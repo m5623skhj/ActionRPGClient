@@ -1,17 +1,61 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="소스 파일">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
-    </Filter>
-    <Filter Include="헤더 파일">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
-    </Filter>
-    <Filter Include="리소스 파일">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
-    </Filter>
+    <Filter Include="App"><UniqueIdentifier>{A139FBC6-CE70-4A80-8998-C508E8C5399B}</UniqueIdentifier></Filter>
+    <Filter Include="Core"><UniqueIdentifier>{6CE2E955-F73C-402B-B397-D5274D4D41D5}</UniqueIdentifier></Filter>
+    <Filter Include="Game"><UniqueIdentifier>{8742BC97-8142-4385-9D5D-B96F0C74B640}</UniqueIdentifier></Filter>
+    <Filter Include="Graphics"><UniqueIdentifier>{04D2E6FD-6937-4476-B4A2-E60E69B9BFD0}</UniqueIdentifier></Filter>
+    <Filter Include="Input"><UniqueIdentifier>{C86B4407-B75C-4BD2-8ADD-194F1101C126}</UniqueIdentifier></Filter>
+    <Filter Include="Platform"><UniqueIdentifier>{3BB0418E-3B0C-46E4-AB5F-0DF7978C5958}</UniqueIdentifier></Filter>
+    <Filter Include="Resources"><UniqueIdentifier>{7E720C9B-EE27-492F-8D86-2AE0EC75E393}</UniqueIdentifier></Filter>
+    <Filter Include="Assets"><UniqueIdentifier>{42D11B28-2331-49A9-BE05-E344D43A6053}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="App\Application.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="Core\IniDocument.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="Game\Game.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\GameplayMap.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\GameWorld.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\InputCommandQueue.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\MapBackground.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\Player.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\RunState.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\SkillCommandSystem.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Graphics\D2DRenderer.cpp"><Filter>Graphics</Filter></ClCompile>
+    <ClCompile Include="Graphics\GraphicsDevice.cpp"><Filter>Graphics</Filter></ClCompile>
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="Platform\GameWindow.cpp"><Filter>Platform</Filter></ClCompile>
+    <ClCompile Include="Resources\AssetCatalog.cpp"><Filter>Resources</Filter></ClCompile>
+    <ClCompile Include="Resources\SpriteAnimation.cpp"><Filter>Resources</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="App\Application.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="Core\IniDocument.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="Game\Camera.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\Game.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\GameplayMap.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\GameWorld.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\InputCommandQueue.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\MapBackground.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\Player.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\RunState.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\SkillDefinition.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\SkillCommandSystem.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\Vector2.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Graphics\D2DRenderer.h"><Filter>Graphics</Filter></ClInclude>
+    <ClInclude Include="Graphics\GraphicsDevice.h"><Filter>Graphics</Filter></ClInclude>
+    <ClInclude Include="Input\InputState.h"><Filter>Input</Filter></ClInclude>
+    <ClInclude Include="Platform\GameWindow.h"><Filter>Platform</Filter></ClInclude>
+    <ClInclude Include="Resources\AssetCatalog.h"><Filter>Resources</Filter></ClInclude>
+    <ClInclude Include="Resources\SpriteAnimation.h"><Filter>Resources</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Assets\Data\assets.ini"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Data\animations.ini"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Data\effects.ini"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Data\skills.ini"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\README.md"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_idle.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_run.png"><Filter>Assets</Filter></None>
   </ItemGroup>
 </Project>

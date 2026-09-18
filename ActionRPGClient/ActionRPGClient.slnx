@@ -1,7 +1,6 @@
 <Solution>
   <Configurations>
     <Platform Name="x64" />
-    <Platform Name="x86" />
   </Configurations>
-  <Project Path="ActionRPGClient/ActionRPGClient.vcxproj" />
+  <Project Path="ActionRPGClient/ActionRPGClient.vcxproj" Id="a3d1d019-8163-4ea3-a580-bd7a48589254" />
 </Solution>

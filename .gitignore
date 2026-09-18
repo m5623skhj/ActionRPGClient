@@ -1,1 +1,3 @@
-ActionRPGClient/.vs/ActionRPGClient.slnx/v18/
+ActionRPGClient/.vs/
+ActionRPGClient/artifacts/
+*.vcxproj.user
