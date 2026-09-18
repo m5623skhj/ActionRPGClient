@@ -101,6 +101,8 @@
     <ClCompile Include="Game\InputCommandQueue.cpp" />
     <ClCompile Include="Game\MapBackground.cpp" />
     <ClCompile Include="Game\Player.cpp" />
+    <ClCompile Include="Game\Projectile.cpp" />
+    <ClCompile Include="Game\ProjectileSystem.cpp" />
     <ClCompile Include="Game\RunState.cpp" />
     <ClCompile Include="Game\SkillCommandSystem.cpp" />
     <ClCompile Include="Graphics\D2DRenderer.cpp" />
@@ -120,6 +122,8 @@
     <ClInclude Include="Game\InputCommandQueue.h" />
     <ClInclude Include="Game\MapBackground.h" />
     <ClInclude Include="Game\Player.h" />
+    <ClInclude Include="Game\Projectile.h" />
+    <ClInclude Include="Game\ProjectileSystem.h" />
     <ClInclude Include="Game\RunState.h" />
     <ClInclude Include="Game\SkillDefinition.h" />
     <ClInclude Include="Game\SkillCommandSystem.h" />
@@ -135,10 +139,12 @@
     <None Include="..\Assets\Data\assets.ini" />
     <None Include="..\Assets\Data\animations.ini" />
     <None Include="..\Assets\Data\effects.ini" />
+    <None Include="..\Assets\Data\projectiles.ini" />
     <None Include="..\Assets\Data\skills.ini" />
     <None Include="..\Assets\README.md" />
     <None Include="..\Assets\Images\Characters\player_idle.png" />
     <None Include="..\Assets\Images\Characters\player_run.png" />
+    <None Include="..\Assets\Images\Characters\player_shoot.png" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyRuntimeAssets" AfterTargets="Build">

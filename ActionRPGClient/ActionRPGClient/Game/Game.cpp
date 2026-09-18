@@ -22,10 +22,10 @@ namespace ActionRPG
     {
         world.Render(inRenderer);
         inRenderer.DrawText(
-            L"Move: Arrow Keys    Run: Double Tap    Jump: C    Skill: Left/Right x2 + Z",
+            L"Move: Arrow Keys    Run: Double Tap    Jump: C    Shoot: X    Throw Rock: V    Skill: Left/Right x2 + Z",
             20.0f,
             16.0f,
-            760.0f,
+            1080.0f,
             48.0f,
             D2D1::ColorF(0.92f, 0.95f, 1.0f));
     }

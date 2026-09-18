@@ -19,6 +19,8 @@
     <ClCompile Include="Game\InputCommandQueue.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\MapBackground.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\Player.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\Projectile.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\ProjectileSystem.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\RunState.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\SkillCommandSystem.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Graphics\D2DRenderer.cpp"><Filter>Graphics</Filter></ClCompile>
@@ -38,6 +40,8 @@
     <ClInclude Include="Game\InputCommandQueue.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\MapBackground.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\Player.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\Projectile.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\ProjectileSystem.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\RunState.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\SkillDefinition.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\SkillCommandSystem.h"><Filter>Game</Filter></ClInclude>
@@ -53,9 +57,11 @@
     <None Include="..\Assets\Data\assets.ini"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Data\animations.ini"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Data\effects.ini"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Data\projectiles.ini"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Data\skills.ini"><Filter>Assets</Filter></None>
     <None Include="..\Assets\README.md"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_idle.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_run.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_shoot.png"><Filter>Assets</Filter></None>
   </ItemGroup>
 </Project>

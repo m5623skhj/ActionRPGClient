@@ -82,6 +82,8 @@ namespace
         if (inToken == "Down") return InputKey::MoveDown;
         if (inToken == "Z") return InputKey::ActionZ;
         if (inToken == "C") return InputKey::ActionC;
+        if (inToken == "X") return InputKey::ActionX;
+        if (inToken == "V") return InputKey::ActionV;
         throw std::runtime_error("Unknown command input token: " + std::string(inToken));
     }
 

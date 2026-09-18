@@ -216,6 +216,12 @@ namespace ActionRPG
         case 'C':
             pendingPressedKeys.push_back(InputKey::ActionC);
             break;
+        case 'X':
+            pendingPressedKeys.push_back(InputKey::ActionX);
+            break;
+        case 'V':
+            pendingPressedKeys.push_back(InputKey::ActionV);
+            break;
         default:
             break;
         }

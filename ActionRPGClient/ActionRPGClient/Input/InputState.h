@@ -11,7 +11,9 @@ namespace ActionRPG
         MoveUp,
         MoveDown,
         ActionZ,
-        ActionC
+        ActionC,
+        ActionX,
+        ActionV
     };
 
     struct InputState

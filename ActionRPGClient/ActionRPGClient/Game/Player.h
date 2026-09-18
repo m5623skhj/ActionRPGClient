@@ -7,6 +7,8 @@
 #include "Input/InputState.h"
 #include "Resources/SpriteAnimation.h"
 
+#include <cstdint>
+#include <deque>
 #include <optional>
 
 namespace ActionRPG
@@ -16,6 +18,20 @@ namespace ActionRPG
     class GameplayMap;
     class AssetCatalog;
 
+    enum class PlayerProjectileType
+    {
+        Straight,
+        Arc
+    };
+
+    struct PlayerProjectileRequest
+    {
+        PlayerProjectileType type{ PlayerProjectileType::Straight };
+        Vector2 throwerPosition{};
+        float throwerHeight{};
+        Vector2 direction{};
+    };
+
     class Player final
     {
     public:
@@ -24,9 +40,13 @@ namespace ActionRPG
         // Ground movement uses x/y while jump motion uses an independent height axis.
         void Update(float inDeltaSeconds, const InputState& inInput, const GameplayMap& inGameplayMap);
         void ActivateCommandSkill(const SkillEffectDefinition& inEffect);
+        [[nodiscard]] std::optional<PlayerProjectileRequest> ConsumeProjectileRequest();
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const;
 
         [[nodiscard]] Vector2 GetGroundPosition() const { return groundPosition; }
+
+    private:
+        void QueueProjectileRequest(PlayerProjectileType inType);
 
     private:
         static constexpr float WIDTH = 64.0f;
@@ -45,9 +65,14 @@ namespace ActionRPG
         std::optional<SkillEffectDefinition> activeSkillEffect;
         double movementTimeSeconds{};
         bool facingLeft{};
+        bool isAttacking{};
+        bool attackProjectileQueued{};
+        std::uint32_t attackEventFrame{};
         RunState runState;
         IniDocument animationDefinitions;
         SpriteAnimation idleAnimation;
         SpriteAnimation runAnimation;
+        SpriteAnimation attackAnimation;
+        std::deque<PlayerProjectileRequest> pendingProjectileRequests;
     };
 }

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 namespace ActionRPG
 {
@@ -19,10 +20,14 @@ namespace ActionRPG
         SpriteAnimation(D2DRenderer& inRenderer, const AssetCatalog& inAssetCatalog,
             const IniDocument& inDefinitions, std::string_view inSection);
 
-        void Update(float inDeltaSeconds);
+        void Update(float inDeltaSeconds, bool inLoop = true);
         void Reset();
         void Draw(D2DRenderer& inRenderer, float inCenterX, float inBottomY,
             bool inFlipHorizontal) const;
+
+        [[nodiscard]] std::uint32_t GetCurrentFrame() const { return currentFrame; }
+        [[nodiscard]] std::uint32_t GetFrameCount() const { return frameCount; }
+        [[nodiscard]] bool IsFinished() const { return isFinished; }
 
     private:
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
@@ -30,11 +35,14 @@ namespace ActionRPG
         std::uint32_t rows{ 1 };
         std::uint32_t frameCount{ 1 };
         std::uint32_t currentFrame{};
+        bool isFinished{};
         float frameSeconds{ 1.0f };
         float elapsedSeconds{};
         float firstRowRatio{ 0.5f };
         float anchorY{ 1.0f };
+        float secondRowAnchorY{ 1.0f };
         float renderWidth{};
         float renderHeight{};
+        std::vector<float> frameAnchorXs;
     };
 }

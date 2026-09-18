@@ -9,6 +9,27 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+namespace
+{
+    std::uint32_t ParseOneBasedFrame(const ActionRPG::IniDocument& inDocument,
+        const std::string_view inSection, const std::string_view inKey)
+    {
+        const std::string& text = inDocument.GetValue(inSection, inKey);
+        std::size_t parsedCharacters{};
+        const unsigned long value = std::stoul(text, &parsedCharacters);
+        if (parsedCharacters != text.size() || value == 0
+            || value > std::numeric_limits<std::uint32_t>::max())
+        {
+            throw std::runtime_error("Invalid one-based animation frame: " + text);
+        }
+        return static_cast<std::uint32_t>(value - 1);
+    }
+}
 
 namespace ActionRPG
 {
@@ -18,7 +39,13 @@ namespace ActionRPG
         , animationDefinitions(inAssetCatalog.GetDataPath("Animations"))
         , idleAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerIdle")
         , runAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerRun")
+        , attackAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerShoot")
     {
+        attackEventFrame = ParseOneBasedFrame(animationDefinitions, "PlayerShoot", "event_frame");
+        if (attackEventFrame >= attackAnimation.GetFrameCount())
+        {
+            throw std::runtime_error("PlayerShoot event_frame exceeds frame_count.");
+        }
     }
 
     void Player::Update(const float inDeltaSeconds, const InputState& inInput, const GameplayMap& inGameplayMap)
@@ -30,6 +57,13 @@ namespace ActionRPG
             static_cast<float>(inInput.moveRight) - static_cast<float>(inInput.moveLeft),
             static_cast<float>(inInput.moveDown) - static_cast<float>(inInput.moveUp)
         };
+
+        if (inInput.WasPressed(InputKey::ActionX) && !isAttacking)
+        {
+            isAttacking = true;
+            attackProjectileQueued = false;
+            attackAnimation.Reset();
+        }
 
         const float lengthSquared = direction.x * direction.x + direction.y * direction.y;
         if (lengthSquared > 0.0f)
@@ -43,12 +77,15 @@ namespace ActionRPG
             direction.x *= inverseLength;
             direction.y *= inverseLength;
 
-            const float movementSpeed = runState.IsRunning() ? RUN_SPEED : WALK_SPEED;
-            groundPosition.x += direction.x * movementSpeed * inDeltaSeconds;
-            groundPosition.y += direction.y * movementSpeed * inDeltaSeconds;
+            if (!isAttacking)
+            {
+                const float movementSpeed = runState.IsRunning() ? RUN_SPEED : WALK_SPEED;
+                groundPosition.x += direction.x * movementSpeed * inDeltaSeconds;
+                groundPosition.y += direction.y * movementSpeed * inDeltaSeconds;
+            }
         }
 
-        if (runState.IsRunning() && lengthSquared > 0.0f)
+        if (!isAttacking && runState.IsRunning() && lengthSquared > 0.0f)
         {
             runAnimation.Update(inDeltaSeconds);
         }
@@ -76,6 +113,27 @@ namespace ActionRPG
             }
         }
 
+        if (inInput.WasPressed(InputKey::ActionV))
+        {
+            QueueProjectileRequest(PlayerProjectileType::Arc);
+        }
+
+        if (isAttacking)
+        {
+            attackAnimation.Update(inDeltaSeconds, false);
+            if (!attackProjectileQueued && attackAnimation.GetCurrentFrame() >= attackEventFrame)
+            {
+                QueueProjectileRequest(PlayerProjectileType::Straight);
+                attackProjectileQueued = true;
+            }
+
+            if (attackAnimation.IsFinished())
+            {
+                isAttacking = false;
+                attackAnimation.Reset();
+            }
+        }
+
         skillEffectRemainingSeconds = std::max(0.0f, skillEffectRemainingSeconds - inDeltaSeconds);
         if (skillEffectRemainingSeconds == 0.0f)
         {
@@ -87,6 +145,28 @@ namespace ActionRPG
     {
         activeSkillEffect = inEffect;
         skillEffectRemainingSeconds = inEffect.durationSeconds;
+    }
+
+    std::optional<PlayerProjectileRequest> Player::ConsumeProjectileRequest()
+    {
+        if (pendingProjectileRequests.empty())
+        {
+            return std::nullopt;
+        }
+
+        PlayerProjectileRequest request = pendingProjectileRequests.front();
+        pendingProjectileRequests.pop_front();
+        return request;
+    }
+
+    void Player::QueueProjectileRequest(const PlayerProjectileType inType)
+    {
+        pendingProjectileRequests.push_back(PlayerProjectileRequest{
+            inType,
+            groundPosition,
+            height,
+            Vector2{ facingLeft ? -1.0f : 1.0f, 0.0f }
+        });
     }
 
     void Player::Render(D2DRenderer& inRenderer, const Camera& inCamera) const
@@ -113,7 +193,11 @@ namespace ActionRPG
             12.0f,
             D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.45f));
 
-        if (runState.IsRunning())
+        if (isAttacking)
+        {
+            attackAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+        }
+        else if (runState.IsRunning())
         {
             runAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
         }

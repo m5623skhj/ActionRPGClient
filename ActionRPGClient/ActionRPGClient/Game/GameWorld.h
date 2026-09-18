@@ -5,6 +5,7 @@
 #include "Game/InputCommandQueue.h"
 #include "Game/MapBackground.h"
 #include "Game/Player.h"
+#include "Game/ProjectileSystem.h"
 #include "Game/SkillCommandSystem.h"
 #include "Input/InputState.h"
 
@@ -28,6 +29,7 @@ namespace ActionRPG
         MapBackground mapBackground;
         Camera camera;
         Player player;
+        ProjectileSystem projectileSystem;
         InputCommandQueue commandQueue;
         SkillCommandSystem skillCommandSystem;
         double worldTimeSeconds{};
