@@ -16,6 +16,8 @@
     <ProjectGuid>{a3d1d019-8163-4ea3-a580-bd7a48589254}</ProjectGuid>
     <RootNamespace>ActionRPGClient</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgManifestRoot>$(MSBuildThisFileDirectory)..\..\</VcpkgManifestRoot>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -50,7 +52,7 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_WINDOWS;UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ASIO_STANDALONE;_WIN32_WINNT=0x0A00;_DEBUG;_WINDOWS;UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -73,7 +75,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_WINDOWS;UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ASIO_STANDALONE;_WIN32_WINNT=0x0A00;NDEBUG;_WINDOWS;UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -108,6 +110,8 @@
     <ClCompile Include="Graphics\D2DRenderer.cpp" />
     <ClCompile Include="Graphics\GraphicsDevice.cpp" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="Network\TownClient.cpp" />
+    <ClCompile Include="Network\TownProtocol.cpp" />
     <ClCompile Include="Platform\GameWindow.cpp" />
     <ClCompile Include="Resources\AssetCatalog.cpp" />
     <ClCompile Include="Resources\SpriteAnimation.cpp" />
@@ -131,6 +135,8 @@
     <ClInclude Include="Graphics\D2DRenderer.h" />
     <ClInclude Include="Graphics\GraphicsDevice.h" />
     <ClInclude Include="Input\InputState.h" />
+    <ClInclude Include="Network\TownClient.h" />
+    <ClInclude Include="Network\TownProtocol.h" />
     <ClInclude Include="Platform\GameWindow.h" />
     <ClInclude Include="Resources\AssetCatalog.h" />
     <ClInclude Include="Resources\SpriteAnimation.h" />

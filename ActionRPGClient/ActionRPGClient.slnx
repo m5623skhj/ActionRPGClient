@@ -3,4 +3,5 @@
     <Platform Name="x64" />
   </Configurations>
   <Project Path="ActionRPGClient/ActionRPGClient.vcxproj" Id="a3d1d019-8163-4ea3-a580-bd7a48589254" />
+  <Project Path="TownMapEditor/TownMapEditor.vcxproj" Id="3acfe8d7-7214-44b3-948c-4b35df63dcf4" />
 </Solution>

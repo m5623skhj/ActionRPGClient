@@ -1,6 +1,7 @@
 #include "Game/Game.h"
 
 #include "Graphics/D2DRenderer.h"
+#include "Network/TownClient.h"
 #include "Resources/AssetCatalog.h"
 
 #include <d2d1_1helper.h>
@@ -8,8 +9,8 @@
 namespace ActionRPG
 {
     Game::Game(const float inViewportWidth, const float inViewportHeight, const AssetCatalog& inAssetCatalog,
-        D2DRenderer& inRenderer)
-        : world(inViewportWidth, inViewportHeight, inAssetCatalog, inRenderer)
+        D2DRenderer& inRenderer, TownClient& inTownClient)
+        : world(inViewportWidth, inViewportHeight, inAssetCatalog, inRenderer, inTownClient)
     {
     }
 

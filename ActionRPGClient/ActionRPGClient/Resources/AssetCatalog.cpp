@@ -76,6 +76,16 @@ namespace ActionRPG
         return ResolvePath("Audio", inAssetId);
     }
 
+    std::filesystem::path AssetCatalog::GetAssetPath(const std::string_view inRelativePath) const
+    {
+        const std::filesystem::path path = ResolveRelativePath(inRelativePath);
+        if (!std::filesystem::is_regular_file(path))
+        {
+            throw std::runtime_error("Asset does not exist: " + path.string());
+        }
+        return path;
+    }
+
     bool AssetCatalog::HasImage(const std::string_view inAssetId) const
     {
         return catalog.HasValue("Images", inAssetId);
@@ -89,7 +99,12 @@ namespace ActionRPG
     std::filesystem::path AssetCatalog::ResolvePath(const std::string_view inSection,
         const std::string_view inAssetId) const
     {
-        const std::filesystem::path relativePath = Utf8ToWide(catalog.GetValue(inSection, inAssetId));
+        return ResolveRelativePath(catalog.GetValue(inSection, inAssetId));
+    }
+
+    std::filesystem::path AssetCatalog::ResolveRelativePath(const std::string_view inRelativePath) const
+    {
+        const std::filesystem::path relativePath = Utf8ToWide(inRelativePath);
         if (relativePath.empty() || relativePath.is_absolute())
         {
             throw std::runtime_error("Asset path must be a non-empty relative path: " + relativePath.string());

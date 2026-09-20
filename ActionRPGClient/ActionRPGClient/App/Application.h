@@ -3,6 +3,7 @@
 #include "Game/Game.h"
 #include "Graphics/D2DRenderer.h"
 #include "Graphics/GraphicsDevice.h"
+#include "Network/TownClient.h"
 #include "Platform/GameWindow.h"
 #include "Resources/AssetCatalog.h"
 
@@ -29,6 +30,7 @@ namespace ActionRPG
         GraphicsDevice graphicsDevice;
         D2DRenderer renderer;
         AssetCatalog assetCatalog;
+        TownClient townClient;
         Game game;
     };
 }

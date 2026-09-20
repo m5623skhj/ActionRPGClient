@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <string>
 #include <vector>
 
 namespace ActionRPG
@@ -13,8 +14,9 @@ namespace ActionRPG
         , graphicsDevice(window.GetHandle(), window.GetClientWidth(), window.GetClientHeight())
         , renderer(graphicsDevice)
         , game(static_cast<float>(window.GetClientWidth()), static_cast<float>(window.GetClientHeight()),
-            assetCatalog, renderer)
+            assetCatalog, renderer, townClient)
     {
+        townClient.Start("127.0.0.1", 7777, "Player-" + std::to_string(GetCurrentProcessId()));
     }
 
     int Application::Run()

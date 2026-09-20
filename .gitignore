@@ -1,3 +1,4 @@
 ActionRPGClient/.vs/
 ActionRPGClient/artifacts/
+vcpkg_installed/
 *.vcxproj.user

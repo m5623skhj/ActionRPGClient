@@ -1,30 +1,40 @@
 #pragma once
 
 #include "Game/Vector2.h"
+#include "Network/TownProtocol.h"
+
+#include <vector>
 
 namespace ActionRPG
 {
     class Camera;
     class D2DRenderer;
 
-    // Owns only gameplay-relevant space such as movement bounds and collision geometry.
+    // Holds the same immutable movement geometry used by TownServer for client prediction.
     class GameplayMap final
     {
     public:
-        [[nodiscard]] Vector2 ClampGroundPosition(Vector2 inPosition, float inHorizontalRadius,
-            float inDepthRadius) const;
+        void Configure(const TownProtocol::MapInfo& inMap);
+        [[nodiscard]] Vector2 ConstrainGroundMovement(Vector2 inPrevious, Vector2 inProposed,
+            float inHorizontalRadius, float inDepthRadius) const;
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const;
 
-        [[nodiscard]] float GetWorldWidth() const { return WORLD_WIDTH; }
-        [[nodiscard]] float GetWorldHeight() const { return WORLD_HEIGHT; }
-        [[nodiscard]] float GetWalkableTop() const { return WALKABLE_TOP; }
+        [[nodiscard]] float GetWorldLeft() const { return worldLeft; }
+        [[nodiscard]] float GetWorldTop() const { return worldTop; }
+        [[nodiscard]] float GetWorldRight() const { return worldRight; }
+        [[nodiscard]] float GetWorldBottom() const { return worldBottom; }
 
     private:
-        static constexpr float WORLD_WIDTH = 2400.0f;
-        static constexpr float WORLD_HEIGHT = 1400.0f;
-        static constexpr float WALKABLE_LEFT = 0.0f;
-        static constexpr float WALKABLE_TOP = 360.0f;
-        static constexpr float WALKABLE_RIGHT = WORLD_WIDTH;
-        static constexpr float WALKABLE_BOTTOM = WORLD_HEIGHT;
+        [[nodiscard]] bool IsPositionValid(Vector2 inPosition, float inHorizontalRadius,
+            float inDepthRadius) const;
+
+        float worldLeft = 0.0f;
+        float worldTop = 0.0f;
+        float worldRight = 2400.0f;
+        float worldBottom = 1400.0f;
+        std::vector<TownProtocol::Polygon> walkablePolygons{
+            { { 0.0f, 360.0f }, { 2400.0f, 360.0f }, { 2400.0f, 1400.0f }, { 0.0f, 1400.0f } }
+        };
+        std::vector<TownProtocol::Polygon> blockedPolygons;
     };
 }

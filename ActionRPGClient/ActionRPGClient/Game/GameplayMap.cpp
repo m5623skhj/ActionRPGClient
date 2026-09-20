@@ -1,66 +1,153 @@
 #include "Game/GameplayMap.h"
 
-#include "Game/Camera.h"
-#include "Graphics/D2DRenderer.h"
-
-#include <d2d1_1helper.h>
-
 #include <algorithm>
+#include <cmath>
+#include <ranges>
+
+namespace
+{
+    bool IsPointOnSegment(const ActionRPG::Vector2 inPoint, const TownProtocol::Vector2 inStart,
+        const TownProtocol::Vector2 inEnd)
+    {
+        constexpr float EPSILON = 0.001f;
+        const float deltaX = inEnd.x - inStart.x;
+        const float deltaY = inEnd.y - inStart.y;
+        const float cross = (inPoint.x - inStart.x) * deltaY - (inPoint.y - inStart.y) * deltaX;
+        if (std::abs(cross) > EPSILON)
+        {
+            return false;
+        }
+        const float dot = (inPoint.x - inStart.x) * deltaX + (inPoint.y - inStart.y) * deltaY;
+        const float lengthSquared = deltaX * deltaX + deltaY * deltaY;
+        return dot >= -EPSILON && dot <= lengthSquared + EPSILON;
+    }
+
+    bool IsPointInPolygon(const ActionRPG::Vector2 inPoint,
+        const TownProtocol::Polygon& inPolygon)
+    {
+        bool inside = false;
+        for (std::size_t current = 0, previous = inPolygon.size() - 1;
+            current < inPolygon.size(); previous = current++)
+        {
+            const TownProtocol::Vector2& start = inPolygon[previous];
+            const TownProtocol::Vector2& end = inPolygon[current];
+            if (IsPointOnSegment(inPoint, start, end))
+            {
+                return true;
+            }
+            if ((start.y > inPoint.y) != (end.y > inPoint.y))
+            {
+                const float intersectionX = (end.x - start.x) * (inPoint.y - start.y)
+                    / (end.y - start.y) + start.x;
+                if (inPoint.x < intersectionX)
+                {
+                    inside = !inside;
+                }
+            }
+        }
+        return inside;
+    }
+
+    bool IsPointInAnyPolygon(const ActionRPG::Vector2 inPoint,
+        const std::vector<TownProtocol::Polygon>& inPolygons)
+    {
+        return std::ranges::any_of(inPolygons, [inPoint](const TownProtocol::Polygon& inPolygon)
+        {
+            return IsPointInPolygon(inPoint, inPolygon);
+        });
+    }
+}
 
 namespace ActionRPG
 {
-    Vector2 GameplayMap::ClampGroundPosition(const Vector2 inPosition, const float inHorizontalRadius,
-        const float inDepthRadius) const
+    void GameplayMap::Configure(const TownProtocol::MapInfo& inMap)
     {
-        return Vector2{
-            std::clamp(inPosition.x, WALKABLE_LEFT + inHorizontalRadius, WALKABLE_RIGHT - inHorizontalRadius),
-            std::clamp(inPosition.y, WALKABLE_TOP + inDepthRadius, WALKABLE_BOTTOM - inDepthRadius)
-        };
+        worldLeft = inMap.worldLeft;
+        worldTop = inMap.worldTop;
+        worldRight = inMap.worldRight;
+        worldBottom = inMap.worldBottom;
+        walkablePolygons = inMap.walkablePolygons;
+        blockedPolygons = inMap.blockedPolygons;
     }
 
-    void GameplayMap::Render(D2DRenderer& inRenderer, const Camera& inCamera) const
+    bool GameplayMap::IsPositionValid(const Vector2 inPosition, const float inHorizontalRadius,
+        const float inDepthRadius) const
     {
-        const Vector2 topLeft = inCamera.WorldToScreen(Vector2{ WALKABLE_LEFT, WALKABLE_TOP });
-        const Vector2 bottomRight = inCamera.WorldToScreen(Vector2{ WALKABLE_RIGHT, WALKABLE_BOTTOM });
-
-        inRenderer.FillRectangle(
-            topLeft.x,
-            topLeft.y,
-            bottomRight.x,
-            bottomRight.y,
-            D2D1::ColorF(0.15f, 0.18f, 0.20f));
-
-        constexpr float GRID_SIZE = 160.0f;
-        for (float x = WALKABLE_LEFT; x <= WALKABLE_RIGHT; x += GRID_SIZE)
+        if (inPosition.x < worldLeft || inPosition.x > worldRight
+            || inPosition.y < worldTop || inPosition.y > worldBottom)
         {
-            const Vector2 top = inCamera.WorldToScreen(Vector2{ x, WALKABLE_TOP });
-            const Vector2 bottom = inCamera.WorldToScreen(Vector2{ x, WALKABLE_BOTTOM });
-            inRenderer.FillRectangle(
-                top.x,
-                top.y,
-                top.x + 1.0f,
-                bottom.y,
-                D2D1::ColorF(0.22f, 0.25f, 0.28f));
+            return false;
         }
 
-        for (float y = WALKABLE_TOP; y <= WALKABLE_BOTTOM; y += GRID_SIZE)
+        const auto isPointValid = [this](const Vector2 inPoint)
         {
-            const Vector2 left = inCamera.WorldToScreen(Vector2{ WALKABLE_LEFT, y });
-            const Vector2 right = inCamera.WorldToScreen(Vector2{ WALKABLE_RIGHT, y });
-            inRenderer.FillRectangle(
-                left.x,
-                left.y,
-                right.x,
-                left.y + 1.0f,
-                D2D1::ColorF(0.22f, 0.25f, 0.28f));
+            return IsPointInAnyPolygon(inPoint, walkablePolygons)
+                && !IsPointInAnyPolygon(inPoint, blockedPolygons);
+        };
+        if (!isPointValid(inPosition))
+        {
+            return false;
         }
 
-        inRenderer.DrawRectangle(
-            topLeft.x,
-            topLeft.y,
-            bottomRight.x,
-            bottomRight.y,
-            D2D1::ColorF(0.52f, 0.58f, 0.64f),
-            3.0f);
+        constexpr int SAMPLE_COUNT = 16;
+        constexpr float TWO_PI = 6.28318530717958647692f;
+        for (int index = 0; index < SAMPLE_COUNT; ++index)
+        {
+            const float angle = TWO_PI * static_cast<float>(index) / static_cast<float>(SAMPLE_COUNT);
+            if (!isPointValid(Vector2{
+                inPosition.x + std::cos(angle) * inHorizontalRadius,
+                inPosition.y + std::sin(angle) * inDepthRadius }))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    Vector2 GameplayMap::ConstrainGroundMovement(const Vector2 inPrevious, const Vector2 inProposed,
+        const float inHorizontalRadius, const float inDepthRadius) const
+    {
+        if (!IsPositionValid(inPrevious, inHorizontalRadius, inDepthRadius))
+        {
+            return inProposed;
+        }
+
+        const float deltaX = inProposed.x - inPrevious.x;
+        const float deltaY = inProposed.y - inPrevious.y;
+        const float distance = std::sqrt(deltaX * deltaX + deltaY * deltaY);
+        const int stepCount = std::max(1, static_cast<int>(std::ceil(distance / 4.0f)));
+        Vector2 lastValid = inPrevious;
+        for (int step = 1; step <= stepCount; ++step)
+        {
+            const float ratio = static_cast<float>(step) / static_cast<float>(stepCount);
+            const Vector2 candidate{ inPrevious.x + deltaX * ratio, inPrevious.y + deltaY * ratio };
+            if (IsPositionValid(candidate, inHorizontalRadius, inDepthRadius))
+            {
+                lastValid = candidate;
+                continue;
+            }
+
+            Vector2 low = lastValid;
+            Vector2 high = candidate;
+            for (int iteration = 0; iteration < 12; ++iteration)
+            {
+                const Vector2 middle{ (low.x + high.x) * 0.5f, (low.y + high.y) * 0.5f };
+                if (IsPositionValid(middle, inHorizontalRadius, inDepthRadius))
+                {
+                    low = middle;
+                }
+                else
+                {
+                    high = middle;
+                }
+            }
+            return low;
+        }
+        return lastValid;
+    }
+
+    void GameplayMap::Render(D2DRenderer&, const Camera&) const
+    {
+        // Collision overlays belong to the editor; gameplay renders only authored background images.
     }
 }

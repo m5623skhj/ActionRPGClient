@@ -44,6 +44,10 @@ namespace ActionRPG
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const;
 
         [[nodiscard]] Vector2 GetGroundPosition() const { return groundPosition; }
+        [[nodiscard]] bool IsRunning() const { return runState.IsRunning(); }
+        void SetGroundPosition(Vector2 inPosition) { groundPosition = inPosition; }
+        void ReconcileGroundPosition(Vector2 inAuthoritativePosition);
+        void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
 
     private:
         void QueueProjectileRequest(PlayerProjectileType inType);
@@ -53,8 +57,6 @@ namespace ActionRPG
         static constexpr float HEIGHT = 96.0f;
         static constexpr float HORIZONTAL_RADIUS = WIDTH * 0.5f;
         static constexpr float DEPTH_RADIUS = 18.0f;
-        static constexpr float WALK_SPEED = 280.0f;
-        static constexpr float RUN_SPEED = 480.0f;
         static constexpr float JUMP_SPEED = 700.0f;
         static constexpr float GRAVITY = 1800.0f;
 
@@ -68,6 +70,8 @@ namespace ActionRPG
         bool isAttacking{};
         bool attackProjectileQueued{};
         std::uint32_t attackEventFrame{};
+        float walkSpeed = 280.0f;
+        float runSpeed = 480.0f;
         RunState runState;
         IniDocument animationDefinitions;
         SpriteAnimation idleAnimation;

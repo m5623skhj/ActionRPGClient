@@ -21,17 +21,21 @@ namespace ActionRPG
             viewportHeight = inViewportHeight;
         }
 
-        void Follow(const Vector2& inTargetCenter, const float inWorldWidth, const float inWorldHeight)
+        void Follow(const Vector2& inTargetCenter, const float inWorldLeft, const float inWorldTop,
+            const float inWorldRight, const float inWorldBottom)
         {
             position.x = std::clamp(
                 inTargetCenter.x - viewportWidth * 0.5f,
-                0.0f,
-                std::max(0.0f, inWorldWidth - viewportWidth));
+                inWorldLeft,
+                std::max(inWorldLeft, inWorldRight - viewportWidth));
             position.y = std::clamp(
                 inTargetCenter.y - viewportHeight * 0.5f,
-                0.0f,
-                std::max(0.0f, inWorldHeight - viewportHeight));
+                inWorldTop,
+                std::max(inWorldTop, inWorldBottom - viewportHeight));
         }
+
+        [[nodiscard]] float GetViewportWidth() const { return viewportWidth; }
+        [[nodiscard]] float GetViewportHeight() const { return viewportHeight; }
 
         [[nodiscard]] Vector2 WorldToScreen(const Vector2& inWorldPosition) const
         {

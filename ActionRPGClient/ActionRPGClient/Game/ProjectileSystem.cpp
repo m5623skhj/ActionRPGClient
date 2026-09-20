@@ -156,8 +156,10 @@ namespace ActionRPG
         {
             projectile.Update(inDeltaSeconds);
             const Vector2 position = projectile.GetGroundPosition();
-            if (position.x < -CULL_MARGIN || position.x > inGameplayMap.GetWorldWidth() + CULL_MARGIN
-                || position.y < -CULL_MARGIN || position.y > inGameplayMap.GetWorldHeight() + CULL_MARGIN)
+            if (position.x < inGameplayMap.GetWorldLeft() - CULL_MARGIN
+                || position.x > inGameplayMap.GetWorldRight() + CULL_MARGIN
+                || position.y < inGameplayMap.GetWorldTop() - CULL_MARGIN
+                || position.y > inGameplayMap.GetWorldBottom() + CULL_MARGIN)
             {
                 projectile.Expire();
             }

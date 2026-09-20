@@ -50,6 +50,7 @@ namespace ActionRPG
 
     void Player::Update(const float inDeltaSeconds, const InputState& inInput, const GameplayMap& inGameplayMap)
     {
+        const Vector2 previousGroundPosition = groundPosition;
         movementTimeSeconds += inDeltaSeconds;
         runState.Update(inInput, movementTimeSeconds);
 
@@ -79,7 +80,7 @@ namespace ActionRPG
 
             if (!isAttacking)
             {
-                const float movementSpeed = runState.IsRunning() ? RUN_SPEED : WALK_SPEED;
+                const float movementSpeed = runState.IsRunning() ? runSpeed : walkSpeed;
                 groundPosition.x += direction.x * movementSpeed * inDeltaSeconds;
                 groundPosition.y += direction.y * movementSpeed * inDeltaSeconds;
             }
@@ -94,7 +95,8 @@ namespace ActionRPG
             runAnimation.Reset();
         }
 
-        groundPosition = inGameplayMap.ClampGroundPosition(groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
+        groundPosition = inGameplayMap.ConstrainGroundMovement(
+            previousGroundPosition, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
 
         if (inInput.WasPressed(InputKey::ActionC) && height == 0.0f)
         {
@@ -145,6 +147,28 @@ namespace ActionRPG
     {
         activeSkillEffect = inEffect;
         skillEffectRemainingSeconds = inEffect.durationSeconds;
+    }
+
+    void Player::ReconcileGroundPosition(const Vector2 inAuthoritativePosition)
+    {
+        const float differenceX = inAuthoritativePosition.x - groundPosition.x;
+        const float differenceY = inAuthoritativePosition.y - groundPosition.y;
+        const float distanceSquared = differenceX * differenceX + differenceY * differenceY;
+        if (distanceSquared > 200.0f * 200.0f)
+        {
+            groundPosition = inAuthoritativePosition;
+            return;
+        }
+
+        constexpr float CORRECTION_RATIO = 0.35f;
+        groundPosition.x += differenceX * CORRECTION_RATIO;
+        groundPosition.y += differenceY * CORRECTION_RATIO;
+    }
+
+    void Player::ConfigureMovementSpeeds(const float inWalkSpeed, const float inRunSpeed)
+    {
+        walkSpeed = inWalkSpeed;
+        runSpeed = inRunSpeed;
     }
 
     std::optional<PlayerProjectileRequest> Player::ConsumeProjectileRequest()
