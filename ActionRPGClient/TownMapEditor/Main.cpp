@@ -89,7 +89,8 @@ namespace
         };
         std::vector<Polygon> blockedPolygons;
         FloatPoint spawn{ 640.0f, 640.0f };
-        float sectorSize = 480.0f;
+        float sectorWidth = 1280.0f;
+        float sectorHeight = 720.0f;
         float walkSpeed = 280.0f;
         float runSpeed = 480.0f;
     };
@@ -291,7 +292,11 @@ namespace
         stream >> input;
         const int version = input.at("version").get<int>();
         document.mapId = input.at("mapId").get<std::string>();
-        document.sectorSize = input.at("sectorSize").get<float>();
+        if (input.contains("sectorWidth") || input.contains("sectorHeight"))
+        {
+            document.sectorWidth = input.at("sectorWidth").get<float>();
+            document.sectorHeight = input.at("sectorHeight").get<float>();
+        }
         document.walkSpeed = input.at("walkSpeed").get<float>();
         document.runSpeed = input.at("runSpeed").get<float>();
         document.spawn = { input.at("spawn").at("x").get<float>(), input.at("spawn").at("y").get<float>() };
@@ -454,7 +459,8 @@ namespace
             { "walkablePolygons", WritePolygons(document.walkablePolygons) },
             { "blockedPolygons", WritePolygons(document.blockedPolygons) },
             { "spawn", { { "x", document.spawn.x }, { "y", document.spawn.y } } },
-            { "sectorSize", document.sectorSize }, { "walkSpeed", document.walkSpeed },
+            { "sectorWidth", document.sectorWidth }, { "sectorHeight", document.sectorHeight },
+            { "walkSpeed", document.walkSpeed },
             { "runSpeed", document.runSpeed }
         };
         for (const MapImage& image : document.images)

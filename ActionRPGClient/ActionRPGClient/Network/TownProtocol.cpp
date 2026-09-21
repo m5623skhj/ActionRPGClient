@@ -179,7 +179,8 @@ namespace
             && readPolygons(outMap.blockedPolygons)
             && inReader.ReadFloat(outMap.spawnX)
             && inReader.ReadFloat(outMap.spawnY)
-            && inReader.ReadFloat(outMap.sectorSize)
+            && inReader.ReadFloat(outMap.sectorWidth)
+            && inReader.ReadFloat(outMap.sectorHeight)
             && inReader.ReadFloat(outMap.walkSpeed)
             && inReader.ReadFloat(outMap.runSpeed);
     }
