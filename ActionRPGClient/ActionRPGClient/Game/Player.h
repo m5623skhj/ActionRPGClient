@@ -44,9 +44,10 @@ namespace ActionRPG
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const;
 
         [[nodiscard]] Vector2 GetGroundPosition() const { return groundPosition; }
-        [[nodiscard]] bool IsRunning() const { return runState.IsRunning(); }
+        [[nodiscard]] bool IsRunning() const { return runningEnabled && runState.IsRunning(); }
         void SetGroundPosition(Vector2 inPosition) { groundPosition = inPosition; }
-        void ReconcileGroundPosition(Vector2 inAuthoritativePosition);
+        void SetRunningEnabled(const bool inEnabled) { runningEnabled = inEnabled; }
+        void ReconcileGroundPosition(Vector2 inAuthoritativePosition, bool inForceCorrection = false);
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
 
     private:
@@ -69,6 +70,7 @@ namespace ActionRPG
         bool facingLeft{};
         bool isAttacking{};
         bool attackProjectileQueued{};
+        bool runningEnabled = true;
         std::uint32_t attackEventFrame{};
         float walkSpeed = 280.0f;
         float runSpeed = 480.0f;

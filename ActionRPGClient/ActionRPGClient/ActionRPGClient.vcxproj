@@ -142,6 +142,7 @@
     <ClInclude Include="Resources\SpriteAnimation.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\TOWN_NETWORK.md" />
     <None Include="..\Assets\Data\assets.ini" />
     <None Include="..\Assets\Data\animations.ini" />
     <None Include="..\Assets\Data\effects.ini" />

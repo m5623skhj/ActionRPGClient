@@ -41,8 +41,17 @@ namespace ActionRPG
 
         for (const TownProtocol::MapImage& image : images)
         {
-            const Vector2 topLeft = inCamera.WorldToScreen({ image.x, image.y });
-            const Vector2 bottomRight = inCamera.WorldToScreen({ image.x + image.width, image.y + image.height });
+            const float clippedLeft = std::max(image.x, worldLeft);
+            const float clippedTop = std::max(image.y, worldTop);
+            const float clippedRight = std::min(image.x + image.width, worldRight);
+            const float clippedBottom = std::min(image.y + image.height, worldBottom);
+            if (clippedRight <= clippedLeft || clippedBottom <= clippedTop)
+            {
+                continue;
+            }
+
+            const Vector2 topLeft = inCamera.WorldToScreen({ clippedLeft, clippedTop });
+            const Vector2 bottomRight = inCamera.WorldToScreen({ clippedRight, clippedBottom });
             if (bottomRight.x <= 0.0f || bottomRight.y <= 0.0f
                 || topLeft.x >= inCamera.GetViewportWidth() || topLeft.y >= inCamera.GetViewportHeight())
             {
@@ -70,8 +79,12 @@ namespace ActionRPG
             }
 
             const D2D1_SIZE_F bitmapSize = cached.bitmap->GetSize();
+            const float sourceLeft = (clippedLeft - image.x) / image.width * bitmapSize.width;
+            const float sourceTop = (clippedTop - image.y) / image.height * bitmapSize.height;
+            const float sourceRight = (clippedRight - image.x) / image.width * bitmapSize.width;
+            const float sourceBottom = (clippedBottom - image.y) / image.height * bitmapSize.height;
             inRenderer.DrawBitmap(cached.bitmap.Get(),
-                D2D1::RectF(0.0f, 0.0f, bitmapSize.width, bitmapSize.height),
+                D2D1::RectF(sourceLeft, sourceTop, sourceRight, sourceBottom),
                 D2D1::RectF(topLeft.x, topLeft.y, bottomRight.x, bottomRight.y));
         }
 

@@ -29,6 +29,8 @@ namespace ActionRPG
             const D2D1_COLOR_F& inColor, float inStrokeWidth = 1.0f);
         void FillEllipse(float inCenterX, float inCenterY, float inRadiusX, float inRadiusY,
             const D2D1_COLOR_F& inColor);
+        void PushAxisAlignedClip(const D2D1_RECT_F& inRectangle);
+        void PopAxisAlignedClip();
         [[nodiscard]] Microsoft::WRL::ComPtr<ID2D1Bitmap1> LoadBitmap(
             const std::filesystem::path& inFilePath) const;
         void DrawBitmap(ID2D1Bitmap1* inBitmap, const D2D1_RECT_F& inSourceRectangle,

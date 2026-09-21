@@ -10,6 +10,7 @@
     <Filter Include="Platform"><UniqueIdentifier>{3BB0418E-3B0C-46E4-AB5F-0DF7978C5958}</UniqueIdentifier></Filter>
     <Filter Include="Resources"><UniqueIdentifier>{7E720C9B-EE27-492F-8D86-2AE0EC75E393}</UniqueIdentifier></Filter>
     <Filter Include="Assets"><UniqueIdentifier>{42D11B28-2331-49A9-BE05-E344D43A6053}</UniqueIdentifier></Filter>
+    <Filter Include="Documentation"><UniqueIdentifier>{0B92785D-0B95-45F5-A3FA-2BF4414ECFB9}</UniqueIdentifier></Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App\Application.cpp"><Filter>App</Filter></ClCompile>
@@ -59,6 +60,7 @@
     <ClInclude Include="Resources\SpriteAnimation.h"><Filter>Resources</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\TOWN_NETWORK.md"><Filter>Documentation</Filter></None>
     <None Include="..\Assets\Data\assets.ini"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Data\animations.ini"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Data\effects.ini"><Filter>Assets</Filter></None>

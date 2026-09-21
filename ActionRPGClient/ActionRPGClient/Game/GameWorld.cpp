@@ -24,6 +24,7 @@ namespace ActionRPG
         , skillCommandSystem(inAssetCatalog)
         , townClient(inTownClient)
     {
+        player.SetRunningEnabled(false);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
     }
@@ -61,6 +62,16 @@ namespace ActionRPG
 
     void GameWorld::Render(D2DRenderer& inRenderer) const
     {
+        const Vector2 worldTopLeft = camera.WorldToScreen(
+            { gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop() });
+        const Vector2 worldBottomRight = camera.WorldToScreen(
+            { gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom() });
+        const D2D1_RECT_F visibleRectangle = D2D1::RectF(
+            std::clamp(worldTopLeft.x, 0.0f, camera.GetViewportWidth()),
+            std::clamp(worldTopLeft.y, 0.0f, camera.GetViewportHeight()),
+            std::clamp(worldBottomRight.x, 0.0f, camera.GetViewportWidth()),
+            std::clamp(worldBottomRight.y, 0.0f, camera.GetViewportHeight()));
+        inRenderer.PushAxisAlignedClip(visibleRectangle);
         mapBackground.Render(inRenderer, camera);
         gameplayMap.Render(inRenderer, camera);
         projectileSystem.Render(inRenderer, camera);
@@ -73,6 +84,7 @@ namespace ActionRPG
                 position.x + 28.0f, position.y, D2D1::ColorF(0.35f, 0.68f, 0.95f));
         }
         player.Render(inRenderer, camera);
+        inRenderer.PopAxisAlignedClip();
     }
 
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
@@ -97,6 +109,11 @@ namespace ActionRPG
                     mapBackground.Configure(inEvent.map);
                     player.ConfigureMovementSpeeds(inEvent.map.walkSpeed, inEvent.map.runSpeed);
                     player.SetGroundPosition(Vector2{ inEvent.map.spawnX, inEvent.map.spawnY });
+                    movementSequence = 0;
+                    movementSendAccumulator = 0.0f;
+                    lastSentDirectionX = 0;
+                    lastSentDirectionY = 0;
+                    hasSentMovementInput = false;
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerAppear>)
                 {
@@ -115,13 +132,22 @@ namespace ActionRPG
                 {
                     if (inEvent.playerId == localPlayerId)
                     {
-                        player.ReconcileGroundPosition(Vector2{ inEvent.position.x, inEvent.position.y });
+                        const bool isAuthoritativeStopped = inEvent.velocity.x == 0.0f
+                            && inEvent.velocity.y == 0.0f;
+                        player.ReconcileGroundPosition(
+                            Vector2{ inEvent.position.x, inEvent.position.y }, isAuthoritativeStopped);
                     }
                     else if (auto iterator = remotePlayers.find(inEvent.playerId); iterator != remotePlayers.end())
                     {
-                        iterator->second.snapshotPosition = Vector2{ inEvent.position.x, inEvent.position.y };
-                        iterator->second.velocity = Vector2{ inEvent.velocity.x, inEvent.velocity.y };
+                        const Vector2 snapshotPosition{ inEvent.position.x, inEvent.position.y };
+                        const Vector2 velocity{ inEvent.velocity.x, inEvent.velocity.y };
+                        iterator->second.snapshotPosition = snapshotPosition;
+                        iterator->second.velocity = velocity;
                         iterator->second.secondsSinceSnapshot = 0.0f;
+                        if (velocity.x == 0.0f && velocity.y == 0.0f)
+                        {
+                            iterator->second.displayedPosition = snapshotPosition;
+                        }
                     }
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerDisappear>)
@@ -149,20 +175,35 @@ namespace ActionRPG
 
     void GameWorld::SendMovementInput(const InputState& inInput, const float inDeltaSeconds)
     {
+        constexpr float MOVEMENT_HEARTBEAT_SECONDS = 0.25f;
         movementSendAccumulator += inDeltaSeconds;
-        if (movementSendAccumulator < 0.05f || localPlayerId == 0)
+        if (localPlayerId == 0)
         {
             return;
         }
-        movementSendAccumulator = std::fmod(movementSendAccumulator, 0.05f);
 
-        const int directionX = static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft);
-        const int directionY = static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp);
+        const std::int8_t directionX = static_cast<std::int8_t>(
+            static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
+        const std::int8_t directionY = static_cast<std::int8_t>(
+            static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
+        const bool isMoving = directionX != 0 || directionY != 0;
+        const bool stateChanged = !hasSentMovementInput
+            || directionX != lastSentDirectionX
+            || directionY != lastSentDirectionY;
+        if (!stateChanged && (!isMoving || movementSendAccumulator < MOVEMENT_HEARTBEAT_SECONDS))
+        {
+            return;
+        }
+
+        movementSendAccumulator = 0.0f;
         townClient.SendMovement(TownProtocol::MoveInput{
             ++movementSequence,
-            static_cast<std::int8_t>(directionX),
-            static_cast<std::int8_t>(directionY),
-            player.IsRunning()
+            directionX,
+            directionY,
+            false
         });
+        lastSentDirectionX = directionX;
+        lastSentDirectionY = directionY;
+        hasSentMovementInput = true;
     }
 }

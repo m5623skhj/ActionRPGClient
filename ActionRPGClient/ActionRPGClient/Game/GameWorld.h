@@ -56,6 +56,9 @@ namespace ActionRPG
         std::uint64_t localPlayerId{};
         std::uint32_t movementSequence{};
         float movementSendAccumulator{};
+        std::int8_t lastSentDirectionX{};
+        std::int8_t lastSentDirectionY{};
+        bool hasSentMovementInput{};
         double worldTimeSeconds{};
     };
 }

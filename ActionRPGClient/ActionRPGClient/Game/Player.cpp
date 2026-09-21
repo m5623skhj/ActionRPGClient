@@ -80,13 +80,13 @@ namespace ActionRPG
 
             if (!isAttacking)
             {
-                const float movementSpeed = runState.IsRunning() ? runSpeed : walkSpeed;
+                const float movementSpeed = IsRunning() ? runSpeed : walkSpeed;
                 groundPosition.x += direction.x * movementSpeed * inDeltaSeconds;
                 groundPosition.y += direction.y * movementSpeed * inDeltaSeconds;
             }
         }
 
-        if (!isAttacking && runState.IsRunning() && lengthSquared > 0.0f)
+        if (!isAttacking && IsRunning() && lengthSquared > 0.0f)
         {
             runAnimation.Update(inDeltaSeconds);
         }
@@ -149,12 +149,12 @@ namespace ActionRPG
         skillEffectRemainingSeconds = inEffect.durationSeconds;
     }
 
-    void Player::ReconcileGroundPosition(const Vector2 inAuthoritativePosition)
+    void Player::ReconcileGroundPosition(const Vector2 inAuthoritativePosition, const bool inForceCorrection)
     {
         const float differenceX = inAuthoritativePosition.x - groundPosition.x;
         const float differenceY = inAuthoritativePosition.y - groundPosition.y;
         const float distanceSquared = differenceX * differenceX + differenceY * differenceY;
-        if (distanceSquared > 200.0f * 200.0f)
+        if (inForceCorrection || distanceSquared > 200.0f * 200.0f)
         {
             groundPosition = inAuthoritativePosition;
             return;

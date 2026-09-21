@@ -50,6 +50,8 @@ Assets/
 
 `TownMapEditor/` 프로젝트는 마을 이동 영역과 시작 위치를 배치하는 별도 도구입니다.
 
+TownServer 콘텐츠 패킷을 추가하는 절차는 [`TOWN_NETWORK.md`](TOWN_NETWORK.md)를 참고합니다.
+
 주요 데이터 파일은 다음과 같습니다.
 
 - `Assets/Data/assets.ini`: 논리적 에셋 이름과 파일 경로
@@ -81,6 +83,8 @@ Disappear를 확인할 수 있습니다.
 
 ## Town Map Editor
 
+전체 사용법은 [`TOWN_MAP_EDITOR.md`](TOWN_MAP_EDITOR.md)를 참고합니다.
+
 ```powershell
 artifacts/bin/x64/Debug/TownMapEditor.exe `
   C:\Users\KimHyeongJin\source\repos\ActionRPGServer\ActionRPGServer\TownServer\Data\TownMap.json `
@@ -89,14 +93,19 @@ artifacts/bin/x64/Debug/TownMapEditor.exe `
 
 - `Add at X/Y`: 입력한 월드 좌표에 이미지 추가
 - `Add Right`: 선택 이미지의 오른쪽 끝에 간격 없이 이미지 추가
+- `Add Bottom`: 선택 이미지의 아래쪽 끝에 간격 없이 이미지 추가
+- `Add Top`: 선택 이미지의 위쪽 끝에 간격 없이 이미지 추가
+- `Add Left`: 선택 이미지의 왼쪽 끝에 간격 없이 이미지 추가
+- `O`: 기존 TownMap JSON 불러오기
 - `V`: 이미지 선택. 드래그 또는 X/Y 입력으로 위치 수정
 - `W`: 이동 가능 다각형 작성. 좌클릭으로 점을 추가하고 `Enter`로 완성
 - `B`: 진입 금지 다각형 작성
 - `P` 또는 우클릭: 플레이어 시작 위치 배치
+- `R`: 드래그로 실제 표시 영역 지정. 영역 밖 배경은 클라이언트에서 잘림
 - `Clear Mode Areas`: 현재 W/B 모드의 영역을 모두 제거
 - 가운데 버튼 드래그 또는 `Space+좌클릭`: 캔버스 이동
 - 마우스 휠: 커서 위치를 중심으로 확대·축소
-- `F`: 전체 맵 맞춤, `S`: JSON 저장
+- `F`: 전체 맵 맞춤, `S`: 현재 JSON 저장, `Shift+S`: 다른 이름으로 저장
 
 추가한 이미지는 `Assets/Images/Towns`로 복사됩니다. 너비가 100인 이미지가
 X=0에 있을 때 `Add Right`로 추가한 다음 이미지는 X=100에 배치됩니다.

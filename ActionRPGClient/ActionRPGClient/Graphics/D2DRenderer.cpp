@@ -101,6 +101,16 @@ namespace ActionRPG
             solidColorBrush.Get());
     }
 
+    void D2DRenderer::PushAxisAlignedClip(const D2D1_RECT_F& inRectangle)
+    {
+        d2dContext->PushAxisAlignedClip(inRectangle, D2D1_ANTIALIAS_MODE_ALIASED);
+    }
+
+    void D2DRenderer::PopAxisAlignedClip()
+    {
+        d2dContext->PopAxisAlignedClip();
+    }
+
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> D2DRenderer::LoadBitmap(
         const std::filesystem::path& inFilePath) const
     {

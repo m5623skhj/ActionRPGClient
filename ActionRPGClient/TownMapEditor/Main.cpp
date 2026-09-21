@@ -32,8 +32,12 @@ namespace
 
     enum ControlId
     {
-        ADD_XY = 100,
+        OPEN_MAP = 100,
+        ADD_XY,
         ADD_RIGHT,
+        ADD_BOTTOM,
+        ADD_TOP,
+        ADD_LEFT,
         APPLY_POSITION,
         POSITION_X,
         POSITION_Y,
@@ -41,12 +45,25 @@ namespace
         MODE_WALKABLE,
         MODE_BLOCKED,
         MODE_SPAWN,
+        MODE_VISIBLE_AREA,
         CLEAR_AREAS,
         FIT_MAP,
-        SAVE_MAP
+        SAVE_MAP,
+        SAVE_MAP_AS
     };
 
-    enum class EditMode { Select, Walkable, Blocked, Spawn };
+    enum class EditMode { Select, Walkable, Blocked, Spawn, VisibleArea };
+    enum class ImagePlacement { AtPosition, Right, Bottom, Top, Left };
+    enum class SpawnValidation
+    {
+        Valid,
+        OutsideVisibleArea,
+        OutsideWalkable,
+        InsideBlocked,
+        FootprintOutsideVisibleArea,
+        FootprintOutsideWalkable,
+        FootprintInsideBlocked
+    };
 
     struct FloatPoint { float x{}; float y{}; };
     using Polygon = std::vector<FloatPoint>;
@@ -175,7 +192,7 @@ namespace
         void HandleCommand(HWND inWindow, int inCommand);
         void HandleKey(HWND inWindow, WPARAM inKey);
         void BeginLeft(HWND inWindow, int inX, int inY);
-        void EndPointer();
+        void EndPointer(HWND inWindow);
         void BeginPan(HWND inWindow, int inX, int inY);
         void MoveMouse(HWND inWindow, int inX, int inY);
         void ZoomAt(HWND inWindow, int inX, int inY, int inWheelDelta);
@@ -183,8 +200,10 @@ namespace
 
     private:
         void Load();
-        void Save(HWND inWindow);
-        void AddImage(HWND inWindow, bool inPlaceRight);
+        void Open(HWND inWindow);
+        [[nodiscard]] bool Save(HWND inWindow);
+        void SaveAs(HWND inWindow);
+        void AddImage(HWND inWindow, ImagePlacement inPlacement);
         void ApplyPosition(HWND inWindow);
         void UpdatePositionControls() const;
         void FinishPolygon(HWND inWindow);
@@ -193,11 +212,11 @@ namespace
         void DrawImages(Gdiplus::Graphics& inGraphics, int inCanvasWidth, int inCanvasHeight);
         void DrawPolygons(Gdiplus::Graphics& inGraphics, const std::vector<Polygon>& inPolygons,
             Gdiplus::Color inFill, Gdiplus::Color inOutline) const;
-        void DrawOverlays(Gdiplus::Graphics& inGraphics) const;
+        void DrawOverlays(Gdiplus::Graphics& inGraphics, int inCanvasWidth, int inCanvasHeight) const;
         [[nodiscard]] Gdiplus::Image* GetCachedImage(const std::string& inAsset);
         void TrimImageCache();
         [[nodiscard]] Bounds CalculateBounds() const;
-        [[nodiscard]] bool IsSpawnValid() const;
+        [[nodiscard]] SpawnValidation ValidateSpawn() const;
         [[nodiscard]] std::optional<std::size_t> HitTestImage(FloatPoint inPoint) const;
         [[nodiscard]] FloatPoint ScreenToWorld(int inX, int inY) const;
         [[nodiscard]] Gdiplus::PointF WorldPoint(FloatPoint inPoint) const;
@@ -214,11 +233,14 @@ namespace
         std::optional<std::size_t> selectedImage;
         Polygon workingPolygon;
         FloatPoint imageDragOffset{};
+        FloatPoint visibleAreaStart{};
+        std::optional<Bounds> workingVisibleArea;
         POINT lastMouse{};
         float cameraX{};
         float cameraY{};
         float zoom = 0.5f;
         bool draggingImage{};
+        bool draggingVisibleArea{};
         bool panning{};
         HWND positionX{};
         HWND positionY{};
@@ -306,19 +328,113 @@ namespace
         document.blockedPolygons = ReadPolygons(input.at("blockedPolygons"));
     }
 
-    void Editor::Save(HWND inWindow)
+    void Editor::Open(HWND inWindow)
     {
-        if (!workingPolygon.empty())
+        wchar_t fileBuffer[32768]{};
+        OPENFILENAMEW dialog{};
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = inWindow;
+        dialog.lpstrFilter = L"Town Map JSON\0*.json\0All Files\0*.*\0";
+        dialog.lpstrFile = fileBuffer;
+        dialog.nMaxFile = static_cast<DWORD>(std::size(fileBuffer));
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        if (!GetOpenFileNameW(&dialog)) return;
+
+        const std::filesystem::path previousMapPath = mapPath;
+        TownMapDocument previousDocument = document;
+        try
         {
-            MessageBoxW(inWindow, L"Finish or cancel the current polygon before saving.",
-                L"Town Map Editor", MB_OK | MB_ICONWARNING);
-            return;
+            mapPath = std::filesystem::path(fileBuffer);
+            document = TownMapDocument{};
+            Load();
         }
-        if (document.walkablePolygons.empty() || !IsSpawnValid())
+        catch (...)
         {
-            MessageBoxW(inWindow, L"A walkable polygon and a valid spawn are required.",
+            mapPath = previousMapPath;
+            document = std::move(previousDocument);
+            throw;
+        }
+
+        selectedImage.reset();
+        workingPolygon.clear();
+        workingVisibleArea.reset();
+        if (GetCapture() == inWindow) ReleaseCapture();
+        draggingImage = false;
+        draggingVisibleArea = false;
+        panning = false;
+        mode = EditMode::Select;
+        imageCache.clear();
+        SetWindowTextW(inWindow, (L"Town Map Editor - loaded: " + mapPath.wstring()).c_str());
+        Fit(inWindow);
+    }
+
+    bool Editor::Save(HWND inWindow)
+    {
+        if (!workingPolygon.empty() || workingVisibleArea.has_value())
+        {
+            MessageBoxW(inWindow, L"Finish or cancel the current polygon or visible area before saving.",
                 L"Town Map Editor", MB_OK | MB_ICONWARNING);
-            return;
+            return false;
+        }
+        if (document.world.right <= document.world.left || document.world.bottom <= document.world.top)
+        {
+            MessageBoxW(inWindow, L"The visible area must have a positive width and height.",
+                L"Town Map Editor", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        if (document.walkablePolygons.empty())
+        {
+            MessageBoxW(inWindow, L"At least one completed walkable polygon is required.",
+                L"Town Map Editor", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        for (const auto* polygons : { &document.walkablePolygons, &document.blockedPolygons })
+        {
+            for (const Polygon& polygon : *polygons)
+            {
+                for (const FloatPoint point : polygon)
+                {
+                    if (point.x < document.world.left || point.x > document.world.right
+                        || point.y < document.world.top || point.y > document.world.bottom)
+                    {
+                        MessageBoxW(inWindow, L"All polygon vertices must be inside the visible area.",
+                            L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                        return false;
+                    }
+                }
+            }
+        }
+
+        const SpawnValidation spawnValidation = ValidateSpawn();
+        const wchar_t* spawnError = nullptr;
+        switch (spawnValidation)
+        {
+        case SpawnValidation::OutsideVisibleArea:
+            spawnError = L"The spawn center must be inside the visible area.";
+            break;
+        case SpawnValidation::OutsideWalkable:
+            spawnError = L"The spawn center must be inside a walkable polygon.";
+            break;
+        case SpawnValidation::InsideBlocked:
+            spawnError = L"The spawn center must not be inside a blocked polygon.";
+            break;
+        case SpawnValidation::FootprintOutsideVisibleArea:
+            spawnError = L"The spawn footprint must be fully inside the visible area.";
+            break;
+        case SpawnValidation::FootprintOutsideWalkable:
+            spawnError = L"The spawn footprint must be fully inside a walkable polygon.";
+            break;
+        case SpawnValidation::FootprintInsideBlocked:
+            spawnError = L"The spawn footprint must not overlap a blocked polygon.";
+            break;
+        case SpawnValidation::Valid:
+        default:
+            break;
+        }
+        if (spawnError != nullptr)
+        {
+            MessageBoxW(inWindow, spawnError, L"Town Map Editor", MB_OK | MB_ICONWARNING);
+            return false;
         }
         std::size_t totalVertexCount{};
         for (const auto* polygons : { &document.walkablePolygons, &document.blockedPolygons })
@@ -327,10 +443,9 @@ namespace
         {
             MessageBoxW(inWindow, L"The map exceeds the 32768 polygon vertex limit.",
                 L"Town Map Editor", MB_OK | MB_ICONWARNING);
-            return;
+            return false;
         }
 
-        document.world = CalculateBounds();
         nlohmann::json output{
             { "version", 2 }, { "mapId", document.mapId },
             { "world", { { "left", document.world.left }, { "top", document.world.top },
@@ -353,6 +468,38 @@ namespace
         if (!stream) throw std::runtime_error("Unable to save the town map.");
         stream << std::setw(2) << output << '\n';
         SetWindowTextW(inWindow, (L"Town Map Editor - saved: " + mapPath.wstring()).c_str());
+        return true;
+    }
+
+    void Editor::SaveAs(HWND inWindow)
+    {
+        wchar_t fileBuffer[32768]{};
+        const std::wstring fileName = mapPath.filename().wstring();
+        const std::wstring initialDirectory = mapPath.parent_path().wstring();
+        wcsncpy_s(fileBuffer, std::size(fileBuffer), fileName.c_str(), _TRUNCATE);
+
+        OPENFILENAMEW dialog{};
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = inWindow;
+        dialog.lpstrFilter = L"Town Map JSON\0*.json\0All Files\0*.*\0";
+        dialog.lpstrFile = fileBuffer;
+        dialog.nMaxFile = static_cast<DWORD>(std::size(fileBuffer));
+        dialog.lpstrInitialDir = initialDirectory.empty() ? nullptr : initialDirectory.c_str();
+        dialog.lpstrDefExt = L"json";
+        dialog.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+        if (!GetSaveFileNameW(&dialog)) return;
+
+        const std::filesystem::path previousMapPath = mapPath;
+        mapPath = std::filesystem::path(fileBuffer);
+        try
+        {
+            if (!Save(inWindow)) mapPath = previousMapPath;
+        }
+        catch (...)
+        {
+            mapPath = previousMapPath;
+            throw;
+        }
     }
 
     void Editor::CreateControls(HWND inWindow)
@@ -363,8 +510,12 @@ namespace
                 0, 0, 100, 28, inWindow, reinterpret_cast<HMENU>(static_cast<INT_PTR>(inId)),
                 GetModuleHandleW(nullptr), nullptr));
         };
+        addButton(L"O  Open Map", OPEN_MAP);
         addButton(L"Add at X/Y", ADD_XY);
         addButton(L"Add Right", ADD_RIGHT);
+        addButton(L"Add Bottom", ADD_BOTTOM);
+        addButton(L"Add Top", ADD_TOP);
+        addButton(L"Add Left", ADD_LEFT);
         xLabel = CreateWindowW(L"STATIC", L"X", WS_CHILD | WS_VISIBLE, 0, 0, 20, 22,
             inWindow, nullptr, GetModuleHandleW(nullptr), nullptr);
         yLabel = CreateWindowW(L"STATIC", L"Y", WS_CHILD | WS_VISIBLE, 0, 0, 20, 22,
@@ -378,9 +529,11 @@ namespace
         addButton(L"W  Walkable", MODE_WALKABLE);
         addButton(L"B  Blocked", MODE_BLOCKED);
         addButton(L"P  Spawn", MODE_SPAWN);
+        addButton(L"R  Visible Area", MODE_VISIBLE_AREA);
         addButton(L"Clear Mode Areas", CLEAR_AREAS);
         addButton(L"F  Fit All", FIT_MAP);
         addButton(L"S  Save", SAVE_MAP);
+        addButton(L"Shift+S  Save As...", SAVE_MAP_AS);
         LayoutControls(inWindow);
     }
 
@@ -392,27 +545,32 @@ namespace
         int y = 18;
         for (std::size_t index = 0; index < buttons.size(); ++index)
         {
-            if (index == 2) y = 132;
+            if (index == 6) y = 276;
             MoveWindow(buttons[index], left, y, PANEL_WIDTH - 24, 30, TRUE);
             y += 36;
         }
-        MoveWindow(xLabel, left, 97, 16, 22, TRUE);
-        MoveWindow(positionX, left + 18, 94, 78, 25, TRUE);
-        MoveWindow(yLabel, left + 104, 97, 16, 22, TRUE);
-        MoveWindow(positionY, left + 122, 94, 78, 25, TRUE);
+        MoveWindow(xLabel, left, 241, 16, 22, TRUE);
+        MoveWindow(positionX, left + 18, 238, 78, 25, TRUE);
+        MoveWindow(yLabel, left + 104, 241, 16, 22, TRUE);
+        MoveWindow(positionY, left + 122, 238, 78, 25, TRUE);
     }
 
     void Editor::HandleCommand(HWND inWindow, const int inCommand)
     {
         switch (inCommand)
         {
-        case ADD_XY: AddImage(inWindow, false); break;
-        case ADD_RIGHT: AddImage(inWindow, true); break;
+        case OPEN_MAP: Open(inWindow); break;
+        case ADD_XY: AddImage(inWindow, ImagePlacement::AtPosition); break;
+        case ADD_RIGHT: AddImage(inWindow, ImagePlacement::Right); break;
+        case ADD_BOTTOM: AddImage(inWindow, ImagePlacement::Bottom); break;
+        case ADD_TOP: AddImage(inWindow, ImagePlacement::Top); break;
+        case ADD_LEFT: AddImage(inWindow, ImagePlacement::Left); break;
         case APPLY_POSITION: ApplyPosition(inWindow); break;
         case MODE_SELECT: SetMode(EditMode::Select, inWindow); break;
         case MODE_WALKABLE: SetMode(EditMode::Walkable, inWindow); break;
         case MODE_BLOCKED: SetMode(EditMode::Blocked, inWindow); break;
         case MODE_SPAWN: SetMode(EditMode::Spawn, inWindow); break;
+        case MODE_VISIBLE_AREA: SetMode(EditMode::VisibleArea, inWindow); break;
         case CLEAR_AREAS:
             if (mode == EditMode::Walkable) document.walkablePolygons.clear();
             else if (mode == EditMode::Blocked) document.blockedPolygons.clear();
@@ -420,7 +578,8 @@ namespace
             InvalidateRect(inWindow, nullptr, FALSE);
             break;
         case FIT_MAP: Fit(inWindow); break;
-        case SAVE_MAP: Save(inWindow); break;
+        case SAVE_MAP: static_cast<void>(Save(inWindow)); break;
+        case SAVE_MAP_AS: SaveAs(inWindow); break;
         default: break;
         }
     }
@@ -432,13 +591,19 @@ namespace
             if (inKey == VK_RETURN) ApplyPosition(inWindow);
             return;
         }
-        if (inKey == 'V') SetMode(EditMode::Select, inWindow);
+        if (inKey == 'O') Open(inWindow);
+        else if (inKey == 'V') SetMode(EditMode::Select, inWindow);
         else if (inKey == 'W') SetMode(EditMode::Walkable, inWindow);
         else if (inKey == 'B') SetMode(EditMode::Blocked, inWindow);
         else if (inKey == 'P') SetMode(EditMode::Spawn, inWindow);
+        else if (inKey == 'R') SetMode(EditMode::VisibleArea, inWindow);
         else if (inKey == 'F') Fit(inWindow);
-        else if (inKey == 'S') Save(inWindow);
-        else if (inKey == 'A') AddImage(inWindow, false);
+        else if (inKey == 'S')
+        {
+            if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) SaveAs(inWindow);
+            else static_cast<void>(Save(inWindow));
+        }
+        else if (inKey == 'A') AddImage(inWindow, ImagePlacement::AtPosition);
         else if (inKey == VK_RETURN) FinishPolygon(inWindow);
         else if (inKey == VK_BACK && !workingPolygon.empty())
         {
@@ -465,7 +630,7 @@ namespace
         }
     }
 
-    void Editor::AddImage(HWND inWindow, const bool inPlaceRight)
+    void Editor::AddImage(HWND inWindow, const ImagePlacement inPlacement)
     {
         if (document.images.size() >= 2048)
             throw std::runtime_error("A town map supports at most 2048 images.");
@@ -501,14 +666,36 @@ namespace
         if (imported.GetLastStatus() != Gdiplus::Ok || imported.GetWidth() == 0 || imported.GetHeight() == 0)
             throw std::runtime_error("Unable to read the selected image.");
 
+        const float imageWidth = static_cast<float>(imported.GetWidth());
+        const float imageHeight = static_cast<float>(imported.GetHeight());
         float x{};
         float y{};
-        if (inPlaceRight && !document.images.empty())
+        if (inPlacement != ImagePlacement::AtPosition && !document.images.empty())
         {
             const std::size_t baseIndex = selectedImage.value_or(document.images.size() - 1);
             const MapImage& base = document.images[baseIndex];
-            x = base.x + base.width;
-            y = base.y;
+            switch (inPlacement)
+            {
+            case ImagePlacement::Right:
+                x = base.x + base.width;
+                y = base.y;
+                break;
+            case ImagePlacement::Bottom:
+                x = base.x;
+                y = base.y + base.height;
+                break;
+            case ImagePlacement::Top:
+                x = base.x;
+                y = base.y - imageHeight;
+                break;
+            case ImagePlacement::Left:
+                x = base.x - imageWidth;
+                y = base.y;
+                break;
+            case ImagePlacement::AtPosition:
+            default:
+                break;
+            }
         }
         else
         {
@@ -518,8 +705,7 @@ namespace
         const std::filesystem::path relative = std::filesystem::relative(destination, assetRoot);
         const std::string asset = WideToUtf8(relative.generic_wstring());
         if (asset.size() > 240) throw std::runtime_error("Imported asset path exceeds 240 UTF-8 bytes.");
-        document.images.push_back(MapImage{ asset, x, y,
-            static_cast<float>(imported.GetWidth()), static_cast<float>(imported.GetHeight()) });
+        document.images.push_back(MapImage{ asset, x, y, imageWidth, imageHeight });
         selectedImage = document.images.size() - 1;
         mode = EditMode::Select;
         UpdatePositionControls();
@@ -568,8 +754,17 @@ namespace
 
     void Editor::SetMode(const EditMode inMode, HWND inWindow)
     {
+        if (draggingImage || draggingVisibleArea || panning)
+        {
+            draggingImage = false;
+            draggingVisibleArea = false;
+            panning = false;
+            ReleaseCapture();
+        }
         workingPolygon.clear();
+        workingVisibleArea.reset();
         mode = inMode;
+        SetFocus(inWindow);
         InvalidateRect(inWindow, nullptr, FALSE);
     }
 
@@ -607,21 +802,21 @@ namespace
 
     void Editor::Fit(HWND inWindow)
     {
-        document.world = CalculateBounds();
+        const Bounds bounds = CalculateBounds();
         RECT client{};
         GetClientRect(inWindow, &client);
         const float availableWidth = static_cast<float>(std::max(1L, client.right - PANEL_WIDTH));
         const float availableHeight = static_cast<float>(std::max(1L, client.bottom));
-        const float width = std::max(1.0f, document.world.right - document.world.left);
-        const float height = std::max(1.0f, document.world.bottom - document.world.top);
+        const float width = std::max(1.0f, bounds.right - bounds.left);
+        const float height = std::max(1.0f, bounds.bottom - bounds.top);
         zoom = std::clamp(std::min(availableWidth / width, availableHeight / height) * 0.9f,
             MIN_ZOOM, MAX_ZOOM);
-        cameraX = document.world.left - (availableWidth / zoom - width) * 0.5f;
-        cameraY = document.world.top - (availableHeight / zoom - height) * 0.5f;
+        cameraX = bounds.left - (availableWidth / zoom - width) * 0.5f;
+        cameraY = bounds.top - (availableHeight / zoom - height) * 0.5f;
         InvalidateRect(inWindow, nullptr, FALSE);
     }
 
-    bool Editor::IsSpawnValid() const
+    SpawnValidation Editor::ValidateSpawn() const
     {
         const auto inAny = [](const FloatPoint inPoint, const std::vector<Polygon>& inPolygons)
         {
@@ -630,19 +825,30 @@ namespace
                 return IsPointInPolygon(inPoint, inPolygon);
             });
         };
-        const auto valid = [&](const FloatPoint inPoint)
+        const auto insideVisibleArea = [this](const FloatPoint inPoint)
         {
-            return inAny(inPoint, document.walkablePolygons) && !inAny(inPoint, document.blockedPolygons);
+            return inPoint.x >= document.world.left && inPoint.x <= document.world.right
+                && inPoint.y >= document.world.top && inPoint.y <= document.world.bottom;
         };
-        if (!valid(document.spawn)) return false;
+        if (!insideVisibleArea(document.spawn)) return SpawnValidation::OutsideVisibleArea;
+        if (!inAny(document.spawn, document.walkablePolygons)) return SpawnValidation::OutsideWalkable;
+        if (inAny(document.spawn, document.blockedPolygons)) return SpawnValidation::InsideBlocked;
+
         constexpr float TWO_PI = 6.28318530717958647692f;
         for (int index = 0; index < 16; ++index)
         {
             const float angle = TWO_PI * static_cast<float>(index) / 16.0f;
-            if (!valid({ document.spawn.x + std::cos(angle) * 32.0f,
-                document.spawn.y + std::sin(angle) * 18.0f })) return false;
+            const FloatPoint footprintPoint{
+                document.spawn.x + std::cos(angle) * 32.0f,
+                document.spawn.y + std::sin(angle) * 18.0f
+            };
+            if (!insideVisibleArea(footprintPoint)) return SpawnValidation::FootprintOutsideVisibleArea;
+            if (!inAny(footprintPoint, document.walkablePolygons))
+                return SpawnValidation::FootprintOutsideWalkable;
+            if (inAny(footprintPoint, document.blockedPolygons))
+                return SpawnValidation::FootprintInsideBlocked;
         }
-        return true;
+        return SpawnValidation::Valid;
     }
 
     void Editor::Paint(HWND inWindow, HDC inDeviceContext)
@@ -668,11 +874,11 @@ namespace
             Gdiplus::Color(72, 50, 220, 110), Gdiplus::Color(220, 60, 235, 130));
         DrawPolygons(graphics, document.blockedPolygons,
             Gdiplus::Color(90, 230, 55, 65), Gdiplus::Color(230, 250, 80, 80));
-        DrawOverlays(graphics);
+        DrawOverlays(graphics, canvasRight, client.bottom);
 
         SetBkMode(buffer, TRANSPARENT);
         SetTextColor(buffer, RGB(235, 240, 248));
-        const std::wstring instructions = L"Middle drag / Space+drag: pan   Wheel: zoom   Enter: close polygon   Backspace: undo   Delete: image";
+        const std::wstring instructions = L"Middle drag / Space+drag: pan   Wheel: zoom   Enter: close polygon   R: visible area   Backspace: undo";
         TextOutW(buffer, 12, 10, instructions.c_str(), static_cast<int>(instructions.size()));
         BitBlt(inDeviceContext, 0, 0, client.right, client.bottom, buffer, 0, 0, SRCCOPY);
         SelectObject(buffer, previousBitmap);
@@ -722,8 +928,32 @@ namespace
         }
     }
 
-    void Editor::DrawOverlays(Gdiplus::Graphics& inGraphics) const
+    void Editor::DrawOverlays(Gdiplus::Graphics& inGraphics, const int inCanvasWidth,
+        const int inCanvasHeight) const
     {
+        const Bounds& visibleArea = workingVisibleArea.has_value() ? *workingVisibleArea : document.world;
+        const Gdiplus::RectF visibleRectangle = WorldRectangle(
+            visibleArea.left, visibleArea.top,
+            visibleArea.right - visibleArea.left, visibleArea.bottom - visibleArea.top);
+        const float clippedLeft = std::clamp(visibleRectangle.X, 0.0f, static_cast<float>(inCanvasWidth));
+        const float clippedTop = std::clamp(visibleRectangle.Y, 0.0f, static_cast<float>(inCanvasHeight));
+        const float clippedRight = std::clamp(visibleRectangle.GetRight(), 0.0f,
+            static_cast<float>(inCanvasWidth));
+        const float clippedBottom = std::clamp(visibleRectangle.GetBottom(), 0.0f,
+            static_cast<float>(inCanvasHeight));
+        Gdiplus::SolidBrush outsideBrush(Gdiplus::Color(150, 0, 0, 0));
+        inGraphics.FillRectangle(&outsideBrush, 0.0f, 0.0f,
+            static_cast<float>(inCanvasWidth), clippedTop);
+        inGraphics.FillRectangle(&outsideBrush, 0.0f, clippedBottom,
+            static_cast<float>(inCanvasWidth), static_cast<float>(inCanvasHeight) - clippedBottom);
+        inGraphics.FillRectangle(&outsideBrush, 0.0f, clippedTop,
+            clippedLeft, std::max(0.0f, clippedBottom - clippedTop));
+        inGraphics.FillRectangle(&outsideBrush, clippedRight, clippedTop,
+            static_cast<float>(inCanvasWidth) - clippedRight,
+            std::max(0.0f, clippedBottom - clippedTop));
+        Gdiplus::Pen visibleAreaPen(Gdiplus::Color(255, 90, 210, 255), 3.0f);
+        inGraphics.DrawRectangle(&visibleAreaPen, visibleRectangle);
+
         if (!workingPolygon.empty())
         {
             std::vector<Gdiplus::PointF> points;
@@ -737,8 +967,20 @@ namespace
         }
 
         const Gdiplus::PointF spawn = WorldPoint(document.spawn);
-        Gdiplus::SolidBrush spawnBrush(Gdiplus::Color(255, 255, 190, 40));
-        inGraphics.FillEllipse(&spawnBrush, spawn.X - 7.0f, spawn.Y - 7.0f, 14.0f, 14.0f);
+        const bool spawnValid = ValidateSpawn() == SpawnValidation::Valid;
+        const Gdiplus::Color spawnColor = spawnValid
+            ? Gdiplus::Color(150, 70, 230, 120)
+            : Gdiplus::Color(180, 250, 70, 70);
+        Gdiplus::SolidBrush spawnBrush(spawnColor);
+        Gdiplus::Pen spawnOutline(spawnValid
+            ? Gdiplus::Color(255, 90, 255, 145)
+            : Gdiplus::Color(255, 255, 90, 90), 2.0f);
+        const float spawnRadiusX = 32.0f * zoom;
+        const float spawnRadiusY = 18.0f * zoom;
+        inGraphics.FillEllipse(&spawnBrush, spawn.X - spawnRadiusX, spawn.Y - spawnRadiusY,
+            spawnRadiusX * 2.0f, spawnRadiusY * 2.0f);
+        inGraphics.DrawEllipse(&spawnOutline, spawn.X - spawnRadiusX, spawn.Y - spawnRadiusY,
+            spawnRadiusX * 2.0f, spawnRadiusY * 2.0f);
 
         if (selectedImage.has_value())
         {
@@ -825,6 +1067,7 @@ namespace
     void Editor::BeginLeft(HWND inWindow, const int inX, const int inY)
     {
         if (!IsCanvasPoint(inWindow, inX, inY)) return;
+        SetFocus(inWindow);
         if (GetKeyState(VK_SPACE) < 0)
         {
             BeginPan(inWindow, inX, inY);
@@ -847,6 +1090,13 @@ namespace
         {
             document.spawn = world;
         }
+        else if (mode == EditMode::VisibleArea)
+        {
+            visibleAreaStart = world;
+            workingVisibleArea = Bounds{ world.x, world.y, world.x, world.y };
+            draggingVisibleArea = true;
+            SetCapture(inWindow);
+        }
         else
         {
             if (workingPolygon.size() < 2048) workingPolygon.push_back(world);
@@ -854,18 +1104,30 @@ namespace
         InvalidateRect(inWindow, nullptr, FALSE);
     }
 
-    void Editor::EndPointer()
+    void Editor::EndPointer(HWND inWindow)
     {
-        if (draggingImage || panning)
+        if (draggingVisibleArea && workingVisibleArea.has_value())
+        {
+            const Bounds bounds = *workingVisibleArea;
+            if (bounds.right > bounds.left && bounds.bottom > bounds.top)
+            {
+                document.world = bounds;
+            }
+            workingVisibleArea.reset();
+        }
+        if (draggingImage || draggingVisibleArea || panning)
         {
             draggingImage = false;
+            draggingVisibleArea = false;
             panning = false;
             ReleaseCapture();
+            InvalidateRect(inWindow, nullptr, FALSE);
         }
     }
 
     void Editor::BeginPan(HWND inWindow, const int inX, const int inY)
     {
+        SetFocus(inWindow);
         panning = true;
         lastMouse = POINT{ inX, inY };
         SetCapture(inWindow);
@@ -889,6 +1151,17 @@ namespace
             UpdatePositionControls();
             InvalidateRect(inWindow, nullptr, FALSE);
         }
+        else if (draggingVisibleArea)
+        {
+            const FloatPoint world = ScreenToWorld(inX, inY);
+            workingVisibleArea = Bounds{
+                std::min(visibleAreaStart.x, world.x),
+                std::min(visibleAreaStart.y, world.y),
+                std::max(visibleAreaStart.x, world.x),
+                std::max(visibleAreaStart.y, world.y)
+            };
+            InvalidateRect(inWindow, nullptr, FALSE);
+        }
     }
 
     void Editor::ZoomAt(HWND inWindow, const int inX, const int inY, const int inWheelDelta)
@@ -905,6 +1178,7 @@ namespace
     void Editor::PlaceSpawn(HWND inWindow, const int inX, const int inY)
     {
         if (!IsCanvasPoint(inWindow, inX, inY)) return;
+        SetFocus(inWindow);
         document.spawn = ScreenToWorld(inX, inY);
         InvalidateRect(inWindow, nullptr, FALSE);
     }
@@ -926,9 +1200,9 @@ namespace
             case WM_COMMAND: editor->HandleCommand(inWindow, LOWORD(inWParam)); return 0;
             case WM_KEYDOWN: editor->HandleKey(inWindow, inWParam); return 0;
             case WM_LBUTTONDOWN: editor->BeginLeft(inWindow, GET_X_LPARAM(inLParam), GET_Y_LPARAM(inLParam)); return 0;
-            case WM_LBUTTONUP: editor->EndPointer(); return 0;
+            case WM_LBUTTONUP: editor->EndPointer(inWindow); return 0;
             case WM_MBUTTONDOWN: editor->BeginPan(inWindow, GET_X_LPARAM(inLParam), GET_Y_LPARAM(inLParam)); return 0;
-            case WM_MBUTTONUP: editor->EndPointer(); return 0;
+            case WM_MBUTTONUP: editor->EndPointer(inWindow); return 0;
             case WM_RBUTTONDOWN: editor->PlaceSpawn(inWindow, GET_X_LPARAM(inLParam), GET_Y_LPARAM(inLParam)); return 0;
             case WM_MOUSEMOVE: editor->MoveMouse(inWindow, GET_X_LPARAM(inLParam), GET_Y_LPARAM(inLParam)); return 0;
             case WM_MOUSEWHEEL:
