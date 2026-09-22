@@ -1,11 +1,18 @@
 # ActionRPGClient
 
-던전형 2D 액션 게임을 위한 Windows 클라이언트 기초 프로젝트입니다.  
+마을 TCP 통신과 2D 액션 기능을 함께 개발하는 Windows 클라이언트입니다.
 Win32 게임 루프 위에 D3D11/DXGI 장치와 Direct2D 렌더링을 구성했습니다.
+
+문서 안내:
+
+- [클라이언트 개발 가이드](DEVELOPMENT.md): 구조, 실행 흐름, 기능과 에셋을 추가할 위치
+- [마을 패킷 개발 가이드](TOWN_NETWORK.md): TownServer와 주고받는 패킷 추가 절차
+- [마을 맵 에디터 설명서](TOWN_MAP_EDITOR.md): 이미지 배치, 이동 영역, 저장과 적용
+- [에셋 디렉터리 설명](Assets/README.md): INI와 이미지·오디오 경로 규칙
 
 ## 현재 기능
 
-- 방향키 이동과 짧은 시간 내 두 번 입력하는 달리기
+- 방향키 이동과 달리기 판정(현재 마을에서는 걷기만 허용)
 - `C` 키 점프
 - 방향 입력과 `Z` 키를 조합하는 스킬 커맨드 큐
 - 대기, 달리기, 사격 스프라이트 애니메이션
@@ -14,7 +21,7 @@ Win32 게임 루프 위에 D3D11/DXGI 장치와 Direct2D 렌더링을 구성했�
 - INI 파일을 이용한 애니메이션, 스킬, 이펙트 및 투사체 설정
 - TownServer TCP 자동 연결과 재연결
 - 서버 권위 위치 보정과 원격 플레이어 데드레커닝
-- 석터 기반 Appear/Disappear 처리
+- 섹터 기반 Appear/Disappear 처리
 
 ## 조작법
 
@@ -28,7 +35,7 @@ Win32 게임 루프 위에 D3D11/DXGI 장치와 Direct2D 렌더링을 구성했�
 | `→`, `→`, `Z` | 오른쪽 방향 스킬 |
 | `←`, `←`, `Z` | 왼쪽 방향 스킬 |
 
-달리기 판정은 스킬 커맨드 큐와 별도로 관리하므로 방향키 연속 입력이 스킬 커맨드에서 제거되지 않습니다.
+달리기 판정은 스킬 커맨드 큐와 별도로 관리하지만 현재 마을에서는 비활성화되어 있습니다.
 
 ## 프로젝트 구조
 
@@ -46,11 +53,10 @@ Assets/
   Data/                게임 데이터 INI 파일
   Images/              이미지와 스프라이트 시트
   Audio/               음악과 효과음 배치 위치
+TownMapEditor/          마을 맵 JSON을 작성하는 별도 프로젝트
 ```
 
-`TownMapEditor/` 프로젝트는 마을 이동 영역과 시작 위치를 배치하는 별도 도구입니다.
-
-TownServer 콘텐츠 패킷을 추가하는 절차는 [`TOWN_NETWORK.md`](TOWN_NETWORK.md)를 참고합니다.
+`TownMapEditor/`는 마을 배경 이미지, 이동 영역, 시작 위치를 배치하는 도구입니다.
 
 주요 데이터 파일은 다음과 같습니다.
 
@@ -60,14 +66,14 @@ TownServer 콘텐츠 패킷을 추가하는 절차는 [`TOWN_NETWORK.md`](TOWN_N
 - `Assets/Data/effects.ini`: 스킬 이펙트 정보
 - `Assets/Data/projectiles.ini`: 투사체 이동 및 표시 정보
 
-빌드할 때 `Assets` 디렉터리가 실행 파일 옆으로 복사됩니다. 실행 중에는 작업 디렉터리가 아니라 실행 파일 위치를 기준으로 에셋을 찾습니다.
+빌드할 때 `Assets` 디렉터리가 실행 파일 옆으로 복사됩니다. 실행 중에는 작업 디렉터리가 아니라 실행 파일 위치를 기준으로 에셋을 찾습니다. 마을 배경은 `assets.ini` 등록 대신 서버 맵 JSON의 `asset` 상대 경로를 사용합니다.
 
 ## 빌드 및 실행
 
 Visual Studio 2022에서 `ActionRPGClient.slnx`를 열고 다음 구성을 선택합니다.
 
-- Configuration: `Debug` 또는 `Release`
-- Platform: `x64`
+- 구성: `Debug` 또는 `Release`
+- 플랫폼: `x64`
 
 명령줄에서는 Visual Studio Developer PowerShell에서 다음과 같이 빌드할 수 있습니다.
 
@@ -80,6 +86,9 @@ Debug 실행 파일은 `artifacts/bin/x64/Debug/ActionRPGClient.exe`에 생성�
 클라이언트는 기본적으로 `127.0.0.1:7777`의 TownServer에 연결합니다. 서버를 먼저
 실행한 뒤 클라이언트를 여러 번 실행하면 원격 플레이어의 Appear, 이동,
 Disappear를 확인할 수 있습니다.
+입장 시 맵의 좌표와 이동 영역은 서버에서 받지만 배경 이미지 파일은 클라이언트의
+`Assets/Images/Towns`에 있어야 합니다. 서버 또는 클라이언트의 입장 패킷 형식을
+변경했다면 양쪽 프로젝트를 함께 다시 빌드합니다.
 
 ## Town Map Editor
 
@@ -87,8 +96,8 @@ Disappear를 확인할 수 있습니다.
 
 ```powershell
 artifacts/bin/x64/Debug/TownMapEditor.exe `
-  C:\Users\KimHyeongJin\source\repos\ActionRPGServer\ActionRPGServer\TownServer\Data\TownMap.json `
-  C:\Users\KimHyeongJin\source\repos\ActionRPGClient\ActionRPGClient\Assets
+  ..\..\ActionRPGServer\ActionRPGServer\TownServer\Data\TownMap.json `
+  .\Assets
 ```
 
 - `Add at X/Y`: 입력한 월드 좌표에 이미지 추가

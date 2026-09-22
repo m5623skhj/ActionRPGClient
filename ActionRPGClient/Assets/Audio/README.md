@@ -1,3 +1,3 @@
-# Audio
+# 오디오 디렉터리
 
-Store music and sound-effect files here. Register each runtime file under `[Audio]` in `Data/assets.ini` and refer to it by logical ID from gameplay data.
+음악과 효과음 파일을 보관합니다. 사용할 파일은 `Assets/Data/assets.ini`의 `[Audio]`에 `Assets/` 기준 상대 경로로 등록하고, 게임 데이터에서는 해당 논리적 ID를 참조합니다.

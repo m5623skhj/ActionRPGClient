@@ -1,17 +1,19 @@
-# Assets
+# Assets 디렉터리
 
-Runtime content is stored outside C++ source code.
+게임에서 사용하는 데이터와 미디어 파일은 C++ 소스와 분리해 이 디렉터리에 보관합니다.
 
-- `Data/assets.ini` maps logical IDs to data, image and audio paths.
-- `Data/animations.ini` defines sprite-sheet layout, playback speed and render size.
-- `Data/projectiles.ini` defines straight and arc projectile motion, lifetime and primitive visuals.
-- `Data/skills.ini` defines ordered input commands and timing limits.
-- `Data/effects.ini` links skills to visual/audio effect definitions.
-- `Images/` is reserved for textures, sprite sheets and effect images.
-- `Audio/` is reserved for music and sound effects.
+| 경로 | 용도 |
+| --- | --- |
+| `Data/assets.ini` | 데이터·이미지·오디오의 논리적 ID와 상대 경로 연결 |
+| `Data/animations.ini` | 스프라이트 시트 구성, 재생 속도, 표시 크기 |
+| `Data/projectiles.ini` | 직선·포물선 투사체의 이동, 수명, 표시 방식 |
+| `Data/skills.ini` | 스킬 입력 순서와 시간 제한 |
+| `Data/effects.ini` | 스킬과 시각·청각 효과의 연결 |
+| `Images/` | 캐릭터, 마을 배경, 이펙트 이미지 |
+| `Audio/` | 음악과 효과음 |
 
-The build copies this directory next to `ActionRPGClient.exe`. Runtime paths are resolved from the executable directory, not the process working directory.
+`ActionRPGClient`를 빌드하면 이 디렉터리 전체가 실행 파일 옆의 `Assets/`로 복사됩니다. 실행 중에는 현재 작업 디렉터리가 아닌 **실행 파일 위치**를 기준으로 경로를 찾습니다. `assets.ini`에 등록하는 경로는 `Assets/` 기준 상대 경로로 작성합니다.
 
-`anchor_y` is the normalized vertical point in a sprite cell that is placed on the character's ground position. Use the shared foot baseline of every frame so animation does not drift along the map depth axis.
-For a two-row sheet with different padding per row, `second_row_anchor_y` overrides that point for the second row.
-`anchor_xs` optionally supplies one normalized horizontal body anchor per frame, preventing unevenly packed sheets from moving the character on screen.
+마을 맵 JSON의 `images[].asset`도 `Assets/` 기준 상대 경로입니다. 마을 배경 이미지는 이 값을 직접 사용하므로 `assets.ini`의 `[Images]`에 별도로 등록할 필요가 없습니다.
+
+스프라이트 셀의 `anchor_y`는 캐릭터의 지면 좌표에 맞출 세로 기준점을 0~1 범위로 나타냅니다. 모든 프레임의 발 위치를 같은 기준에 맞춰야 애니메이션 중 캐릭터가 위아래로 흔들리지 않습니다. 두 번째 행의 여백이 다르면 `second_row_anchor_y`로 해당 행의 기준점을 덮어쓸 수 있습니다. 프레임마다 가로 배치가 불규칙하면 `anchor_xs`에 프레임별 가로 기준점을 지정합니다.
