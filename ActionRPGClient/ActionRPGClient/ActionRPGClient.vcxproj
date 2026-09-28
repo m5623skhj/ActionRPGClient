@@ -63,7 +63,8 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>MultiSocketRUDPClient.lib;Logger.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(RudpOutputDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -88,7 +89,8 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>MultiSocketRUDPClient.lib;Logger.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(RudpOutputDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -110,6 +112,7 @@
     <ClCompile Include="Graphics\D2DRenderer.cpp" />
     <ClCompile Include="Graphics\GraphicsDevice.cpp" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="Network\DungeonClient.cpp" />
     <ClCompile Include="Network\TownClient.cpp" />
     <ClCompile Include="Network\TownProtocol.cpp" />
     <ClCompile Include="Platform\GameWindow.cpp" />
@@ -135,6 +138,7 @@
     <ClInclude Include="Graphics\D2DRenderer.h" />
     <ClInclude Include="Graphics\GraphicsDevice.h" />
     <ClInclude Include="Input\InputState.h" />
+    <ClInclude Include="Network\DungeonClient.h" />
     <ClInclude Include="Network\TownClient.h" />
     <ClInclude Include="Network\TownProtocol.h" />
     <ClInclude Include="Platform\GameWindow.h" />

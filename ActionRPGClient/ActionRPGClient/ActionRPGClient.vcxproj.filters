@@ -28,6 +28,7 @@
     <ClCompile Include="Graphics\D2DRenderer.cpp"><Filter>Graphics</Filter></ClCompile>
     <ClCompile Include="Graphics\GraphicsDevice.cpp"><Filter>Graphics</Filter></ClCompile>
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="Network\DungeonClient.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Network\TownClient.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Network\TownProtocol.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Platform\GameWindow.cpp"><Filter>Platform</Filter></ClCompile>
@@ -53,6 +54,7 @@
     <ClInclude Include="Graphics\D2DRenderer.h"><Filter>Graphics</Filter></ClInclude>
     <ClInclude Include="Graphics\GraphicsDevice.h"><Filter>Graphics</Filter></ClInclude>
     <ClInclude Include="Input\InputState.h"><Filter>Input</Filter></ClInclude>
+    <ClInclude Include="Network\DungeonClient.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Network\TownClient.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Network\TownProtocol.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Platform\GameWindow.h"><Filter>Platform</Filter></ClInclude>

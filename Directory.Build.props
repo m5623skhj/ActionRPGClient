@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ActionRPGClient' Or '$(MSBuildProjectName)' == 'MultiSocketRUDPClient' Or '$(MSBuildProjectName)' == 'Logger'">
+    <RudpRoot>$(MSBuildThisFileDirectory)External\MultiSocketRUDP\</RudpRoot>
+    <RudpOutputDir>$(MSBuildThisFileDirectory)artifacts\bin\$(Platform)\$(Configuration)\</RudpOutputDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'MultiSocketRUDPClient' Or '$(MSBuildProjectName)' == 'Logger'">
+    <OutDir>$(RudpOutputDir)</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)artifacts\obj\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+</Project>
