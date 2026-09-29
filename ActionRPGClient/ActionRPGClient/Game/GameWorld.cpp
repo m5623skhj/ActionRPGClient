@@ -19,6 +19,22 @@ namespace ActionRPG
 {
     namespace
     {
+        std::string ResolveCharacterAnimation(const IniDocument& inDefinitions,
+            const std::uint32_t inCharacterId, const std::string_view inAnimation)
+        {
+            const std::string characterSection = "Character" + std::to_string(inCharacterId);
+            if (inDefinitions.HasValue(characterSection, inAnimation))
+            {
+                return inDefinitions.GetValue(characterSection, inAnimation);
+            }
+            return inDefinitions.GetValue("Default", inAnimation);
+        }
+
+        bool IsMoving(const Vector2 inVelocity)
+        {
+            return inVelocity.x * inVelocity.x + inVelocity.y * inVelocity.y > 1.0f;
+        }
+
         std::wstring Utf8ToWide(const std::string_view inText)
         {
             if (inText.empty())
@@ -41,14 +57,35 @@ namespace ActionRPG
         }
     }
 
+    GameWorld::RemotePlayerState::RemotePlayerState(std::string inName,
+        const std::uint32_t inCharacterId, const Vector2 inPosition, const Vector2 inVelocity,
+        const AssetCatalog& inAssetCatalog, D2DRenderer& inRenderer,
+        const IniDocument& inAnimationDefinitions, const IniDocument& inCharacterDefinitions)
+        : name(std::move(inName))
+        , characterId(inCharacterId)
+        , displayedPosition(inPosition)
+        , snapshotPosition(inPosition)
+        , velocity(inVelocity)
+        , facingLeft(inVelocity.x < 0.0f)
+        , idleAnimation(inRenderer, inAssetCatalog, inAnimationDefinitions,
+            ResolveCharacterAnimation(inCharacterDefinitions, inCharacterId, "idle_animation"))
+        , walkAnimation(inRenderer, inAssetCatalog, inAnimationDefinitions,
+            ResolveCharacterAnimation(inCharacterDefinitions, inCharacterId, "walk_animation"))
+    {
+    }
+
     GameWorld::GameWorld(const float inViewportWidth, const float inViewportHeight,
         const AssetCatalog& inAssetCatalog, D2DRenderer& inRenderer, TownClient& inTownClient,
         DungeonClient& inDungeonClient)
         : mapBackground(inAssetCatalog)
         , camera(inViewportWidth, inViewportHeight)
+        , animationDefinitions(inAssetCatalog.GetDataPath("Animations"))
+        , characterDefinitions(inAssetCatalog.GetDataPath("Characters"))
         , player(Vector2{ 640.0f, 640.0f }, inAssetCatalog, inRenderer)
         , projectileSystem(inAssetCatalog)
         , skillCommandSystem(inAssetCatalog)
+        , assetCatalog(inAssetCatalog)
+        , renderer(inRenderer)
         , townClient(inTownClient)
         , dungeonClient(inDungeonClient)
     {
@@ -117,8 +154,16 @@ namespace ActionRPG
             const Vector2 position = camera.WorldToScreen(remotePlayer.displayedPosition);
             inRenderer.FillEllipse(position.x, position.y, 27.0f, 12.0f,
                 D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.45f));
-            inRenderer.FillRectangle(position.x - 28.0f, position.y - 96.0f,
-                position.x + 28.0f, position.y, D2D1::ColorF(0.35f, 0.68f, 0.95f));
+            if (IsMoving(remotePlayer.velocity))
+            {
+                remotePlayer.walkAnimation.Draw(
+                    inRenderer, position.x, position.y, remotePlayer.facingLeft);
+            }
+            else
+            {
+                remotePlayer.idleAnimation.Draw(
+                    inRenderer, position.x, position.y, remotePlayer.facingLeft);
+            }
         }
         player.Render(inRenderer, camera);
         inRenderer.PopAxisAlignedClip();
@@ -170,13 +215,17 @@ namespace ActionRPG
                 {
                     if (inEvent.playerId != localPlayerId)
                     {
-                        remotePlayers[inEvent.playerId] = RemotePlayerState{
-                            inEvent.playerName,
-                            Vector2{ inEvent.position.x, inEvent.position.y },
+                        remotePlayers.erase(inEvent.playerId);
+                        remotePlayers.try_emplace(
+                            inEvent.playerId,
+                            std::move(inEvent.playerName),
+                            inEvent.characterId,
                             Vector2{ inEvent.position.x, inEvent.position.y },
                             Vector2{ inEvent.velocity.x, inEvent.velocity.y },
-                            0.0f
-                        };
+                            assetCatalog,
+                            renderer,
+                            animationDefinitions,
+                            characterDefinitions);
                     }
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerMove>)
@@ -482,6 +531,22 @@ namespace ActionRPG
     {
         for (auto& [playerId, remotePlayer] : remotePlayers)
         {
+            const bool isMoving = IsMoving(remotePlayer.velocity);
+            if (isMoving)
+            {
+                remotePlayer.walkAnimation.Update(inDeltaSeconds);
+                remotePlayer.idleAnimation.Reset();
+            }
+            else
+            {
+                remotePlayer.walkAnimation.Reset();
+                remotePlayer.idleAnimation.Update(inDeltaSeconds);
+            }
+            if (std::abs(remotePlayer.velocity.x) > 1.0f)
+            {
+                remotePlayer.facingLeft = remotePlayer.velocity.x < 0.0f;
+            }
+
             remotePlayer.secondsSinceSnapshot = std::min(remotePlayer.secondsSinceSnapshot + inDeltaSeconds, 0.25f);
             const Vector2 predictedPosition{
                 remotePlayer.snapshotPosition.x + remotePlayer.velocity.x * remotePlayer.secondsSinceSnapshot,

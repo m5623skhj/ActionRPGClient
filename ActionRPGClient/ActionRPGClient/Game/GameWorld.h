@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/IniDocument.h"
 #include "Game/Camera.h"
 #include "Game/GameplayMap.h"
 #include "Game/InputCommandQueue.h"
@@ -9,6 +10,7 @@
 #include "Game/SkillCommandSystem.h"
 #include "Input/InputState.h"
 #include "Network/TownProtocol.h"
+#include "Resources/SpriteAnimation.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -38,11 +40,20 @@ namespace ActionRPG
     private:
         struct RemotePlayerState
         {
+            RemotePlayerState(std::string inName, std::uint32_t inCharacterId,
+                Vector2 inPosition, Vector2 inVelocity, const AssetCatalog& inAssetCatalog,
+                D2DRenderer& inRenderer, const IniDocument& inAnimationDefinitions,
+                const IniDocument& inCharacterDefinitions);
+
             std::string name;
+            std::uint32_t characterId{};
             Vector2 displayedPosition{};
             Vector2 snapshotPosition{};
             Vector2 velocity{};
             float secondsSinceSnapshot{};
+            bool facingLeft{};
+            SpriteAnimation idleAnimation;
+            SpriteAnimation walkAnimation;
         };
 
         enum class DungeonEntryState
@@ -68,10 +79,14 @@ namespace ActionRPG
         GameplayMap gameplayMap;
         MapBackground mapBackground;
         Camera camera;
+        IniDocument animationDefinitions;
+        IniDocument characterDefinitions;
         Player player;
         ProjectileSystem projectileSystem;
         InputCommandQueue commandQueue;
         SkillCommandSystem skillCommandSystem;
+        const AssetCatalog& assetCatalog;
+        D2DRenderer& renderer;
         TownClient& townClient;
         DungeonClient& dungeonClient;
         std::unordered_map<std::uint64_t, RemotePlayerState> remotePlayers;

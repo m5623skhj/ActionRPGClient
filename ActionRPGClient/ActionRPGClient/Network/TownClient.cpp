@@ -47,7 +47,8 @@ namespace ActionRPG
         Stop();
     }
 
-    void TownClient::Start(std::string inHost, const std::uint16_t inPort, std::string inPlayerName)
+    void TownClient::Start(std::string inHost, const std::uint16_t inPort,
+        std::string inPlayerName, const std::uint32_t inCharacterId)
     {
         if (started)
         {
@@ -57,6 +58,7 @@ namespace ActionRPG
         host = std::move(inHost);
         port = std::to_string(inPort);
         playerName = std::move(inPlayerName);
+        characterId = inCharacterId;
         networkThread = std::thread([this]() { ioContext.run(); });
         asio::post(strand, [this]() { Connect(); });
     }
@@ -162,7 +164,8 @@ namespace ActionRPG
 
                 socket.set_option(asio::ip::tcp::no_delay(true));
                 connected.store(true);
-                QueuePacket(TownProtocol::Encode(TownProtocol::EnterTownRequest{ playerName }));
+                QueuePacket(TownProtocol::Encode(TownProtocol::EnterTownRequest{
+                    playerName, characterId }));
                 ReadHeader();
             });
         });

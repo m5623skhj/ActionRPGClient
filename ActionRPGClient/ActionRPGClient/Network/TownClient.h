@@ -30,7 +30,8 @@ namespace ActionRPG
         TownClient(const TownClient&) = delete;
         TownClient& operator=(const TownClient&) = delete;
 
-        void Start(std::string inHost, std::uint16_t inPort, std::string inPlayerName);
+        void Start(std::string inHost, std::uint16_t inPort, std::string inPlayerName,
+            std::uint32_t inCharacterId);
         void Stop();
         void SendMovement(const TownProtocol::MoveInput& inInput);
         void RequestDungeon(std::string inZoneId, std::uint32_t inDungeonId);
@@ -59,6 +60,7 @@ namespace ActionRPG
         std::string host;
         std::string port;
         std::string playerName;
+        std::uint32_t characterId{ 1 };
         std::array<std::uint8_t, 4> receiveHeader{};
         std::vector<std::uint8_t> receiveBody;
         std::deque<std::vector<std::uint8_t>> sendQueue;
