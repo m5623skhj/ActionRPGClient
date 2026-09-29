@@ -11,6 +11,7 @@
     <Filter Include="Resources"><UniqueIdentifier>{7E720C9B-EE27-492F-8D86-2AE0EC75E393}</UniqueIdentifier></Filter>
     <Filter Include="Assets"><UniqueIdentifier>{42D11B28-2331-49A9-BE05-E344D43A6053}</UniqueIdentifier></Filter>
     <Filter Include="Documentation"><UniqueIdentifier>{0B92785D-0B95-45F5-A3FA-2BF4414ECFB9}</UniqueIdentifier></Filter>
+    <Filter Include="Options"><UniqueIdentifier>{BD1B83F9-BBA1-4E22-A2E7-B3926C8CE146}</UniqueIdentifier></Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App\Application.cpp"><Filter>App</Filter></ClCompile>
@@ -29,6 +30,7 @@
     <ClCompile Include="Graphics\GraphicsDevice.cpp"><Filter>Graphics</Filter></ClCompile>
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="Network\DungeonClient.cpp"><Filter>Network</Filter></ClCompile>
+    <ClCompile Include="Network\DungeonProtocol.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Network\TownClient.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Network\TownProtocol.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Platform\GameWindow.cpp"><Filter>Platform</Filter></ClCompile>
@@ -55,6 +57,8 @@
     <ClInclude Include="Graphics\GraphicsDevice.h"><Filter>Graphics</Filter></ClInclude>
     <ClInclude Include="Input\InputState.h"><Filter>Input</Filter></ClInclude>
     <ClInclude Include="Network\DungeonClient.h"><Filter>Network</Filter></ClInclude>
+    <ClInclude Include="Network\DungeonProtocol.h"><Filter>Network</Filter></ClInclude>
+    <ClInclude Include="Network\RudpPrerequisites.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Network\TownClient.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Network\TownProtocol.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Platform\GameWindow.h"><Filter>Platform</Filter></ClInclude>
@@ -72,5 +76,6 @@
     <None Include="..\Assets\Images\Characters\player_idle.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_run.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_shoot.png"><Filter>Assets</Filter></None>
+    <None Include="ClientOptionFile\CoreOption.txt"><Filter>Options</Filter></None>
   </ItemGroup>
 </Project>

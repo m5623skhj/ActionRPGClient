@@ -3,19 +3,35 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 class IPacket;
 
 namespace ActionRPG
 {
-    struct DungeonPacket
+    struct DungeonChallengeEvent
     {
-        bool reliable{};
-        std::vector<std::uint8_t> bytes;
+        std::uint64_t challenge{};
     };
 
-    // Owns the RUDP connection. Start is called when entering a dungeon.
+    struct DungeonAuthResultEvent
+    {
+        bool succeeded{};
+    };
+
+    enum class DungeonConnectionState
+    {
+        Stopped,
+        Connecting,
+        Connected,
+        Failed
+    };
+
+    using DungeonEvent = std::variant<DungeonChallengeEvent, DungeonAuthResultEvent>;
+
+    // Owns the RUDP connection. Start returns immediately while the TLS session
+    // broker exchange and RUDP connection are performed on a worker thread.
     class DungeonClient final
     {
     public:
@@ -25,12 +41,12 @@ namespace ActionRPG
         DungeonClient(const DungeonClient&) = delete;
         DungeonClient& operator=(const DungeonClient&) = delete;
 
-        bool Start(const std::wstring& inCoreOptions, const std::wstring& inBrokerOptions);
+        bool Start(std::string inSessionBrokerAddress, std::uint16_t inSessionBrokerPort);
         void Stop();
-        [[nodiscard]] bool IsConnected() const;
+        [[nodiscard]] DungeonConnectionState GetConnectionState() const;
         void SendReliable(IPacket& inPacket);
         bool SendUnreliable(IPacket& inPacket);
-        [[nodiscard]] std::vector<DungeonPacket> ConsumePackets();
+        [[nodiscard]] std::vector<DungeonEvent> ConsumeEvents();
 
     private:
         class Impl;

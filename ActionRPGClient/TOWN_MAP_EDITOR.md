@@ -1,7 +1,7 @@
 # Town Map Editor 사용 설명서
 
 Town Map Editor는 여러 장의 마을 배경 이미지를 월드에 배치하고, TownServer가 사용하는
-이동 가능 영역과 진입 금지 영역, 플레이어 시작 위치를 작성하는 도구입니다.
+이동 가능·진입 금지 영역, 시작 위치, 맵 이동 및 던전 선택 진입 영역을 작성하는 도구입니다.
 
 ## 1. 빌드
 
@@ -51,7 +51,9 @@ artifacts/bin/x64/Debug/TownMapEditor.exe `
 3. 필요한 경우 `Blocked` 모드에서 이동 가능 영역 내부의 장애물을 작성합니다.
 4. `Spawn` 모드에서 플레이어 시작 위치를 지정합니다.
 5. `Visible Area` 모드에서 실제 게임 화면에 표시할 전체 영역을 지정합니다.
-6. `Save` 또는 `Save As...`로 TownServer용 JSON 파일을 저장합니다.
+6. 맵 이동 도착지는 `Entry Point`로 배치합니다.
+7. `Map Transfer` 또는 `Dungeon Zone`으로 진입 영역과 동작을 지정합니다.
+8. `Save` 또는 `Save As...`로 TownServer용 JSON 파일을 저장합니다.
 
 ## 4. 이미지 추가와 배치
 
@@ -173,6 +175,14 @@ Blocked, Spawn은 표시 영역 안에 있어야 합니다. 표시 영역은 서
 
 `Fit All`은 편집 화면의 카메라만 조정하며 지정한 표시 영역은 변경하지 않습니다.
 
+### 맵 이동과 던전 진입 영역
+
+- `E Entry Point`: `Entry point id`를 입력하고 캔버스를 클릭해 다른 맵에서 도착할 위치를 배치합니다.
+- `M Map Transfer`: `Transition zone id`, `Target map id`, `Target entry`를 입력하고 다각형을 그린 뒤 `Enter`를 누릅니다.
+- `D Dungeon Zone`: `Transition zone id`와 `Dungeon group`을 입력하고 다각형을 그린 뒤 `Enter`를 누릅니다. 그룹 ID는 `DungeonCatalog.json`의 `groupId`와 일치해야 합니다.
+
+서버는 플레이어가 영역 밖에서 안으로 들어올 때만 동작을 발생시킵니다. 도착지가 다른 진입 영역 안에 있더라도 도착 직후의 즉시 재발동은 억제되며, 그 영역을 벗어난 뒤 다시 진입해야 발동합니다. `Clear Mode Areas`는 현재 모드의 모든 Entry Point 또는 해당 종류의 Transition Zone을 삭제합니다.
+
 ## 10. 저장
 
 `S Save` 버튼 또는 `S` 키를 누르면 현재 맵 JSON 경로에 저장합니다.
@@ -208,7 +218,10 @@ Blocked, Spawn은 표시 영역 안에 있어야 합니다. 표시 영역은 서
 | 진입 금지 영역 | `B Blocked`, `B` | 장애물 다각형 작성 |
 | 시작 위치 | `P Spawn`, `P`, 우클릭 | 플레이어 시작 위치 지정 |
 | 전체 표시 영역 | `R Visible Area`, `R` | 드래그한 사각형을 표시 및 최외곽 이동 영역으로 지정 |
-| 현재 종류 영역 삭제 | `Clear Mode Areas` | 현재 W/B 모드의 완성된 영역 전체 삭제 |
+| 맵 도착지 | `E Entry Point`, `E` | 이동 후 플레이어가 나타날 위치 배치 |
+| 맵 이동 영역 | `M Map Transfer`, `M` | 대상 맵과 Entry Point로 이동하는 다각형 작성 |
+| 던전 선택 영역 | `D Dungeon Zone`, `D` | 지정한 던전 그룹 선택창을 여는 다각형 작성 |
+| 현재 종류 영역 삭제 | `Clear Mode Areas` | 현재 모드의 완성된 영역 또는 지점 전체 삭제 |
 | 전체 보기 | `F Fit All`, `F` | 전체 맵이 보이도록 카메라 조정 |
 | 저장 | `S Save`, `S` | 맵 JSON 저장 |
 | 다른 이름으로 저장 | `Shift+S Save As...`, `Shift+S` | 새 파일 경로에 저장하고 현재 저장 대상으로 지정 |
@@ -225,16 +238,17 @@ Blocked, Spawn은 표시 영역 안에 있어야 합니다. 표시 영역은 서
 - 전체 다각형 꼭짓점: 최대 32,768개
 - 이미지 에셋 상대 경로: UTF-8 기준 최대 240바이트
 - 지원 이미지: PNG, JPG, JPEG, BMP
-- 지원 맵 형식: 버전 1 읽기, 버전 2 읽기 및 저장
+- Entry Point: 최대 256개
+- Transition Zone: 최대 256개
+- 지원 맵 형식: 버전 1·2·3 읽기, 버전 3 저장
 
-버전 1 맵을 불러온 뒤 저장하면 버전 2 형식으로 저장됩니다.
+기존 맵을 불러온 뒤 저장하면 버전 3 형식으로 저장됩니다.
 기존 `sectorSize` 맵을 불러와 저장하면 기본 1280×720 직사각형 섹터의
 `sectorWidth`와 `sectorHeight` 형식으로 저장됩니다.
 
 ## 13. 서버와 클라이언트에 반영
 
-TownServer의 실제 맵 파일을 직접 열어 저장했다면 서버를 다시 시작해야 변경된 이동 영역이
-반영됩니다.
+TownServer의 실제 맵 파일을 직접 열어 저장했다면 서버를 다시 시작해야 변경된 영역이 반영됩니다. TownServer는 `Data`의 `TownMap*.json`을 모두 읽으며, 맵 이동 대상 `mapId`와 `Entry Point`가 실제로 존재하는지 시작 시 검증합니다.
 
 ```text
 ActionRPGServer/ActionRPGServer/TownServer/Data/TownMap.json

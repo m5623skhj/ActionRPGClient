@@ -13,7 +13,8 @@ namespace ActionRPG
         ActionZ,
         ActionC,
         ActionX,
-        ActionV
+        ActionV,
+        ConfirmSelection
     };
 
     struct InputState

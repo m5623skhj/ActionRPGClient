@@ -14,7 +14,7 @@ namespace ActionRPG
         , graphicsDevice(window.GetHandle(), window.GetClientWidth(), window.GetClientHeight())
         , renderer(graphicsDevice)
         , game(static_cast<float>(window.GetClientWidth()), static_cast<float>(window.GetClientHeight()),
-            assetCatalog, renderer, townClient)
+            assetCatalog, renderer, townClient, dungeonClient)
     {
         townClient.Start("127.0.0.1", 7777, "Player-" + std::to_string(GetCurrentProcessId()));
     }

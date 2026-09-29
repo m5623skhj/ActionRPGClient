@@ -92,6 +92,14 @@ namespace ActionRPG
             inStrokeWidth);
     }
 
+    void D2DRenderer::DrawLine(const float inStartX, const float inStartY, const float inEndX,
+        const float inEndY, const D2D1_COLOR_F& inColor, const float inStrokeWidth)
+    {
+        solidColorBrush->SetColor(inColor);
+        d2dContext->DrawLine(D2D1::Point2F(inStartX, inStartY), D2D1::Point2F(inEndX, inEndY),
+            solidColorBrush.Get(), inStrokeWidth);
+    }
+
     void D2DRenderer::FillEllipse(const float inCenterX, const float inCenterY, const float inRadiusX,
         const float inRadiusY, const D2D1_COLOR_F& inColor)
     {

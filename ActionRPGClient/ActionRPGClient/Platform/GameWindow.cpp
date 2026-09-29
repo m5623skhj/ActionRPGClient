@@ -222,6 +222,9 @@ namespace ActionRPG
         case 'V':
             pendingPressedKeys.push_back(InputKey::ActionV);
             break;
+        case VK_RETURN:
+            pendingPressedKeys.push_back(InputKey::ConfirmSelection);
+            break;
         default:
             break;
         }

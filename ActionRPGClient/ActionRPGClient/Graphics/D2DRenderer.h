@@ -27,6 +27,8 @@ namespace ActionRPG
             const D2D1_COLOR_F& inColor);
         void DrawRectangle(float inLeft, float inTop, float inRight, float inBottom,
             const D2D1_COLOR_F& inColor, float inStrokeWidth = 1.0f);
+        void DrawLine(float inStartX, float inStartY, float inEndX, float inEndY,
+            const D2D1_COLOR_F& inColor, float inStrokeWidth = 1.0f);
         void FillEllipse(float inCenterX, float inCenterY, float inRadiusX, float inRadiusY,
             const D2D1_COLOR_F& inColor);
         void PushAxisAlignedClip(const D2D1_RECT_F& inRectangle);

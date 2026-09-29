@@ -1,6 +1,7 @@
 #include "Game/Game.h"
 
 #include "Graphics/D2DRenderer.h"
+#include "Network/DungeonClient.h"
 #include "Network/TownClient.h"
 #include "Resources/AssetCatalog.h"
 
@@ -9,8 +10,8 @@
 namespace ActionRPG
 {
     Game::Game(const float inViewportWidth, const float inViewportHeight, const AssetCatalog& inAssetCatalog,
-        D2DRenderer& inRenderer, TownClient& inTownClient)
-        : world(inViewportWidth, inViewportHeight, inAssetCatalog, inRenderer, inTownClient)
+        D2DRenderer& inRenderer, TownClient& inTownClient, DungeonClient& inDungeonClient)
+        : world(inViewportWidth, inViewportHeight, inAssetCatalog, inRenderer, inTownClient, inDungeonClient)
     {
     }
 
@@ -23,12 +24,19 @@ namespace ActionRPG
     {
         world.Render(inRenderer);
         inRenderer.DrawText(
-            L"Move: Arrow Keys    Run: Double Tap    Jump: C    Shoot: X    Throw Rock: V    Skill: Left/Right x2 + Z",
+            L"Move: Arrow Keys    Run: Double Tap    Jump: C    Shoot: X    Rock: V    Skill: Left/Right x2 + Z",
             20.0f,
             16.0f,
             1080.0f,
             48.0f,
             D2D1::ColorF(0.92f, 0.95f, 1.0f));
+        inRenderer.DrawText(
+            world.GetDungeonStatusText(),
+            20.0f,
+            50.0f,
+            500.0f,
+            32.0f,
+            D2D1::ColorF(0.65f, 0.82f, 1.0f));
     }
 
     void Game::Resize(const float inViewportWidth, const float inViewportHeight)

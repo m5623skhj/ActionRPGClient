@@ -96,6 +96,32 @@ namespace ActionRPG
         });
     }
 
+    void TownClient::RequestDungeon(std::string inZoneId, const std::uint32_t inDungeonId)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::EnterDungeonRequest{ std::move(inZoneId), inDungeonId })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
+    void TownClient::ConfirmDungeonJoin(
+        const std::uint64_t inRoomId,
+        const std::uint64_t inChallenge)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::ConfirmDungeonJoin{ inRoomId, inChallenge })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
     std::vector<TownEvent> TownClient::ConsumeEvents()
     {
         std::scoped_lock lock(eventMutex);
@@ -220,6 +246,18 @@ namespace ActionRPG
             break;
         case TownProtocol::PacketType::PlayerDisappear:
             if (auto packet = TownProtocol::DecodePlayerDisappear(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::EnterDungeonResponse:
+            if (auto packet = TownProtocol::DecodeEnterDungeonResponse(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::MapChanged:
+            if (auto packet = TownProtocol::DecodeMapChanged(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::DungeonSelectionOpen:
+            if (auto packet = TownProtocol::DecodeDungeonSelectionOpen(receiveBody)) PushEvent(std::move(*packet));
             else HandleDisconnect();
             break;
         default:

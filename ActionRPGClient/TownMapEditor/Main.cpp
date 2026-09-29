@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -26,7 +27,7 @@
 
 namespace
 {
-    constexpr int PANEL_WIDTH = 230;
+    constexpr int PANEL_WIDTH = 300;
     constexpr float MIN_ZOOM = 0.02f;
     constexpr float MAX_ZOOM = 16.0f;
 
@@ -46,13 +47,30 @@ namespace
         MODE_BLOCKED,
         MODE_SPAWN,
         MODE_VISIBLE_AREA,
+        MODE_ENTRY_POINT,
+        MODE_MAP_TRANSFER,
+        MODE_DUNGEON_ZONE,
+        ENTRY_POINT_ID,
+        TRANSITION_ZONE_ID,
+        TARGET_MAP_ID,
+        TARGET_VALUE,
         CLEAR_AREAS,
         FIT_MAP,
         SAVE_MAP,
         SAVE_MAP_AS
     };
 
-    enum class EditMode { Select, Walkable, Blocked, Spawn, VisibleArea };
+    enum class EditMode
+    {
+        Select,
+        Walkable,
+        Blocked,
+        Spawn,
+        VisibleArea,
+        EntryPoint,
+        MapTransfer,
+        DungeonZone
+    };
     enum class ImagePlacement { AtPosition, Right, Bottom, Top, Left };
     enum class SpawnValidation
     {
@@ -79,6 +97,28 @@ namespace
 
     struct Bounds { float left{}; float top{}; float right{}; float bottom{}; };
 
+    struct EntryPoint
+    {
+        std::string id;
+        FloatPoint position;
+    };
+
+    enum class TransitionActionType
+    {
+        MapTransfer,
+        DungeonSelection
+    };
+
+    struct TransitionZone
+    {
+        std::string id;
+        Polygon polygon;
+        TransitionActionType actionType = TransitionActionType::MapTransfer;
+        std::string targetMapId;
+        std::string targetEntryPointId;
+        std::string dungeonGroupId;
+    };
+
     struct TownMapDocument
     {
         std::string mapId = "town_01";
@@ -88,6 +128,8 @@ namespace
             { { 0.0f, 360.0f }, { 2400.0f, 360.0f }, { 2400.0f, 1400.0f }, { 0.0f, 1400.0f } }
         };
         std::vector<Polygon> blockedPolygons;
+        std::vector<EntryPoint> entryPoints;
+        std::vector<TransitionZone> transitionZones;
         FloatPoint spawn{ 640.0f, 640.0f };
         float sectorWidth = 1280.0f;
         float sectorHeight = 720.0f;
@@ -213,6 +255,7 @@ namespace
         void DrawImages(Gdiplus::Graphics& inGraphics, int inCanvasWidth, int inCanvasHeight);
         void DrawPolygons(Gdiplus::Graphics& inGraphics, const std::vector<Polygon>& inPolygons,
             Gdiplus::Color inFill, Gdiplus::Color inOutline) const;
+        void DrawTransitions(Gdiplus::Graphics& inGraphics) const;
         void DrawOverlays(Gdiplus::Graphics& inGraphics, int inCanvasWidth, int inCanvasHeight) const;
         [[nodiscard]] Gdiplus::Image* GetCachedImage(const std::string& inAsset);
         void TrimImageCache();
@@ -224,6 +267,7 @@ namespace
         [[nodiscard]] Gdiplus::RectF WorldRectangle(float inX, float inY, float inWidth, float inHeight) const;
         [[nodiscard]] static bool IsCanvasPoint(HWND inWindow, int inX, int inY);
         [[nodiscard]] static float ReadPosition(HWND inEdit);
+        [[nodiscard]] static std::string ReadText(HWND inEdit);
         [[nodiscard]] static std::vector<Polygon> ReadPolygons(const nlohmann::json& inPolygons);
         [[nodiscard]] static nlohmann::json WritePolygons(const std::vector<Polygon>& inPolygons);
 
@@ -247,6 +291,11 @@ namespace
         HWND positionY{};
         HWND xLabel{};
         HWND yLabel{};
+        HWND entryPointId{};
+        HWND transitionZoneId{};
+        HWND targetMapId{};
+        HWND targetValue{};
+        std::vector<HWND> labels;
         std::vector<HWND> buttons;
         std::unordered_map<std::string, CachedImage> imageCache;
         std::uint64_t frameNumber{};
@@ -314,7 +363,7 @@ namespace
                 { right, bottom }, { left, bottom } } };
             return;
         }
-        if (version != 2) throw std::runtime_error("Unsupported map version.");
+        if (version != 2 && version != 3) throw std::runtime_error("Unsupported map version.");
 
         document.world = {
             input.at("world").at("left").get<float>(), input.at("world").at("top").get<float>(),
@@ -331,6 +380,45 @@ namespace
         }
         document.walkablePolygons = ReadPolygons(input.at("walkablePolygons"));
         document.blockedPolygons = ReadPolygons(input.at("blockedPolygons"));
+        document.entryPoints.clear();
+        document.transitionZones.clear();
+        if (version >= 3)
+        {
+            for (const nlohmann::json& inputEntryPoint : input.at("entryPoints"))
+            {
+                document.entryPoints.push_back(EntryPoint{
+                    inputEntryPoint.at("id").get<std::string>(),
+                    { inputEntryPoint.at("position").at("x").get<float>(),
+                        inputEntryPoint.at("position").at("y").get<float>() }
+                });
+            }
+            for (const nlohmann::json& inputZone : input.at("transitionZones"))
+            {
+                TransitionZone zone;
+                zone.id = inputZone.at("id").get<std::string>();
+                nlohmann::json polygonCollection = nlohmann::json::array();
+                polygonCollection.push_back(inputZone.at("polygon"));
+                zone.polygon = ReadPolygons(polygonCollection).front();
+                const nlohmann::json& action = inputZone.at("action");
+                const std::string type = action.at("type").get<std::string>();
+                if (type == "MapTransfer")
+                {
+                    zone.actionType = TransitionActionType::MapTransfer;
+                    zone.targetMapId = action.at("targetMapId").get<std::string>();
+                    zone.targetEntryPointId = action.at("targetEntryPointId").get<std::string>();
+                }
+                else if (type == "DungeonSelection")
+                {
+                    zone.actionType = TransitionActionType::DungeonSelection;
+                    zone.dungeonGroupId = action.at("dungeonGroupId").get<std::string>();
+                }
+                else
+                {
+                    throw std::runtime_error("Unknown transition action type.");
+                }
+                document.transitionZones.push_back(std::move(zone));
+            }
+        }
     }
 
     void Editor::Open(HWND inWindow)
@@ -387,6 +475,18 @@ namespace
                 L"Town Map Editor", MB_OK | MB_ICONWARNING);
             return false;
         }
+        if (document.mapId.empty() || document.mapId.size() > 64)
+        {
+            MessageBoxW(inWindow, L"Map id must contain between 1 and 64 UTF-8 bytes.",
+                L"Town Map Editor", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        if (document.entryPoints.size() > 256 || document.transitionZones.size() > 256)
+        {
+            MessageBoxW(inWindow, L"A map supports at most 256 entry points and 256 transition zones.",
+                L"Town Map Editor", MB_OK | MB_ICONWARNING);
+            return false;
+        }
         if (document.walkablePolygons.empty())
         {
             MessageBoxW(inWindow, L"At least one completed walkable polygon is required.",
@@ -406,6 +506,60 @@ namespace
                             L"Town Map Editor", MB_OK | MB_ICONWARNING);
                         return false;
                     }
+                }
+            }
+        }
+
+        std::unordered_set<std::string> entryPointIds;
+        for (const EntryPoint& entryPoint : document.entryPoints)
+        {
+            const bool insideWalkable = std::ranges::any_of(document.walkablePolygons,
+                [&entryPoint](const Polygon& inPolygon)
+                {
+                    return IsPointInPolygon(entryPoint.position, inPolygon);
+                });
+            const bool insideBlocked = std::ranges::any_of(document.blockedPolygons,
+                [&entryPoint](const Polygon& inPolygon)
+                {
+                    return IsPointInPolygon(entryPoint.position, inPolygon);
+                });
+            if (entryPoint.id.empty() || entryPoint.id.size() > 64
+                || !entryPointIds.insert(entryPoint.id).second || !insideWalkable || insideBlocked)
+            {
+                MessageBoxW(inWindow, L"Entry point ids must be unique and positions must be walkable.",
+                    L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+        }
+
+        std::unordered_set<std::string> transitionZoneIds;
+        for (const TransitionZone& zone : document.transitionZones)
+        {
+            if (zone.id.empty() || zone.id.size() > 64
+                || !transitionZoneIds.insert(zone.id).second || zone.polygon.size() < 3)
+            {
+                MessageBoxW(inWindow, L"Transition zone ids must be unique and each zone needs three points.",
+                    L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+            if ((zone.actionType == TransitionActionType::MapTransfer
+                    && (zone.targetMapId.empty() || zone.targetMapId.size() > 64
+                        || zone.targetEntryPointId.empty() || zone.targetEntryPointId.size() > 64))
+                || (zone.actionType == TransitionActionType::DungeonSelection
+                    && (zone.dungeonGroupId.empty() || zone.dungeonGroupId.size() > 64)))
+            {
+                MessageBoxW(inWindow, L"Transition zone target fields are incomplete.",
+                    L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+            for (const FloatPoint point : zone.polygon)
+            {
+                if (point.x < document.world.left || point.x > document.world.right
+                    || point.y < document.world.top || point.y > document.world.bottom)
+                {
+                    MessageBoxW(inWindow, L"Transition zone vertices must be inside the visible area.",
+                        L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                    return false;
                 }
             }
         }
@@ -444,6 +598,8 @@ namespace
         std::size_t totalVertexCount{};
         for (const auto* polygons : { &document.walkablePolygons, &document.blockedPolygons })
             for (const Polygon& polygon : *polygons) totalVertexCount += polygon.size();
+        for (const TransitionZone& zone : document.transitionZones)
+            totalVertexCount += zone.polygon.size();
         if (totalVertexCount > 32768)
         {
             MessageBoxW(inWindow, L"The map exceeds the 32768 polygon vertex limit.",
@@ -452,12 +608,14 @@ namespace
         }
 
         nlohmann::json output{
-            { "version", 2 }, { "mapId", document.mapId },
+            { "version", 3 }, { "mapId", document.mapId },
             { "world", { { "left", document.world.left }, { "top", document.world.top },
                 { "right", document.world.right }, { "bottom", document.world.bottom } } },
             { "images", nlohmann::json::array() },
             { "walkablePolygons", WritePolygons(document.walkablePolygons) },
             { "blockedPolygons", WritePolygons(document.blockedPolygons) },
+            { "entryPoints", nlohmann::json::array() },
+            { "transitionZones", nlohmann::json::array() },
             { "spawn", { { "x", document.spawn.x }, { "y", document.spawn.y } } },
             { "sectorWidth", document.sectorWidth }, { "sectorHeight", document.sectorHeight },
             { "walkSpeed", document.walkSpeed },
@@ -467,6 +625,35 @@ namespace
         {
             output["images"].push_back({ { "asset", image.asset }, { "x", image.x },
                 { "y", image.y }, { "width", image.width }, { "height", image.height } });
+        }
+        for (const EntryPoint& entryPoint : document.entryPoints)
+        {
+            output["entryPoints"].push_back({
+                { "id", entryPoint.id },
+                { "position", { { "x", entryPoint.position.x }, { "y", entryPoint.position.y } } }
+            });
+        }
+        for (const TransitionZone& zone : document.transitionZones)
+        {
+            nlohmann::json polygon = nlohmann::json::array();
+            for (const FloatPoint point : zone.polygon)
+            {
+                polygon.push_back({ { "x", point.x }, { "y", point.y } });
+            }
+            nlohmann::json action;
+            if (zone.actionType == TransitionActionType::MapTransfer)
+            {
+                action = { { "type", "MapTransfer" }, { "targetMapId", zone.targetMapId },
+                    { "targetEntryPointId", zone.targetEntryPointId } };
+            }
+            else
+            {
+                action = { { "type", "DungeonSelection" },
+                    { "dungeonGroupId", zone.dungeonGroupId } };
+            }
+            output["transitionZones"].push_back({
+                { "id", zone.id }, { "polygon", std::move(polygon) }, { "action", std::move(action) }
+            });
         }
 
         if (!mapPath.parent_path().empty()) std::filesystem::create_directories(mapPath.parent_path());
@@ -536,6 +723,30 @@ namespace
         addButton(L"B  Blocked", MODE_BLOCKED);
         addButton(L"P  Spawn", MODE_SPAWN);
         addButton(L"R  Visible Area", MODE_VISIBLE_AREA);
+        addButton(L"E  Entry Point", MODE_ENTRY_POINT);
+        addButton(L"M  Map Transfer", MODE_MAP_TRANSFER);
+        addButton(L"D  Dungeon Zone", MODE_DUNGEON_ZONE);
+        const auto addLabel = [this, inWindow](const wchar_t* inText)
+        {
+            HWND label = CreateWindowW(L"STATIC", inText, WS_CHILD | WS_VISIBLE,
+                0, 0, 100, 20, inWindow, nullptr, GetModuleHandleW(nullptr), nullptr);
+            labels.push_back(label);
+            return label;
+        };
+        const auto addEdit = [inWindow](const int inId)
+        {
+            return CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 100, 24, inWindow,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(inId)), GetModuleHandleW(nullptr), nullptr);
+        };
+        addLabel(L"Entry point id");
+        entryPointId = addEdit(ENTRY_POINT_ID);
+        addLabel(L"Transition zone id");
+        transitionZoneId = addEdit(TRANSITION_ZONE_ID);
+        addLabel(L"Target map id");
+        targetMapId = addEdit(TARGET_MAP_ID);
+        addLabel(L"Target entry / dungeon group");
+        targetValue = addEdit(TARGET_VALUE);
         addButton(L"Clear Mode Areas", CLEAR_AREAS);
         addButton(L"F  Fit All", FIT_MAP);
         addButton(L"S  Save", SAVE_MAP);
@@ -548,17 +759,35 @@ namespace
         RECT client{};
         GetClientRect(inWindow, &client);
         const int left = std::max(0L, client.right - PANEL_WIDTH) + 12;
-        int y = 18;
-        for (std::size_t index = 0; index < buttons.size(); ++index)
+        for (std::size_t index = 0; index < 6; ++index)
         {
-            if (index == 6) y = 276;
-            MoveWindow(buttons[index], left, y, PANEL_WIDTH - 24, 30, TRUE);
-            y += 36;
+            MoveWindow(buttons[index], left, 12 + static_cast<int>(index) * 30,
+                PANEL_WIDTH - 24, 26, TRUE);
         }
-        MoveWindow(xLabel, left, 241, 16, 22, TRUE);
-        MoveWindow(positionX, left + 18, 238, 78, 25, TRUE);
-        MoveWindow(yLabel, left + 104, 241, 16, 22, TRUE);
-        MoveWindow(positionY, left + 122, 238, 78, 25, TRUE);
+        MoveWindow(xLabel, left, 197, 16, 22, TRUE);
+        MoveWindow(positionX, left + 18, 194, 108, 25, TRUE);
+        MoveWindow(yLabel, left + 136, 197, 16, 22, TRUE);
+        MoveWindow(positionY, left + 154, 194, 108, 25, TRUE);
+        MoveWindow(buttons[6], left, 225, PANEL_WIDTH - 24, 26, TRUE);
+        for (std::size_t index = 7; index <= 14; ++index)
+        {
+            MoveWindow(buttons[index], left, 257 + static_cast<int>(index - 7) * 29,
+                PANEL_WIDTH - 24, 25, TRUE);
+        }
+        for (std::size_t index = 0; index < labels.size(); ++index)
+        {
+            const int fieldTop = 496 + static_cast<int>(index) * 49;
+            MoveWindow(labels[index], left, fieldTop, PANEL_WIDTH - 24, 18, TRUE);
+        }
+        MoveWindow(entryPointId, left, 514, PANEL_WIDTH - 24, 24, TRUE);
+        MoveWindow(transitionZoneId, left, 563, PANEL_WIDTH - 24, 24, TRUE);
+        MoveWindow(targetMapId, left, 612, PANEL_WIDTH - 24, 24, TRUE);
+        MoveWindow(targetValue, left, 661, PANEL_WIDTH - 24, 24, TRUE);
+        for (std::size_t index = 15; index < buttons.size(); ++index)
+        {
+            MoveWindow(buttons[index], left, 696 + static_cast<int>(index - 15) * 30,
+                PANEL_WIDTH - 24, 26, TRUE);
+        }
     }
 
     void Editor::HandleCommand(HWND inWindow, const int inCommand)
@@ -577,9 +806,23 @@ namespace
         case MODE_BLOCKED: SetMode(EditMode::Blocked, inWindow); break;
         case MODE_SPAWN: SetMode(EditMode::Spawn, inWindow); break;
         case MODE_VISIBLE_AREA: SetMode(EditMode::VisibleArea, inWindow); break;
+        case MODE_ENTRY_POINT: SetMode(EditMode::EntryPoint, inWindow); break;
+        case MODE_MAP_TRANSFER: SetMode(EditMode::MapTransfer, inWindow); break;
+        case MODE_DUNGEON_ZONE: SetMode(EditMode::DungeonZone, inWindow); break;
         case CLEAR_AREAS:
             if (mode == EditMode::Walkable) document.walkablePolygons.clear();
             else if (mode == EditMode::Blocked) document.blockedPolygons.clear();
+            else if (mode == EditMode::EntryPoint) document.entryPoints.clear();
+            else if (mode == EditMode::MapTransfer)
+                std::erase_if(document.transitionZones, [](const TransitionZone& inZone)
+                {
+                    return inZone.actionType == TransitionActionType::MapTransfer;
+                });
+            else if (mode == EditMode::DungeonZone)
+                std::erase_if(document.transitionZones, [](const TransitionZone& inZone)
+                {
+                    return inZone.actionType == TransitionActionType::DungeonSelection;
+                });
             workingPolygon.clear();
             InvalidateRect(inWindow, nullptr, FALSE);
             break;
@@ -597,12 +840,21 @@ namespace
             if (inKey == VK_RETURN) ApplyPosition(inWindow);
             return;
         }
+        if (GetFocus() == entryPointId || GetFocus() == transitionZoneId
+            || GetFocus() == targetMapId || GetFocus() == targetValue)
+        {
+            if (inKey == VK_RETURN) SetFocus(inWindow);
+            return;
+        }
         if (inKey == 'O') Open(inWindow);
         else if (inKey == 'V') SetMode(EditMode::Select, inWindow);
         else if (inKey == 'W') SetMode(EditMode::Walkable, inWindow);
         else if (inKey == 'B') SetMode(EditMode::Blocked, inWindow);
         else if (inKey == 'P') SetMode(EditMode::Spawn, inWindow);
         else if (inKey == 'R') SetMode(EditMode::VisibleArea, inWindow);
+        else if (inKey == 'E') SetMode(EditMode::EntryPoint, inWindow);
+        else if (inKey == 'M') SetMode(EditMode::MapTransfer, inWindow);
+        else if (inKey == 'D') SetMode(EditMode::DungeonZone, inWindow);
         else if (inKey == 'F') Fit(inWindow);
         else if (inKey == 'S')
         {
@@ -729,6 +981,18 @@ namespace
         return value;
     }
 
+    std::string Editor::ReadText(HWND inEdit)
+    {
+        const int length = GetWindowTextLengthW(inEdit);
+        std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+        if (length > 0)
+        {
+            GetWindowTextW(inEdit, text.data(), length + 1);
+        }
+        text.resize(static_cast<std::size_t>(length));
+        return WideToUtf8(text);
+    }
+
     void Editor::ApplyPosition(HWND inWindow)
     {
         if (!selectedImage.has_value()) return;
@@ -754,6 +1018,35 @@ namespace
         if (workingPolygon.size() < 3) return;
         if (mode == EditMode::Walkable) document.walkablePolygons.push_back(std::move(workingPolygon));
         else if (mode == EditMode::Blocked) document.blockedPolygons.push_back(std::move(workingPolygon));
+        else if (mode == EditMode::MapTransfer || mode == EditMode::DungeonZone)
+        {
+            TransitionZone zone;
+            zone.id = ReadText(transitionZoneId);
+            zone.polygon = std::move(workingPolygon);
+            if (mode == EditMode::MapTransfer)
+            {
+                zone.actionType = TransitionActionType::MapTransfer;
+                zone.targetMapId = ReadText(targetMapId);
+                zone.targetEntryPointId = ReadText(targetValue);
+            }
+            else
+            {
+                zone.actionType = TransitionActionType::DungeonSelection;
+                zone.dungeonGroupId = ReadText(targetValue);
+            }
+            if (zone.id.empty()
+                || (zone.actionType == TransitionActionType::MapTransfer
+                    && (zone.targetMapId.empty() || zone.targetEntryPointId.empty()))
+                || (zone.actionType == TransitionActionType::DungeonSelection
+                    && zone.dungeonGroupId.empty()))
+            {
+                workingPolygon = std::move(zone.polygon);
+                MessageBoxW(inWindow, L"Fill the transition id and target fields before finishing the zone.",
+                    L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                return;
+            }
+            document.transitionZones.push_back(std::move(zone));
+        }
         workingPolygon.clear();
         InvalidateRect(inWindow, nullptr, FALSE);
     }
@@ -799,6 +1092,10 @@ namespace
         for (const auto* polygons : { &document.walkablePolygons, &document.blockedPolygons })
             for (const Polygon& polygon : *polygons)
                 for (const FloatPoint point : polygon) include(point.x, point.y);
+        for (const TransitionZone& zone : document.transitionZones)
+            for (const FloatPoint point : zone.polygon) include(point.x, point.y);
+        for (const EntryPoint& entryPoint : document.entryPoints)
+            include(entryPoint.position.x, entryPoint.position.y);
         include(document.spawn.x, document.spawn.y);
         if (!initialized) return document.world;
         if (bounds.right - bounds.left < 1.0f) bounds.right = bounds.left + 1.0f;
@@ -880,11 +1177,12 @@ namespace
             Gdiplus::Color(72, 50, 220, 110), Gdiplus::Color(220, 60, 235, 130));
         DrawPolygons(graphics, document.blockedPolygons,
             Gdiplus::Color(90, 230, 55, 65), Gdiplus::Color(230, 250, 80, 80));
+        DrawTransitions(graphics);
         DrawOverlays(graphics, canvasRight, client.bottom);
 
         SetBkMode(buffer, TRANSPARENT);
         SetTextColor(buffer, RGB(235, 240, 248));
-        const std::wstring instructions = L"Middle drag / Space+drag: pan   Wheel: zoom   Enter: close polygon   R: visible area   Backspace: undo";
+        const std::wstring instructions = L"Pan: Middle/Space+drag   Zoom: Wheel   Finish zone: Enter   Entry/Map/Dungeon: E/M/D";
         TextOutW(buffer, 12, 10, instructions.c_str(), static_cast<int>(instructions.size()));
         BitBlt(inDeviceContext, 0, 0, client.right, client.bottom, buffer, 0, 0, SRCCOPY);
         SelectObject(buffer, previousBitmap);
@@ -931,6 +1229,33 @@ namespace
                 inGraphics.FillPolygon(&fill, points.data(), static_cast<INT>(points.size()));
             if (points.size() >= 2)
                 inGraphics.DrawPolygon(&outline, points.data(), static_cast<INT>(points.size()));
+        }
+    }
+
+    void Editor::DrawTransitions(Gdiplus::Graphics& inGraphics) const
+    {
+        for (const TransitionZone& zone : document.transitionZones)
+        {
+            const bool isMapTransfer = zone.actionType == TransitionActionType::MapTransfer;
+            const Gdiplus::Color fillColor = isMapTransfer
+                ? Gdiplus::Color(80, 40, 190, 245)
+                : Gdiplus::Color(90, 245, 175, 45);
+            const Gdiplus::Color outlineColor = isMapTransfer
+                ? Gdiplus::Color(255, 70, 215, 255)
+                : Gdiplus::Color(255, 255, 205, 70);
+            std::vector<Gdiplus::PointF> points;
+            points.reserve(zone.polygon.size());
+            for (const FloatPoint point : zone.polygon)
+            {
+                points.push_back(WorldPoint(point));
+            }
+            if (points.size() >= 3)
+            {
+                Gdiplus::SolidBrush fill(fillColor);
+                Gdiplus::Pen outline(outlineColor, 3.0f);
+                inGraphics.FillPolygon(&fill, points.data(), static_cast<INT>(points.size()));
+                inGraphics.DrawPolygon(&outline, points.data(), static_cast<INT>(points.size()));
+            }
         }
     }
 
@@ -987,6 +1312,18 @@ namespace
             spawnRadiusX * 2.0f, spawnRadiusY * 2.0f);
         inGraphics.DrawEllipse(&spawnOutline, spawn.X - spawnRadiusX, spawn.Y - spawnRadiusY,
             spawnRadiusX * 2.0f, spawnRadiusY * 2.0f);
+
+        for (const EntryPoint& entryPoint : document.entryPoints)
+        {
+            const Gdiplus::PointF point = WorldPoint(entryPoint.position);
+            Gdiplus::SolidBrush entryBrush(Gdiplus::Color(190, 170, 95, 255));
+            Gdiplus::Pen entryOutline(Gdiplus::Color(255, 225, 190, 255), 2.0f);
+            const float radius = std::max(5.0f, 14.0f * zoom);
+            inGraphics.FillEllipse(&entryBrush, point.X - radius, point.Y - radius,
+                radius * 2.0f, radius * 2.0f);
+            inGraphics.DrawEllipse(&entryOutline, point.X - radius, point.Y - radius,
+                radius * 2.0f, radius * 2.0f);
+        }
 
         if (selectedImage.has_value())
         {
@@ -1102,6 +1439,28 @@ namespace
             workingVisibleArea = Bounds{ world.x, world.y, world.x, world.y };
             draggingVisibleArea = true;
             SetCapture(inWindow);
+        }
+        else if (mode == EditMode::EntryPoint)
+        {
+            const std::string id = ReadText(entryPointId);
+            if (id.empty())
+            {
+                MessageBoxW(inWindow, L"Enter an entry point id before placing it.",
+                    L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                return;
+            }
+            const bool duplicate = std::ranges::any_of(document.entryPoints,
+                [&id](const EntryPoint& inEntryPoint)
+                {
+                    return inEntryPoint.id == id;
+                });
+            if (duplicate)
+            {
+                MessageBoxW(inWindow, L"Entry point ids must be unique.",
+                    L"Town Map Editor", MB_OK | MB_ICONWARNING);
+                return;
+            }
+            document.entryPoints.push_back(EntryPoint{ id, world });
         }
         else
         {
