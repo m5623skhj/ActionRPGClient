@@ -21,6 +21,11 @@ namespace ActionRPG
     {
     public:
         void Update(const InputState& inInput, double inCurrentTimeSeconds);
+        void Reset() noexcept
+        {
+            runningDirection = RunDirection::None;
+            lastPressedTimes.fill(-1000.0);
+        }
 
         [[nodiscard]] bool IsRunning() const { return runningDirection != RunDirection::None; }
 

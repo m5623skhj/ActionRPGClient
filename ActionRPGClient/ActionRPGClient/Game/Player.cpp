@@ -53,7 +53,14 @@ namespace ActionRPG
     {
         const Vector2 previousGroundPosition = groundPosition;
         movementTimeSeconds += inDeltaSeconds;
-        runState.Update(inInput, movementTimeSeconds);
+        if (runningEnabled)
+        {
+            runState.Update(inInput, movementTimeSeconds);
+        }
+        else
+        {
+            runState.Reset();
+        }
 
         Vector2 direction{
             static_cast<float>(inInput.moveRight) - static_cast<float>(inInput.moveLeft),

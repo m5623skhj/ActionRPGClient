@@ -24,7 +24,7 @@ namespace ActionRPG
     {
         world.Render(inRenderer);
         inRenderer.DrawText(
-            L"Move: Arrow Keys    Run: Double Tap    Jump: C    Shoot: X    Rock: V    Skill: Left/Right x2 + Z",
+            L"Move: Arrow Keys    Jump: C    Shoot: X    Rock: V    Skill: Left/Right x2 + Z",
             20.0f,
             16.0f,
             1080.0f,
