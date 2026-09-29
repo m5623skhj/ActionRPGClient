@@ -8,6 +8,7 @@
 #include <d2d1_1helper.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace ActionRPG
@@ -39,6 +40,13 @@ namespace ActionRPG
             return;
         }
 
+        // Keep every tile on the same pixel grid while the camera moves through subpixel positions.
+        const Vector2 screenOrigin = inCamera.WorldToScreen({ 0.0f, 0.0f });
+        const Vector2 pixelAlignmentOffset{
+            std::round(screenOrigin.x) - screenOrigin.x,
+            std::round(screenOrigin.y) - screenOrigin.y
+        };
+
         for (const TownProtocol::MapImage& image : images)
         {
             const float clippedLeft = std::max(image.x, worldLeft);
@@ -50,8 +58,16 @@ namespace ActionRPG
                 continue;
             }
 
-            const Vector2 topLeft = inCamera.WorldToScreen({ clippedLeft, clippedTop });
-            const Vector2 bottomRight = inCamera.WorldToScreen({ clippedRight, clippedBottom });
+            const Vector2 unalignedTopLeft = inCamera.WorldToScreen({ clippedLeft, clippedTop });
+            const Vector2 unalignedBottomRight = inCamera.WorldToScreen({ clippedRight, clippedBottom });
+            const Vector2 topLeft{
+                unalignedTopLeft.x + pixelAlignmentOffset.x,
+                unalignedTopLeft.y + pixelAlignmentOffset.y
+            };
+            const Vector2 bottomRight{
+                unalignedBottomRight.x + pixelAlignmentOffset.x,
+                unalignedBottomRight.y + pixelAlignmentOffset.y
+            };
             if (bottomRight.x <= 0.0f || bottomRight.y <= 0.0f
                 || topLeft.x >= inCamera.GetViewportWidth() || topLeft.y >= inCamera.GetViewportHeight())
             {
