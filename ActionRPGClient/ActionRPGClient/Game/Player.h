@@ -68,6 +68,7 @@ namespace ActionRPG
         std::optional<SkillEffectDefinition> activeSkillEffect;
         double movementTimeSeconds{};
         bool facingLeft{};
+        bool isMoving{};
         bool isAttacking{};
         bool attackProjectileQueued{};
         bool runningEnabled = true;
@@ -77,6 +78,7 @@ namespace ActionRPG
         RunState runState;
         IniDocument animationDefinitions;
         SpriteAnimation idleAnimation;
+        SpriteAnimation walkAnimation;
         SpriteAnimation runAnimation;
         SpriteAnimation attackAnimation;
         std::deque<PlayerProjectileRequest> pendingProjectileRequests;

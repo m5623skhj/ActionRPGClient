@@ -38,6 +38,7 @@ namespace ActionRPG
         : groundPosition(inInitialPosition)
         , animationDefinitions(inAssetCatalog.GetDataPath("Animations"))
         , idleAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerIdle")
+        , walkAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerWalk")
         , runAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerRun")
         , attackAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerShoot")
     {
@@ -86,12 +87,20 @@ namespace ActionRPG
             }
         }
 
-        if (!isAttacking && IsRunning() && lengthSquared > 0.0f)
+        isMoving = !isAttacking && lengthSquared > 0.0f;
+        if (isMoving && IsRunning())
         {
             runAnimation.Update(inDeltaSeconds);
+            walkAnimation.Reset();
+        }
+        else if (isMoving)
+        {
+            walkAnimation.Update(inDeltaSeconds);
+            runAnimation.Reset();
         }
         else
         {
+            walkAnimation.Reset();
             runAnimation.Reset();
         }
 
@@ -230,9 +239,13 @@ namespace ActionRPG
         {
             attackAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
         }
-        else if (runState.IsRunning())
+        else if (isMoving && IsRunning())
         {
             runAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+        }
+        else if (isMoving)
+        {
+            walkAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
         }
         else
         {
