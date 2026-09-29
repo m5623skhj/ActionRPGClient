@@ -54,7 +54,7 @@ namespace ActionRPG
             Entered
         };
 
-        void ProcessNetworkEvents();
+        void ProcessNetworkEvents(const InputState& inInput);
         void ProcessDungeonEvents();
         void UpdateDungeonSelection(const InputState& inInput);
         void RequestDungeon(std::uint32_t inDungeonId);

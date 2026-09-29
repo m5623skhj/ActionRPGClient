@@ -59,7 +59,7 @@ namespace ActionRPG
 
     void GameWorld::Update(const float inDeltaSeconds, const InputState& inInput)
     {
-        ProcessNetworkEvents();
+        ProcessNetworkEvents(inInput);
         ProcessDungeonEvents();
         UpdateDungeonSelection(inInput);
 
@@ -153,11 +153,11 @@ namespace ActionRPG
         }
     }
 
-    void GameWorld::ProcessNetworkEvents()
+    void GameWorld::ProcessNetworkEvents(const InputState& inInput)
     {
         for (TownEvent& event : townClient.ConsumeEvents())
         {
-            std::visit([this](auto& inEvent)
+            std::visit([this, &inInput](auto& inEvent)
             {
                 using EventType = std::decay_t<decltype(inEvent)>;
                 if constexpr (std::is_same_v<EventType, TownProtocol::EnterTownResponse>)
@@ -183,7 +183,13 @@ namespace ActionRPG
                 {
                     if (inEvent.playerId == localPlayerId)
                     {
-                        if (inEvent.lastProcessedInput == movementSequence)
+                        const std::int8_t currentDirectionX = static_cast<std::int8_t>(
+                            static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
+                        const std::int8_t currentDirectionY = static_cast<std::int8_t>(
+                            static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
+                        const bool inputMatchesSentState = currentDirectionX == lastSentDirectionX
+                            && currentDirectionY == lastSentDirectionY;
+                        if (inputMatchesSentState && inEvent.lastProcessedInput == movementSequence)
                         {
                             player.ReconcileGroundPosition(
                                 Vector2{ inEvent.position.x, inEvent.position.y });
