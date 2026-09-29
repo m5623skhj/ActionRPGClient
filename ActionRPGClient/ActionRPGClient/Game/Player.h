@@ -47,7 +47,7 @@ namespace ActionRPG
         [[nodiscard]] bool IsRunning() const { return runningEnabled && runState.IsRunning(); }
         void SetGroundPosition(Vector2 inPosition) { groundPosition = inPosition; }
         void SetRunningEnabled(const bool inEnabled) { runningEnabled = inEnabled; }
-        void ReconcileGroundPosition(Vector2 inAuthoritativePosition, bool inForceCorrection = false);
+        void ReconcileGroundPosition(Vector2 inAuthoritativePosition);
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
 
     private:

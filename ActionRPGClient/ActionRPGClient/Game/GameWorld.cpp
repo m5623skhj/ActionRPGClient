@@ -183,10 +183,11 @@ namespace ActionRPG
                 {
                     if (inEvent.playerId == localPlayerId)
                     {
-                        const bool isAuthoritativeStopped = inEvent.velocity.x == 0.0f
-                            && inEvent.velocity.y == 0.0f;
-                        player.ReconcileGroundPosition(
-                            Vector2{ inEvent.position.x, inEvent.position.y }, isAuthoritativeStopped);
+                        if (inEvent.lastProcessedInput == movementSequence)
+                        {
+                            player.ReconcileGroundPosition(
+                                Vector2{ inEvent.position.x, inEvent.position.y });
+                        }
                     }
                     else if (auto iterator = remotePlayers.find(inEvent.playerId); iterator != remotePlayers.end())
                     {

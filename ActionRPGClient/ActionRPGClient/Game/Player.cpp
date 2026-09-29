@@ -149,12 +149,21 @@ namespace ActionRPG
         skillEffectRemainingSeconds = inEffect.durationSeconds;
     }
 
-    void Player::ReconcileGroundPosition(const Vector2 inAuthoritativePosition, const bool inForceCorrection)
+    void Player::ReconcileGroundPosition(const Vector2 inAuthoritativePosition)
     {
         const float differenceX = inAuthoritativePosition.x - groundPosition.x;
         const float differenceY = inAuthoritativePosition.y - groundPosition.y;
         const float distanceSquared = differenceX * differenceX + differenceY * differenceY;
-        if (inForceCorrection || distanceSquared > 200.0f * 200.0f)
+
+        // A 20 Hz server tick can leave the local prediction about 14 pixels ahead at walking speed.
+        constexpr float CORRECTION_DEAD_ZONE = 16.0f;
+        if (distanceSquared <= CORRECTION_DEAD_ZONE * CORRECTION_DEAD_ZONE)
+        {
+            return;
+        }
+
+        constexpr float SNAP_DISTANCE = 200.0f;
+        if (distanceSquared > SNAP_DISTANCE * SNAP_DISTANCE)
         {
             groundPosition = inAuthoritativePosition;
             return;
