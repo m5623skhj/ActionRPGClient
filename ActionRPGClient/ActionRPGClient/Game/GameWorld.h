@@ -12,8 +12,12 @@
 #include "Network/TownProtocol.h"
 #include "Resources/SpriteAnimation.h"
 
+#include <d2d1_1.h>
+#include <wrl/client.h>
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -36,6 +40,8 @@ namespace ActionRPG
         void Render(D2DRenderer& inRenderer) const;
         void Resize(float inViewportWidth, float inViewportHeight);
         [[nodiscard]] std::wstring_view GetDungeonStatusText() const;
+        [[nodiscard]] bool ConsumeExitRequested() noexcept;
+        [[nodiscard]] bool IsUiOverlayVisible() const noexcept;
 
     private:
         struct RemotePlayerState
@@ -65,9 +71,32 @@ namespace ActionRPG
             Entered
         };
 
+        enum class SystemUiPage
+        {
+            Closed,
+            Menu,
+            Party,
+            ExitConfirmation
+        };
+
+        enum class SystemMenuAction
+        {
+            Party,
+            Exit
+        };
+
+        struct SystemMenuEntry
+        {
+            std::wstring label;
+            SystemMenuAction action = SystemMenuAction::Party;
+            Microsoft::WRL::ComPtr<ID2D1Bitmap1> icon;
+        };
+
         void ProcessNetworkEvents(const InputState& inInput);
         void ProcessDungeonEvents();
         void UpdateDungeonSelection(const InputState& inInput);
+        void UpdateSystemInterface(const InputState& inInput);
+        void UpdatePartyInterface(const InputState& inInput);
         void RequestDungeon(std::uint32_t inDungeonId);
         void ApplyMap(const TownProtocol::MapInfo& inMap, Vector2 inPosition);
         void ResetDungeonEntry();
@@ -75,12 +104,17 @@ namespace ActionRPG
         void SendMovementInput(const InputState& inInput, float inDeltaSeconds);
         void RenderTransitionZones(D2DRenderer& inRenderer) const;
         void RenderDungeonSelection(D2DRenderer& inRenderer) const;
+        void RenderSystemInterface(D2DRenderer& inRenderer) const;
+        void RenderPartyInterface(D2DRenderer& inRenderer) const;
+        [[nodiscard]] std::vector<std::uint64_t> GetNearbyPlayerIds() const;
+        [[nodiscard]] bool IsPartyLeader() const noexcept;
 
         GameplayMap gameplayMap;
         MapBackground mapBackground;
         Camera camera;
         IniDocument animationDefinitions;
         IniDocument characterDefinitions;
+        IniDocument systemMenuDefinitions;
         Player player;
         ProjectileSystem projectileSystem;
         InputCommandQueue commandQueue;
@@ -105,5 +139,18 @@ namespace ActionRPG
         std::vector<TownProtocol::DungeonOption> dungeonOptions;
         std::uint64_t dungeonRoomId{};
         std::uint64_t combatSeed{};
+        std::vector<SystemMenuEntry> systemMenuEntries;
+        SystemUiPage systemUiPage = SystemUiPage::Closed;
+        float systemMenuScrollOffset{};
+        float uiMouseX{};
+        float uiMouseY{};
+        bool uiClickConsumed{};
+        bool exitRequested{};
+        TownProtocol::PartySnapshot partySnapshot;
+        std::optional<TownProtocol::PartyInvitation> pendingPartyInvitation;
+        bool partyInvitationAnswerPending{};
+        std::size_t selectedNearbyIndex{};
+        std::uint8_t selectedPartySlot{};
+        std::wstring partyStatusText;
     };
 }

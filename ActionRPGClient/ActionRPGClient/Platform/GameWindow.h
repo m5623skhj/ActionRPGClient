@@ -45,6 +45,10 @@ namespace ActionRPG
         std::uint32_t clientHeight{};
         bool resizePending{};
         bool isMinimized{};
+        float mouseX{};
+        float mouseY{};
+        int pendingMouseWheelDelta{};
+        bool pendingLeftMousePressed{};
         std::array<bool, 256> keyStates{};
         std::vector<InputKey> pendingPressedKeys;
     };

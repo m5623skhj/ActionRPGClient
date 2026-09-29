@@ -19,6 +19,7 @@ namespace ActionRPG
         void Update(float inDeltaSeconds, const InputState& inInput);
         void Render(D2DRenderer& inRenderer) const;
         void Resize(float inViewportWidth, float inViewportHeight);
+        [[nodiscard]] bool ConsumeExitRequested() noexcept;
 
     private:
         GameWorld world;

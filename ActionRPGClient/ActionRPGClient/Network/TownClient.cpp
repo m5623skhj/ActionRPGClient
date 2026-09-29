@@ -124,6 +124,55 @@ namespace ActionRPG
         });
     }
 
+    void TownClient::InviteToParty(const std::uint64_t inTargetPlayerId)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyInviteRequest{ inTargetPlayerId })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
+    void TownClient::AnswerPartyInvitation(const std::uint64_t inInvitationId,
+        const bool inAccepted)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyInviteAnswer{ inInvitationId, inAccepted })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
+    void TownClient::LeaveParty()
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyLeaveRequest{})]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
+    void TownClient::KickPartyMember(const std::uint64_t inTargetPlayerId)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyKickRequest{ inTargetPlayerId })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
     std::vector<TownEvent> TownClient::ConsumeEvents()
     {
         std::scoped_lock lock(eventMutex);
@@ -261,6 +310,18 @@ namespace ActionRPG
             break;
         case TownProtocol::PacketType::DungeonSelectionOpen:
             if (auto packet = TownProtocol::DecodeDungeonSelectionOpen(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartyInvitation:
+            if (auto packet = TownProtocol::DecodePartyInvitation(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartySnapshot:
+            if (auto packet = TownProtocol::DecodePartySnapshot(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartyOperationResult:
+            if (auto packet = TownProtocol::DecodePartyOperationResult(receiveBody)) PushEvent(std::move(*packet));
             else HandleDisconnect();
             break;
         default:

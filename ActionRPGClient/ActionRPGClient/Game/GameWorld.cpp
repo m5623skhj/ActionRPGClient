@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -19,6 +20,119 @@ namespace ActionRPG
 {
     namespace
     {
+        constexpr float MENU_TILE_WIDTH = 166.0f;
+        constexpr float MENU_TILE_HEIGHT = 194.0f;
+        constexpr float MENU_ICON_SIZE = 128.0f;
+        constexpr float MENU_TILE_GAP = 18.0f;
+
+        struct SystemMenuLayout
+        {
+            float left{};
+            float top{};
+            float right{};
+            float bottom{};
+            std::size_t columns{ 1 };
+            float maxScrollOffset{};
+        };
+
+        struct PartyLayout
+        {
+            D2D1_RECT_F panel{};
+            float middle{};
+            float listTop{};
+            D2D1_RECT_F inviteButton{};
+            D2D1_RECT_F kickButton{};
+            D2D1_RECT_F leaveButton{};
+        };
+
+        bool ContainsPoint(const D2D1_RECT_F& inRectangle, const float inX, const float inY)
+        {
+            return inX >= inRectangle.left && inX <= inRectangle.right
+                && inY >= inRectangle.top && inY <= inRectangle.bottom;
+        }
+
+        SystemMenuLayout CalculateSystemMenuLayout(const float inViewportWidth,
+            const float inViewportHeight, const std::size_t inEntryCount)
+        {
+            constexpr float HORIZONTAL_MARGIN = 52.0f;
+            constexpr float VIEW_TOP = 96.0f;
+            constexpr float BOTTOM_MARGIN = 48.0f;
+            const float availableWidth = std::max(
+                MENU_TILE_WIDTH, inViewportWidth - HORIZONTAL_MARGIN * 2.0f);
+            std::size_t columns = std::max<std::size_t>(1, static_cast<std::size_t>(
+                (availableWidth + MENU_TILE_GAP) / (MENU_TILE_WIDTH + MENU_TILE_GAP)));
+            if (inEntryCount > 0)
+            {
+                columns = std::min(columns, inEntryCount);
+            }
+            const std::size_t rows = inEntryCount == 0 ? 0
+                : (inEntryCount + columns - 1) / columns;
+            const float contentWidth = static_cast<float>(columns) * MENU_TILE_WIDTH
+                + static_cast<float>(columns - 1) * MENU_TILE_GAP;
+            const float viewBottom = std::max(VIEW_TOP + MENU_TILE_HEIGHT,
+                inViewportHeight - BOTTOM_MARGIN);
+            const float contentHeight = rows == 0 ? 0.0f
+                : static_cast<float>(rows) * MENU_TILE_HEIGHT
+                    + static_cast<float>(rows - 1) * MENU_TILE_GAP;
+            return SystemMenuLayout{
+                std::max(20.0f, (inViewportWidth - contentWidth) * 0.5f),
+                VIEW_TOP,
+                std::min(inViewportWidth - 20.0f,
+                    std::max(20.0f, (inViewportWidth - contentWidth) * 0.5f) + contentWidth),
+                viewBottom,
+                columns,
+                std::max(0.0f, contentHeight - (viewBottom - VIEW_TOP))
+            };
+        }
+
+        D2D1_RECT_F GetSystemMenuTileRectangle(const SystemMenuLayout& inLayout,
+            const std::size_t inIndex, const float inScrollOffset)
+        {
+            const std::size_t column = inIndex % inLayout.columns;
+            const std::size_t row = inIndex / inLayout.columns;
+            const float left = inLayout.left
+                + static_cast<float>(column) * (MENU_TILE_WIDTH + MENU_TILE_GAP);
+            const float top = inLayout.top
+                + static_cast<float>(row) * (MENU_TILE_HEIGHT + MENU_TILE_GAP)
+                - inScrollOffset;
+            return D2D1::RectF(left, top, left + MENU_TILE_WIDTH, top + MENU_TILE_HEIGHT);
+        }
+
+        PartyLayout CalculatePartyLayout(const float inViewportWidth, const float inViewportHeight)
+        {
+            const float panelWidth = std::max(360.0f, std::min(820.0f, inViewportWidth - 40.0f));
+            const float panelHeight = std::max(460.0f, std::min(570.0f, inViewportHeight - 40.0f));
+            const float left = std::max(20.0f, (inViewportWidth - panelWidth) * 0.5f);
+            const float top = std::max(20.0f, (inViewportHeight - panelHeight) * 0.5f);
+            const D2D1_RECT_F panel = D2D1::RectF(left, top, left + panelWidth, top + panelHeight);
+            const float middle = left + panelWidth * 0.52f;
+            const float buttonTop = panel.bottom - 88.0f;
+            return PartyLayout{
+                panel,
+                middle,
+                top + 90.0f,
+                D2D1::RectF(left + 20.0f, buttonTop, middle - 12.0f, buttonTop + 36.0f),
+                D2D1::RectF(middle + 12.0f, buttonTop, panel.right - 130.0f, buttonTop + 36.0f),
+                D2D1::RectF(panel.right - 118.0f, buttonTop, panel.right - 20.0f, buttonTop + 36.0f)
+            };
+        }
+
+        D2D1_RECT_F GetInvitationDialog(const float inViewportWidth)
+        {
+            const float width = std::min(500.0f, inViewportWidth - 40.0f);
+            const float left = (inViewportWidth - width) * 0.5f;
+            return D2D1::RectF(left, 72.0f, left + width, 242.0f);
+        }
+
+        D2D1_RECT_F GetExitDialog(const float inViewportWidth, const float inViewportHeight)
+        {
+            const float width = std::min(480.0f, inViewportWidth - 40.0f);
+            const float height = 220.0f;
+            const float left = (inViewportWidth - width) * 0.5f;
+            const float top = (inViewportHeight - height) * 0.5f;
+            return D2D1::RectF(left, top, left + width, top + height);
+        }
+
         std::string ResolveCharacterAnimation(const IniDocument& inDefinitions,
             const std::uint32_t inCharacterId, const std::string_view inAnimation)
         {
@@ -55,6 +169,35 @@ namespace ActionRPG
             }
             return result;
         }
+
+        std::wstring_view GetPartyResultText(const TownProtocol::PartyResultCode inResult)
+        {
+            switch (inResult)
+            {
+            case TownProtocol::PartyResultCode::Succeeded:
+                return L"Party action completed.";
+            case TownProtocol::PartyResultCode::PlayerNotFound:
+                return L"The selected player is no longer nearby.";
+            case TownProtocol::PartyResultCode::AlreadyInParty:
+                return L"That player already belongs to a party.";
+            case TownProtocol::PartyResultCode::NotInParty:
+                return L"You are not in a party.";
+            case TownProtocol::PartyResultCode::NotLeader:
+                return L"Only the party leader can do that.";
+            case TownProtocol::PartyResultCode::PartyFull:
+                return L"The party is full.";
+            case TownProtocol::PartyResultCode::AlreadyInvited:
+                return L"That player already has a pending invitation.";
+            case TownProtocol::PartyResultCode::InvitationNotFound:
+                return L"The invitation is no longer valid.";
+            case TownProtocol::PartyResultCode::InvalidTarget:
+                return L"The selected party target is invalid.";
+            case TownProtocol::PartyResultCode::Busy:
+                return L"The party is entering a dungeon.";
+            default:
+                return L"Party action failed.";
+            }
+        }
     }
 
     GameWorld::RemotePlayerState::RemotePlayerState(std::string inName,
@@ -81,6 +224,7 @@ namespace ActionRPG
         , camera(inViewportWidth, inViewportHeight)
         , animationDefinitions(inAssetCatalog.GetDataPath("Animations"))
         , characterDefinitions(inAssetCatalog.GetDataPath("Characters"))
+        , systemMenuDefinitions(inAssetCatalog.GetDataPath("SystemMenu"))
         , player(Vector2{ 640.0f, 640.0f }, inAssetCatalog, inRenderer)
         , projectileSystem(inAssetCatalog)
         , skillCommandSystem(inAssetCatalog)
@@ -89,6 +233,29 @@ namespace ActionRPG
         , townClient(inTownClient)
         , dungeonClient(inDungeonClient)
     {
+        for (const std::string& section : systemMenuDefinitions.GetSectionNames())
+        {
+            const std::string actionName = systemMenuDefinitions.GetValue(section, "Action");
+            SystemMenuAction action{};
+            if (actionName == "Party")
+            {
+                action = SystemMenuAction::Party;
+            }
+            else if (actionName == "Exit")
+            {
+                action = SystemMenuAction::Exit;
+            }
+            else
+            {
+                throw std::runtime_error("Unknown system menu action: " + actionName);
+            }
+            const std::string iconAssetId = systemMenuDefinitions.GetValue(section, "Icon");
+            systemMenuEntries.push_back(SystemMenuEntry{
+                Utf8ToWide(systemMenuDefinitions.GetValue(section, "Label")),
+                action,
+                inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId))
+            });
+        }
         player.SetRunningEnabled(false);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
@@ -96,12 +263,19 @@ namespace ActionRPG
 
     void GameWorld::Update(const float inDeltaSeconds, const InputState& inInput)
     {
+        uiMouseX = inInput.mouseX;
+        uiMouseY = inInput.mouseY;
+        uiClickConsumed = false;
         ProcessNetworkEvents(inInput);
         ProcessDungeonEvents();
+        UpdateSystemInterface(inInput);
+        UpdatePartyInterface(inInput);
         UpdateDungeonSelection(inInput);
 
         InputState gameplayInput = inInput;
-        if (isDungeonSelectionOpen || dungeonEntryState != DungeonEntryState::Idle)
+        if (isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
+            || pendingPartyInvitation.has_value()
+            || dungeonEntryState != DungeonEntryState::Idle)
         {
             gameplayInput = InputState{};
         }
@@ -168,6 +342,8 @@ namespace ActionRPG
         player.Render(inRenderer, camera);
         inRenderer.PopAxisAlignedClip();
         RenderDungeonSelection(inRenderer);
+        RenderSystemInterface(inRenderer);
+        RenderPartyInterface(inRenderer);
     }
 
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
@@ -198,6 +374,19 @@ namespace ActionRPG
         }
     }
 
+    bool GameWorld::ConsumeExitRequested() noexcept
+    {
+        const bool result = exitRequested;
+        exitRequested = false;
+        return result;
+    }
+
+    bool GameWorld::IsUiOverlayVisible() const noexcept
+    {
+        return isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
+            || pendingPartyInvitation.has_value();
+    }
+
     void GameWorld::ProcessNetworkEvents(const InputState& inInput)
     {
         for (TownEvent& event : townClient.ConsumeEvents())
@@ -208,6 +397,11 @@ namespace ActionRPG
                 if constexpr (std::is_same_v<EventType, TownProtocol::EnterTownResponse>)
                 {
                     localPlayerId = inEvent.playerId;
+                    partySnapshot = {};
+                    pendingPartyInvitation.reset();
+                    partyInvitationAnswerPending = false;
+                    systemUiPage = SystemUiPage::Closed;
+                    partyStatusText.clear();
                     movementSequence = 0;
                     ApplyMap(inEvent.map, Vector2{ inEvent.map.spawnX, inEvent.map.spawnY });
                 }
@@ -263,16 +457,22 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::EnterDungeonResponse>)
                 {
-                    if (dungeonEntryState != DungeonEntryState::WaitingRoom)
+                    if (dungeonEntryState != DungeonEntryState::WaitingRoom
+                        && dungeonEntryState != DungeonEntryState::Idle)
                     {
                         return;
                     }
                     if (!inEvent.succeeded)
                     {
-                        ResetDungeonEntry();
+                        if (dungeonEntryState == DungeonEntryState::WaitingRoom)
+                        {
+                            ResetDungeonEntry();
+                        }
                         return;
                     }
 
+                    isDungeonSelectionOpen = false;
+                    systemUiPage = SystemUiPage::Closed;
                     dungeonRoomId = inEvent.roomId;
                     combatSeed = inEvent.combatSeed;
                     if (!dungeonClient.Start(
@@ -289,12 +489,41 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::DungeonSelectionOpen>)
                 {
-                    if (dungeonEntryState == DungeonEntryState::Idle && !inEvent.dungeons.empty())
+                    if (dungeonEntryState == DungeonEntryState::Idle && !inEvent.dungeons.empty()
+                        && systemUiPage == SystemUiPage::Closed
+                        && (partySnapshot.partyId == 0 || IsPartyLeader()))
                     {
                         activeDungeonZoneId = std::move(inEvent.zoneId);
                         dungeonOptions = std::move(inEvent.dungeons);
                         selectedDungeonIndex = 0;
                         isDungeonSelectionOpen = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartyInvitation>)
+                {
+                    pendingPartyInvitation = std::move(inEvent);
+                    partyInvitationAnswerPending = false;
+                    partyStatusText = L"Party invitation received.";
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartySnapshot>)
+                {
+                    partySnapshot = std::move(inEvent);
+                    selectedPartySlot = std::min<std::uint8_t>(selectedPartySlot, 7);
+                    if (partySnapshot.partyId == 0)
+                    {
+                        partyStatusText = L"You are not in a party.";
+                    }
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartyOperationResult>)
+                {
+                    partyStatusText = GetPartyResultText(inEvent.result);
+                    if (inEvent.operation == TownProtocol::PartyOperationType::AnswerInvitation)
+                    {
+                        if (inEvent.result != TownProtocol::PartyResultCode::Busy)
+                        {
+                            pendingPartyInvitation.reset();
+                        }
+                        partyInvitationAnswerPending = false;
                     }
                 }
             }, event);
@@ -346,6 +575,7 @@ namespace ActionRPG
     void GameWorld::UpdateDungeonSelection(const InputState& inInput)
     {
         if (dungeonEntryState != DungeonEntryState::Idle || localPlayerId == 0
+            || systemUiPage != SystemUiPage::Closed || pendingPartyInvitation.has_value()
             || !isDungeonSelectionOpen || dungeonOptions.empty())
         {
             return;
@@ -376,8 +606,211 @@ namespace ActionRPG
         }
     }
 
+    void GameWorld::UpdateSystemInterface(const InputState& inInput)
+    {
+        if (pendingPartyInvitation.has_value())
+        {
+            return;
+        }
+        if (inInput.WasPressed(InputKey::ToggleSystemMenu))
+        {
+            if (systemUiPage == SystemUiPage::Closed)
+            {
+                systemUiPage = SystemUiPage::Menu;
+                isDungeonSelectionOpen = false;
+                activeDungeonZoneId.clear();
+                dungeonOptions.clear();
+            }
+            else if (systemUiPage == SystemUiPage::Menu)
+            {
+                systemUiPage = SystemUiPage::Closed;
+            }
+            else
+            {
+                systemUiPage = SystemUiPage::Menu;
+            }
+            return;
+        }
+
+        if (systemUiPage == SystemUiPage::ExitConfirmation && inInput.leftMousePressed)
+        {
+            const D2D1_RECT_F dialog = GetExitDialog(
+                camera.GetViewportWidth(), camera.GetViewportHeight());
+            const float middle = (dialog.left + dialog.right) * 0.5f;
+            const D2D1_RECT_F cancelButton = D2D1::RectF(
+                dialog.left + 28.0f, dialog.bottom - 62.0f, middle - 10.0f, dialog.bottom - 20.0f);
+            const D2D1_RECT_F exitButton = D2D1::RectF(
+                middle + 10.0f, dialog.bottom - 62.0f, dialog.right - 28.0f, dialog.bottom - 20.0f);
+            if (ContainsPoint(cancelButton, inInput.mouseX, inInput.mouseY))
+            {
+                systemUiPage = SystemUiPage::Menu;
+                uiClickConsumed = true;
+            }
+            else if (ContainsPoint(exitButton, inInput.mouseX, inInput.mouseY))
+            {
+                exitRequested = true;
+                uiClickConsumed = true;
+            }
+            return;
+        }
+
+        if (systemUiPage != SystemUiPage::Menu)
+        {
+            return;
+        }
+
+        const SystemMenuLayout layout = CalculateSystemMenuLayout(
+            camera.GetViewportWidth(), camera.GetViewportHeight(), systemMenuEntries.size());
+        if (inInput.mouseWheelDelta != 0)
+        {
+            constexpr float SCROLL_PIXELS_PER_WHEEL_STEP = 84.0f;
+            systemMenuScrollOffset = std::clamp(
+                systemMenuScrollOffset
+                    - static_cast<float>(inInput.mouseWheelDelta) / 120.0f
+                        * SCROLL_PIXELS_PER_WHEEL_STEP,
+                0.0f,
+                layout.maxScrollOffset);
+        }
+        else
+        {
+            systemMenuScrollOffset = std::clamp(
+                systemMenuScrollOffset, 0.0f, layout.maxScrollOffset);
+        }
+
+        if (!inInput.leftMousePressed
+            || !ContainsPoint(D2D1::RectF(layout.left, layout.top, layout.right, layout.bottom),
+                inInput.mouseX, inInput.mouseY))
+        {
+            return;
+        }
+        for (std::size_t index = 0; index < systemMenuEntries.size(); ++index)
+        {
+            const D2D1_RECT_F tile = GetSystemMenuTileRectangle(
+                layout, index, systemMenuScrollOffset);
+            if (!ContainsPoint(tile, inInput.mouseX, inInput.mouseY))
+            {
+                continue;
+            }
+            systemUiPage = systemMenuEntries[index].action == SystemMenuAction::Party
+                ? SystemUiPage::Party : SystemUiPage::ExitConfirmation;
+            uiClickConsumed = true;
+            return;
+        }
+    }
+
+    void GameWorld::UpdatePartyInterface(const InputState& inInput)
+    {
+        if (pendingPartyInvitation.has_value())
+        {
+            if (partyInvitationAnswerPending || !inInput.leftMousePressed || uiClickConsumed)
+            {
+                return;
+            }
+            const D2D1_RECT_F dialog = GetInvitationDialog(camera.GetViewportWidth());
+            const float middle = (dialog.left + dialog.right) * 0.5f;
+            const D2D1_RECT_F acceptButton = D2D1::RectF(
+                dialog.left + 24.0f, dialog.bottom - 58.0f, middle - 8.0f, dialog.bottom - 18.0f);
+            const D2D1_RECT_F declineButton = D2D1::RectF(
+                middle + 8.0f, dialog.bottom - 58.0f, dialog.right - 24.0f, dialog.bottom - 18.0f);
+            if (ContainsPoint(acceptButton, inInput.mouseX, inInput.mouseY))
+            {
+                townClient.AnswerPartyInvitation(
+                    pendingPartyInvitation->invitationId, true);
+                partyInvitationAnswerPending = true;
+                uiClickConsumed = true;
+            }
+            else if (ContainsPoint(declineButton, inInput.mouseX, inInput.mouseY))
+            {
+                townClient.AnswerPartyInvitation(
+                    pendingPartyInvitation->invitationId, false);
+                partyInvitationAnswerPending = true;
+                uiClickConsumed = true;
+            }
+            return;
+        }
+
+        if (systemUiPage != SystemUiPage::Party || localPlayerId == 0
+            || !inInput.leftMousePressed || uiClickConsumed)
+        {
+            return;
+        }
+
+        const std::vector<std::uint64_t> nearbyPlayerIds = GetNearbyPlayerIds();
+        if (nearbyPlayerIds.empty())
+        {
+            selectedNearbyIndex = 0;
+        }
+        else
+        {
+            selectedNearbyIndex = std::min(selectedNearbyIndex, nearbyPlayerIds.size() - 1);
+        }
+
+        const PartyLayout layout = CalculatePartyLayout(
+            camera.GetViewportWidth(), camera.GetViewportHeight());
+        constexpr float ROW_HEIGHT = 38.0f;
+        for (std::size_t index = 0; index < nearbyPlayerIds.size() && index < 8; ++index)
+        {
+            const float top = layout.listTop + static_cast<float>(index) * ROW_HEIGHT;
+            const D2D1_RECT_F row = D2D1::RectF(
+                layout.panel.left + 18.0f, top, layout.middle - 12.0f,
+                top + ROW_HEIGHT - 4.0f);
+            if (ContainsPoint(row, inInput.mouseX, inInput.mouseY))
+            {
+                selectedNearbyIndex = index;
+                uiClickConsumed = true;
+                return;
+            }
+        }
+        for (std::uint8_t slot = 0; slot < 8; ++slot)
+        {
+            const float top = layout.listTop + static_cast<float>(slot) * ROW_HEIGHT;
+            const D2D1_RECT_F row = D2D1::RectF(
+                layout.middle + 12.0f, top, layout.panel.right - 18.0f,
+                top + ROW_HEIGHT - 4.0f);
+            if (ContainsPoint(row, inInput.mouseX, inInput.mouseY))
+            {
+                selectedPartySlot = slot;
+                uiClickConsumed = true;
+                return;
+            }
+        }
+
+        if (ContainsPoint(layout.inviteButton, inInput.mouseX, inInput.mouseY)
+            && !nearbyPlayerIds.empty())
+        {
+            townClient.InviteToParty(nearbyPlayerIds[selectedNearbyIndex]);
+            uiClickConsumed = true;
+            return;
+        }
+        if (ContainsPoint(layout.leaveButton, inInput.mouseX, inInput.mouseY)
+            && partySnapshot.partyId != 0)
+        {
+            townClient.LeaveParty();
+            uiClickConsumed = true;
+            return;
+        }
+        if (ContainsPoint(layout.kickButton, inInput.mouseX, inInput.mouseY) && IsPartyLeader())
+        {
+            const auto member = std::find_if(partySnapshot.members.begin(),
+                partySnapshot.members.end(), [this](const TownProtocol::PartyMemberInfo& inMember)
+                {
+                    return inMember.slot == selectedPartySlot;
+                });
+            if (member != partySnapshot.members.end() && member->playerId != localPlayerId)
+            {
+                townClient.KickPartyMember(member->playerId);
+            }
+            uiClickConsumed = true;
+        }
+    }
+
     void GameWorld::RequestDungeon(const std::uint32_t inDungeonId)
     {
+        if (partySnapshot.partyId != 0 && !IsPartyLeader())
+        {
+            partyStatusText = L"Only the party leader can enter a dungeon.";
+            return;
+        }
         townClient.RequestDungeon(activeDungeonZoneId, inDungeonId);
         dungeonEntryState = DungeonEntryState::WaitingRoom;
     }
@@ -525,6 +958,256 @@ namespace ActionRPG
             panelRight - 42.0f, listTop + 266.0f, D2D1::ColorF(0.78f, 0.82f, 0.86f));
         inRenderer.DrawText(L"UP / DOWN: Select", panelLeft + 28.0f, panelBottom - 42.0f,
             panelRight - 28.0f, panelBottom - 14.0f, D2D1::ColorF(0.72f, 0.72f, 0.68f));
+    }
+
+    void GameWorld::RenderSystemInterface(D2DRenderer& inRenderer) const
+    {
+        if (systemUiPage == SystemUiPage::Closed && !pendingPartyInvitation.has_value())
+        {
+            return;
+        }
+
+        const float viewportWidth = camera.GetViewportWidth();
+        const float viewportHeight = camera.GetViewportHeight();
+        inRenderer.FillRectangle(0.0f, 0.0f, viewportWidth, viewportHeight,
+            D2D1::ColorF(0.22f, 0.23f, 0.25f, 0.76f));
+
+        if (systemUiPage == SystemUiPage::Menu)
+        {
+            inRenderer.DrawText(L"SYSTEM MENU", 52.0f, 34.0f,
+                viewportWidth - 52.0f, 70.0f, D2D1::ColorF(0.96f, 0.92f, 0.82f));
+            inRenderer.DrawText(L"ESC  Close", viewportWidth - 190.0f, 38.0f,
+                viewportWidth - 42.0f, 68.0f, D2D1::ColorF(0.72f, 0.74f, 0.78f));
+
+            const SystemMenuLayout layout = CalculateSystemMenuLayout(
+                viewportWidth, viewportHeight, systemMenuEntries.size());
+            inRenderer.PushAxisAlignedClip(D2D1::RectF(
+                layout.left, layout.top, layout.right, layout.bottom));
+            for (std::size_t index = 0; index < systemMenuEntries.size(); ++index)
+            {
+                const D2D1_RECT_F tile = GetSystemMenuTileRectangle(
+                    layout, index, systemMenuScrollOffset);
+                const bool hovered = ContainsPoint(tile, uiMouseX, uiMouseY)
+                    && ContainsPoint(D2D1::RectF(
+                        layout.left, layout.top, layout.right, layout.bottom), uiMouseX, uiMouseY);
+                inRenderer.FillRectangle(tile.left, tile.top, tile.right, tile.bottom,
+                    hovered ? D2D1::ColorF(0.18f, 0.15f, 0.10f, 0.98f)
+                        : D2D1::ColorF(0.045f, 0.055f, 0.075f, 0.96f));
+                inRenderer.DrawRectangle(tile.left, tile.top, tile.right, tile.bottom,
+                    hovered ? D2D1::ColorF(1.0f, 0.76f, 0.28f)
+                        : D2D1::ColorF(0.48f, 0.54f, 0.62f), hovered ? 3.0f : 1.5f);
+                const float iconLeft = tile.left + (MENU_TILE_WIDTH - MENU_ICON_SIZE) * 0.5f;
+                const float iconTop = tile.top + 12.0f;
+                if (systemMenuEntries[index].icon)
+                {
+                    const D2D1_SIZE_F bitmapSize = systemMenuEntries[index].icon->GetSize();
+                    inRenderer.DrawBitmap(systemMenuEntries[index].icon.Get(),
+                        D2D1::RectF(0.0f, 0.0f, bitmapSize.width, bitmapSize.height),
+                        D2D1::RectF(iconLeft, iconTop,
+                            iconLeft + MENU_ICON_SIZE, iconTop + MENU_ICON_SIZE));
+                }
+                inRenderer.DrawText(systemMenuEntries[index].label,
+                    tile.left + 12.0f, tile.bottom - 42.0f,
+                    tile.right - 12.0f, tile.bottom - 12.0f,
+                    D2D1::ColorF(0.94f, 0.94f, 0.92f));
+            }
+            inRenderer.PopAxisAlignedClip();
+
+            if (layout.maxScrollOffset > 0.0f)
+            {
+                const float trackLeft = layout.right + 10.0f;
+                const float trackHeight = layout.bottom - layout.top;
+                const float handleHeight = std::max(36.0f,
+                    trackHeight * trackHeight / (trackHeight + layout.maxScrollOffset));
+                const float handleTravel = trackHeight - handleHeight;
+                const float handleTop = layout.top + handleTravel
+                    * systemMenuScrollOffset / layout.maxScrollOffset;
+                inRenderer.FillRectangle(trackLeft, layout.top, trackLeft + 6.0f, layout.bottom,
+                    D2D1::ColorF(0.12f, 0.13f, 0.15f, 0.80f));
+                inRenderer.FillRectangle(trackLeft, handleTop, trackLeft + 6.0f,
+                    handleTop + handleHeight, D2D1::ColorF(0.86f, 0.68f, 0.28f));
+            }
+        }
+        else if (systemUiPage == SystemUiPage::ExitConfirmation)
+        {
+            const D2D1_RECT_F dialog = GetExitDialog(viewportWidth, viewportHeight);
+            const float middle = (dialog.left + dialog.right) * 0.5f;
+            const D2D1_RECT_F cancelButton = D2D1::RectF(
+                dialog.left + 28.0f, dialog.bottom - 62.0f, middle - 10.0f, dialog.bottom - 20.0f);
+            const D2D1_RECT_F exitButton = D2D1::RectF(
+                middle + 10.0f, dialog.bottom - 62.0f, dialog.right - 28.0f, dialog.bottom - 20.0f);
+            inRenderer.FillRectangle(dialog.left, dialog.top, dialog.right, dialog.bottom,
+                D2D1::ColorF(0.055f, 0.045f, 0.04f, 0.99f));
+            inRenderer.DrawRectangle(dialog.left, dialog.top, dialog.right, dialog.bottom,
+                D2D1::ColorF(0.90f, 0.66f, 0.24f), 2.0f);
+            inRenderer.DrawText(L"게임을 종료하시겠습니까?", dialog.left + 28.0f, dialog.top + 34.0f,
+                dialog.right - 28.0f, dialog.top + 78.0f, D2D1::ColorF(0.96f, 0.93f, 0.86f));
+            inRenderer.FillRectangle(cancelButton.left, cancelButton.top,
+                cancelButton.right, cancelButton.bottom, D2D1::ColorF(0.18f, 0.20f, 0.24f));
+            inRenderer.FillRectangle(exitButton.left, exitButton.top,
+                exitButton.right, exitButton.bottom, D2D1::ColorF(0.44f, 0.12f, 0.09f));
+            inRenderer.DrawText(L"취소", cancelButton.left + 16.0f, cancelButton.top + 7.0f,
+                cancelButton.right - 12.0f, cancelButton.bottom - 4.0f, D2D1::ColorF(0.92f, 0.94f, 0.96f));
+            inRenderer.DrawText(L"게임 종료", exitButton.left + 16.0f, exitButton.top + 7.0f,
+                exitButton.right - 12.0f, exitButton.bottom - 4.0f, D2D1::ColorF(1.0f, 0.88f, 0.78f));
+        }
+    }
+
+    void GameWorld::RenderPartyInterface(D2DRenderer& inRenderer) const
+    {
+        if (systemUiPage == SystemUiPage::Party)
+        {
+            const PartyLayout layout = CalculatePartyLayout(
+                camera.GetViewportWidth(), camera.GetViewportHeight());
+            inRenderer.FillRectangle(layout.panel.left, layout.panel.top,
+                layout.panel.right, layout.panel.bottom,
+                D2D1::ColorF(0.035f, 0.045f, 0.065f, 0.98f));
+            inRenderer.DrawRectangle(layout.panel.left, layout.panel.top,
+                layout.panel.right, layout.panel.bottom,
+                D2D1::ColorF(0.45f, 0.68f, 0.88f), 2.0f);
+            inRenderer.DrawText(L"파티", layout.panel.left + 22.0f, layout.panel.top + 14.0f,
+                layout.panel.right - 160.0f, layout.panel.top + 44.0f,
+                D2D1::ColorF(0.90f, 0.94f, 1.0f));
+            inRenderer.DrawText(L"ESC  메뉴로", layout.panel.right - 150.0f,
+                layout.panel.top + 16.0f, layout.panel.right - 20.0f,
+                layout.panel.top + 44.0f, D2D1::ColorF(0.68f, 0.74f, 0.82f));
+            inRenderer.DrawText(L"주변 플레이어", layout.panel.left + 22.0f,
+                layout.panel.top + 54.0f, layout.middle - 12.0f, layout.panel.top + 82.0f,
+                D2D1::ColorF(0.82f, 0.86f, 0.92f));
+            inRenderer.DrawText(L"파티 슬롯", layout.middle + 12.0f,
+                layout.panel.top + 54.0f, layout.panel.right - 22.0f,
+                layout.panel.top + 82.0f, D2D1::ColorF(0.82f, 0.86f, 0.92f));
+
+            constexpr float ROW_HEIGHT = 38.0f;
+            const std::vector<std::uint64_t> nearbyPlayerIds = GetNearbyPlayerIds();
+            for (std::size_t index = 0; index < nearbyPlayerIds.size() && index < 8; ++index)
+            {
+                const auto playerIterator = remotePlayers.find(nearbyPlayerIds[index]);
+                if (playerIterator == remotePlayers.end())
+                {
+                    continue;
+                }
+                const float top = layout.listTop + static_cast<float>(index) * ROW_HEIGHT;
+                const bool selected = index == selectedNearbyIndex;
+                inRenderer.FillRectangle(layout.panel.left + 18.0f, top, layout.middle - 12.0f,
+                    top + ROW_HEIGHT - 4.0f, selected
+                        ? D2D1::ColorF(0.30f, 0.22f, 0.08f, 0.95f)
+                        : D2D1::ColorF(0.08f, 0.10f, 0.14f, 0.90f));
+                const std::wstring label = Utf8ToWide(playerIterator->second.name)
+                    + L"  #" + std::to_wstring(nearbyPlayerIds[index]);
+                inRenderer.DrawText(label, layout.panel.left + 26.0f, top + 6.0f,
+                    layout.middle - 18.0f, top + 31.0f, D2D1::ColorF(0.90f, 0.92f, 0.94f));
+            }
+
+            for (std::uint8_t slot = 0; slot < 8; ++slot)
+            {
+                const float top = layout.listTop + static_cast<float>(slot) * ROW_HEIGHT;
+                const bool selected = slot == selectedPartySlot;
+                inRenderer.FillRectangle(layout.middle + 12.0f, top, layout.panel.right - 18.0f,
+                    top + ROW_HEIGHT - 4.0f, selected
+                        ? D2D1::ColorF(0.30f, 0.22f, 0.08f, 0.95f)
+                        : D2D1::ColorF(0.08f, 0.10f, 0.14f, 0.90f));
+                const auto member = std::find_if(partySnapshot.members.begin(),
+                    partySnapshot.members.end(), [slot](const TownProtocol::PartyMemberInfo& inMember)
+                    {
+                        return inMember.slot == slot;
+                    });
+                std::wstring label = L"[" + std::to_wstring(slot) + L"] ";
+                if (member == partySnapshot.members.end())
+                {
+                    label += L"비어 있음";
+                }
+                else
+                {
+                    if (member->playerId == partySnapshot.leaderPlayerId)
+                    {
+                        label += L"[파티장] ";
+                    }
+                    label += Utf8ToWide(member->playerName);
+                }
+                inRenderer.DrawText(label, layout.middle + 20.0f, top + 6.0f,
+                    layout.panel.right - 24.0f, top + 31.0f,
+                    D2D1::ColorF(0.90f, 0.92f, 0.94f));
+            }
+
+            const bool canInvite = !nearbyPlayerIds.empty();
+            const bool canKick = IsPartyLeader();
+            const bool canLeave = partySnapshot.partyId != 0;
+            inRenderer.FillRectangle(layout.inviteButton.left, layout.inviteButton.top,
+                layout.inviteButton.right, layout.inviteButton.bottom,
+                canInvite ? D2D1::ColorF(0.16f, 0.34f, 0.50f) : D2D1::ColorF(0.12f, 0.13f, 0.15f));
+            inRenderer.FillRectangle(layout.kickButton.left, layout.kickButton.top,
+                layout.kickButton.right, layout.kickButton.bottom,
+                canKick ? D2D1::ColorF(0.48f, 0.18f, 0.10f) : D2D1::ColorF(0.12f, 0.13f, 0.15f));
+            inRenderer.FillRectangle(layout.leaveButton.left, layout.leaveButton.top,
+                layout.leaveButton.right, layout.leaveButton.bottom,
+                canLeave ? D2D1::ColorF(0.36f, 0.15f, 0.14f) : D2D1::ColorF(0.12f, 0.13f, 0.15f));
+            inRenderer.DrawText(L"선택한 플레이어 초대", layout.inviteButton.left + 14.0f,
+                layout.inviteButton.top + 6.0f, layout.inviteButton.right - 10.0f,
+                layout.inviteButton.bottom - 4.0f, D2D1::ColorF(0.92f, 0.95f, 1.0f));
+            inRenderer.DrawText(L"강퇴", layout.kickButton.left + 14.0f,
+                layout.kickButton.top + 6.0f, layout.kickButton.right - 10.0f,
+                layout.kickButton.bottom - 4.0f, D2D1::ColorF(0.96f, 0.90f, 0.86f));
+            inRenderer.DrawText(L"탈퇴", layout.leaveButton.left + 14.0f,
+                layout.leaveButton.top + 6.0f, layout.leaveButton.right - 10.0f,
+                layout.leaveButton.bottom - 4.0f, D2D1::ColorF(0.96f, 0.90f, 0.86f));
+            inRenderer.DrawText(partyStatusText, layout.panel.left + 22.0f,
+                layout.panel.bottom - 42.0f, layout.panel.right - 22.0f,
+                layout.panel.bottom - 12.0f, D2D1::ColorF(0.96f, 0.78f, 0.34f));
+        }
+
+        if (pendingPartyInvitation.has_value())
+        {
+            const D2D1_RECT_F dialog = GetInvitationDialog(camera.GetViewportWidth());
+            const float middle = (dialog.left + dialog.right) * 0.5f;
+            const D2D1_RECT_F acceptButton = D2D1::RectF(
+                dialog.left + 24.0f, dialog.bottom - 58.0f, middle - 8.0f, dialog.bottom - 18.0f);
+            const D2D1_RECT_F declineButton = D2D1::RectF(
+                middle + 8.0f, dialog.bottom - 58.0f, dialog.right - 24.0f, dialog.bottom - 18.0f);
+            inRenderer.FillRectangle(dialog.left, dialog.top, dialog.right, dialog.bottom,
+                D2D1::ColorF(0.08f, 0.06f, 0.04f, 0.99f));
+            inRenderer.DrawRectangle(dialog.left, dialog.top, dialog.right, dialog.bottom,
+                D2D1::ColorF(0.95f, 0.70f, 0.24f), 2.0f);
+            const std::wstring message = Utf8ToWide(pendingPartyInvitation->inviterName)
+                + L" 님의 파티 초대";
+            inRenderer.DrawText(message, dialog.left + 24.0f, dialog.top + 22.0f,
+                dialog.right - 24.0f, dialog.top + 64.0f, D2D1::ColorF(0.96f, 0.94f, 0.86f));
+            inRenderer.FillRectangle(acceptButton.left, acceptButton.top,
+                acceptButton.right, acceptButton.bottom, D2D1::ColorF(0.12f, 0.42f, 0.24f));
+            inRenderer.FillRectangle(declineButton.left, declineButton.top,
+                declineButton.right, declineButton.bottom, D2D1::ColorF(0.44f, 0.15f, 0.12f));
+            inRenderer.DrawText(L"수락", acceptButton.left + 16.0f, acceptButton.top + 7.0f,
+                acceptButton.right - 12.0f, acceptButton.bottom - 4.0f,
+                D2D1::ColorF(0.92f, 1.0f, 0.94f));
+            inRenderer.DrawText(L"거절", declineButton.left + 16.0f, declineButton.top + 7.0f,
+                declineButton.right - 12.0f, declineButton.bottom - 4.0f,
+                D2D1::ColorF(1.0f, 0.92f, 0.88f));
+        }
+    }
+
+    std::vector<std::uint64_t> GameWorld::GetNearbyPlayerIds() const
+    {
+        std::vector<std::uint64_t> result;
+        result.reserve(remotePlayers.size());
+        for (const auto& [playerId, remotePlayer] : remotePlayers)
+        {
+            const bool alreadyInParty = std::ranges::any_of(partySnapshot.members,
+                [playerId](const TownProtocol::PartyMemberInfo& inMember)
+                {
+                    return inMember.playerId == playerId;
+                });
+            if (!alreadyInParty)
+            {
+                result.push_back(playerId);
+            }
+        }
+        std::ranges::sort(result);
+        return result;
+    }
+
+    bool GameWorld::IsPartyLeader() const noexcept
+    {
+        return partySnapshot.partyId != 0 && partySnapshot.leaderPlayerId == localPlayerId;
     }
 
     void GameWorld::UpdateRemotePlayers(const float inDeltaSeconds)

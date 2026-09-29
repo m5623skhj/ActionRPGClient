@@ -14,7 +14,8 @@ namespace ActionRPG
         ActionC,
         ActionX,
         ActionV,
-        ConfirmSelection
+        ConfirmSelection,
+        ToggleSystemMenu
     };
 
     struct InputState
@@ -23,6 +24,10 @@ namespace ActionRPG
         bool moveRight{};
         bool moveUp{};
         bool moveDown{};
+        float mouseX{};
+        float mouseY{};
+        int mouseWheelDelta{};
+        bool leftMousePressed{};
         std::vector<InputKey> pressedKeys;
 
         [[nodiscard]] bool WasPressed(const InputKey inKey) const

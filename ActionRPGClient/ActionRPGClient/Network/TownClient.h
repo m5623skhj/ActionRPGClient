@@ -19,7 +19,8 @@ namespace ActionRPG
     using TownEvent = std::variant<TownProtocol::EnterTownResponse, TownProtocol::PlayerAppear,
         TownProtocol::PlayerMove, TownProtocol::PlayerDisappear,
         TownProtocol::EnterDungeonResponse, TownProtocol::MapChanged,
-        TownProtocol::DungeonSelectionOpen>;
+        TownProtocol::DungeonSelectionOpen, TownProtocol::PartyInvitation,
+        TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult>;
 
     class TownClient final
     {
@@ -36,6 +37,10 @@ namespace ActionRPG
         void SendMovement(const TownProtocol::MoveInput& inInput);
         void RequestDungeon(std::string inZoneId, std::uint32_t inDungeonId);
         void ConfirmDungeonJoin(std::uint64_t inRoomId, std::uint64_t inChallenge);
+        void InviteToParty(std::uint64_t inTargetPlayerId);
+        void AnswerPartyInvitation(std::uint64_t inInvitationId, bool inAccepted);
+        void LeaveParty();
+        void KickPartyMember(std::uint64_t inTargetPlayerId);
         [[nodiscard]] std::vector<TownEvent> ConsumeEvents();
         [[nodiscard]] bool IsConnected() const noexcept;
 

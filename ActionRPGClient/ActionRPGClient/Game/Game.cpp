@@ -23,6 +23,10 @@ namespace ActionRPG
     void Game::Render(D2DRenderer& inRenderer) const
     {
         world.Render(inRenderer);
+        if (world.IsUiOverlayVisible())
+        {
+            return;
+        }
         inRenderer.DrawText(
             L"Move: Arrow Keys    Jump: C    Shoot: X    Rock: V    Skill: Left/Right x2 + Z",
             20.0f,
@@ -42,5 +46,10 @@ namespace ActionRPG
     void Game::Resize(const float inViewportWidth, const float inViewportHeight)
     {
         world.Resize(inViewportWidth, inViewportHeight);
+    }
+
+    bool Game::ConsumeExitRequested() noexcept
+    {
+        return world.ConsumeExitRequested();
     }
 }

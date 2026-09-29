@@ -1,5 +1,7 @@
 #include "Platform/GameWindow.h"
 
+#include <Windowsx.h>
+
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -104,10 +106,16 @@ namespace ActionRPG
             .moveRight = IsKeyDown(VK_RIGHT),
             .moveUp = IsKeyDown(VK_UP),
             .moveDown = IsKeyDown(VK_DOWN),
+            .mouseX = mouseX,
+            .mouseY = mouseY,
+            .mouseWheelDelta = pendingMouseWheelDelta,
+            .leftMousePressed = pendingLeftMousePressed,
             .pressedKeys = std::move(pendingPressedKeys)
         };
 
         pendingPressedKeys.clear();
+        pendingMouseWheelDelta = 0;
+        pendingLeftMousePressed = false;
         return inputState;
     }
 
@@ -168,9 +176,26 @@ namespace ActionRPG
             }
             return 0;
 
+        case WM_MOUSEMOVE:
+            mouseX = static_cast<float>(GET_X_LPARAM(inLParam));
+            mouseY = static_cast<float>(GET_Y_LPARAM(inLParam));
+            return 0;
+
+        case WM_LBUTTONDOWN:
+            mouseX = static_cast<float>(GET_X_LPARAM(inLParam));
+            mouseY = static_cast<float>(GET_Y_LPARAM(inLParam));
+            pendingLeftMousePressed = true;
+            return 0;
+
+        case WM_MOUSEWHEEL:
+            pendingMouseWheelDelta += GET_WHEEL_DELTA_WPARAM(inWParam);
+            return 0;
+
         case WM_KILLFOCUS:
             keyStates.fill(false);
             pendingPressedKeys.clear();
+            pendingMouseWheelDelta = 0;
+            pendingLeftMousePressed = false;
             return 0;
 
         case WM_CLOSE:
@@ -224,6 +249,9 @@ namespace ActionRPG
             break;
         case VK_RETURN:
             pendingPressedKeys.push_back(InputKey::ConfirmSelection);
+            break;
+        case VK_ESCAPE:
+            pendingPressedKeys.push_back(InputKey::ToggleSystemMenu);
             break;
         default:
             break;

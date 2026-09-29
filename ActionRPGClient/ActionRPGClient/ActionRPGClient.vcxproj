@@ -155,11 +155,14 @@
     <None Include="..\Assets\Data\effects.ini" />
     <None Include="..\Assets\Data\projectiles.ini" />
     <None Include="..\Assets\Data\skills.ini" />
+    <None Include="..\Assets\Data\system_menu.ini" />
     <None Include="ClientOptionFile\CoreOption.txt" />
     <None Include="..\Assets\README.md" />
     <None Include="..\Assets\Images\Characters\player_idle.png" />
     <None Include="..\Assets\Images\Characters\player_run.png" />
     <None Include="..\Assets\Images\Characters\player_shoot.png" />
+    <None Include="..\Assets\Images\UI\system_menu_party.png" />
+    <None Include="..\Assets\Images\UI\system_menu_exit.png" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyRuntimeAssets" AfterTargets="Build">
