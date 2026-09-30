@@ -47,6 +47,8 @@ namespace ActionRPG
         bool isMinimized{};
         float mouseX{};
         float mouseY{};
+        float pendingClickX{};
+        float pendingClickY{};
         int pendingMouseWheelDelta{};
         bool pendingLeftMousePressed{};
         std::array<bool, 256> keyStates{};

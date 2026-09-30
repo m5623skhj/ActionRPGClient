@@ -108,6 +108,8 @@ namespace ActionRPG
             .moveDown = IsKeyDown(VK_DOWN),
             .mouseX = mouseX,
             .mouseY = mouseY,
+            .clickX = pendingClickX,
+            .clickY = pendingClickY,
             .mouseWheelDelta = pendingMouseWheelDelta,
             .leftMousePressed = pendingLeftMousePressed,
             .pressedKeys = std::move(pendingPressedKeys)
@@ -184,6 +186,11 @@ namespace ActionRPG
         case WM_LBUTTONDOWN:
             mouseX = static_cast<float>(GET_X_LPARAM(inLParam));
             mouseY = static_cast<float>(GET_Y_LPARAM(inLParam));
+            if (!pendingLeftMousePressed)
+            {
+                pendingClickX = mouseX;
+                pendingClickY = mouseY;
+            }
             pendingLeftMousePressed = true;
             return 0;
 

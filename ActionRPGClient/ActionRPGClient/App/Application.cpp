@@ -29,6 +29,8 @@ namespace ActionRPG
         std::vector<InputKey> pendingPressedKeys;
         int pendingMouseWheelDelta = 0;
         bool pendingLeftMousePressed = false;
+        float pendingClickX = 0.0f;
+        float pendingClickY = 0.0f;
 
         while (window.ProcessMessages())
         {
@@ -60,6 +62,11 @@ namespace ActionRPG
                 inputState.pressedKeys.begin(),
                 inputState.pressedKeys.end());
             pendingMouseWheelDelta += inputState.mouseWheelDelta;
+            if (inputState.leftMousePressed && !pendingLeftMousePressed)
+            {
+                pendingClickX = inputState.clickX;
+                pendingClickY = inputState.clickY;
+            }
             pendingLeftMousePressed = pendingLeftMousePressed || inputState.leftMousePressed;
             while (accumulatedSeconds >= FIXED_UPDATE_SECONDS)
             {
@@ -67,6 +74,8 @@ namespace ActionRPG
                 updateInput.pressedKeys = std::move(pendingPressedKeys);
                 updateInput.mouseWheelDelta = pendingMouseWheelDelta;
                 updateInput.leftMousePressed = pendingLeftMousePressed;
+                updateInput.clickX = pendingClickX;
+                updateInput.clickY = pendingClickY;
                 game.Update(static_cast<float>(FIXED_UPDATE_SECONDS), updateInput);
                 pendingPressedKeys.clear();
                 pendingMouseWheelDelta = 0;

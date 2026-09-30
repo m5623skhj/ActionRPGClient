@@ -641,12 +641,12 @@ namespace ActionRPG
                 dialog.left + 28.0f, dialog.bottom - 62.0f, middle - 10.0f, dialog.bottom - 20.0f);
             const D2D1_RECT_F exitButton = D2D1::RectF(
                 middle + 10.0f, dialog.bottom - 62.0f, dialog.right - 28.0f, dialog.bottom - 20.0f);
-            if (ContainsPoint(cancelButton, inInput.mouseX, inInput.mouseY))
+            if (ContainsPoint(cancelButton, inInput.clickX, inInput.clickY))
             {
                 systemUiPage = SystemUiPage::Menu;
                 uiClickConsumed = true;
             }
-            else if (ContainsPoint(exitButton, inInput.mouseX, inInput.mouseY))
+            else if (ContainsPoint(exitButton, inInput.clickX, inInput.clickY))
             {
                 exitRequested = true;
                 uiClickConsumed = true;
@@ -679,7 +679,7 @@ namespace ActionRPG
 
         if (!inInput.leftMousePressed
             || !ContainsPoint(D2D1::RectF(layout.left, layout.top, layout.right, layout.bottom),
-                inInput.mouseX, inInput.mouseY))
+                inInput.clickX, inInput.clickY))
         {
             return;
         }
@@ -687,7 +687,7 @@ namespace ActionRPG
         {
             const D2D1_RECT_F tile = GetSystemMenuTileRectangle(
                 layout, index, systemMenuScrollOffset);
-            if (!ContainsPoint(tile, inInput.mouseX, inInput.mouseY))
+            if (!ContainsPoint(tile, inInput.clickX, inInput.clickY))
             {
                 continue;
             }
@@ -712,14 +712,14 @@ namespace ActionRPG
                 dialog.left + 24.0f, dialog.bottom - 58.0f, middle - 8.0f, dialog.bottom - 18.0f);
             const D2D1_RECT_F declineButton = D2D1::RectF(
                 middle + 8.0f, dialog.bottom - 58.0f, dialog.right - 24.0f, dialog.bottom - 18.0f);
-            if (ContainsPoint(acceptButton, inInput.mouseX, inInput.mouseY))
+            if (ContainsPoint(acceptButton, inInput.clickX, inInput.clickY))
             {
                 townClient.AnswerPartyInvitation(
                     pendingPartyInvitation->invitationId, true);
                 partyInvitationAnswerPending = true;
                 uiClickConsumed = true;
             }
-            else if (ContainsPoint(declineButton, inInput.mouseX, inInput.mouseY))
+            else if (ContainsPoint(declineButton, inInput.clickX, inInput.clickY))
             {
                 townClient.AnswerPartyInvitation(
                     pendingPartyInvitation->invitationId, false);
@@ -754,7 +754,7 @@ namespace ActionRPG
             const D2D1_RECT_F row = D2D1::RectF(
                 layout.panel.left + 18.0f, top, layout.middle - 12.0f,
                 top + ROW_HEIGHT - 4.0f);
-            if (ContainsPoint(row, inInput.mouseX, inInput.mouseY))
+            if (ContainsPoint(row, inInput.clickX, inInput.clickY))
             {
                 selectedNearbyIndex = index;
                 uiClickConsumed = true;
@@ -767,7 +767,7 @@ namespace ActionRPG
             const D2D1_RECT_F row = D2D1::RectF(
                 layout.middle + 12.0f, top, layout.panel.right - 18.0f,
                 top + ROW_HEIGHT - 4.0f);
-            if (ContainsPoint(row, inInput.mouseX, inInput.mouseY))
+            if (ContainsPoint(row, inInput.clickX, inInput.clickY))
             {
                 selectedPartySlot = slot;
                 uiClickConsumed = true;
@@ -775,21 +775,21 @@ namespace ActionRPG
             }
         }
 
-        if (ContainsPoint(layout.inviteButton, inInput.mouseX, inInput.mouseY)
+        if (ContainsPoint(layout.inviteButton, inInput.clickX, inInput.clickY)
             && !nearbyPlayerIds.empty())
         {
             townClient.InviteToParty(nearbyPlayerIds[selectedNearbyIndex]);
             uiClickConsumed = true;
             return;
         }
-        if (ContainsPoint(layout.leaveButton, inInput.mouseX, inInput.mouseY)
+        if (ContainsPoint(layout.leaveButton, inInput.clickX, inInput.clickY)
             && partySnapshot.partyId != 0)
         {
             townClient.LeaveParty();
             uiClickConsumed = true;
             return;
         }
-        if (ContainsPoint(layout.kickButton, inInput.mouseX, inInput.mouseY) && IsPartyLeader())
+        if (ContainsPoint(layout.kickButton, inInput.clickX, inInput.clickY) && IsPartyLeader())
         {
             const auto member = std::find_if(partySnapshot.members.begin(),
                 partySnapshot.members.end(), [this](const TownProtocol::PartyMemberInfo& inMember)

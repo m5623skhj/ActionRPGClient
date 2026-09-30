@@ -26,6 +26,8 @@ namespace ActionRPG
         bool moveDown{};
         float mouseX{};
         float mouseY{};
+        float clickX{};
+        float clickY{};
         int mouseWheelDelta{};
         bool leftMousePressed{};
         std::vector<InputKey> pressedKeys;
