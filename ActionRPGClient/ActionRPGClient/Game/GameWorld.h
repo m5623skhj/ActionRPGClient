@@ -76,6 +76,8 @@ namespace ActionRPG
             Closed,
             Menu,
             Party,
+            PartyDirectory,
+            PartyCreate,
             ExitConfirmation
         };
 
@@ -97,6 +99,10 @@ namespace ActionRPG
         void UpdateDungeonSelection(const InputState& inInput);
         void UpdateSystemInterface(const InputState& inInput);
         void UpdatePartyInterface(const InputState& inInput);
+        void SetSystemUiPage(SystemUiPage inPage);
+        void RequestPartyDirectoryPage(std::uint32_t inPage);
+        void SubmitPartyTitle();
+        void SubmitPartyCreation();
         void RequestDungeon(std::uint32_t inDungeonId);
         void ApplyMap(const TownProtocol::MapInfo& inMap, Vector2 inPosition);
         void ResetDungeonEntry();
@@ -106,7 +112,6 @@ namespace ActionRPG
         void RenderDungeonSelection(D2DRenderer& inRenderer) const;
         void RenderSystemInterface(D2DRenderer& inRenderer) const;
         void RenderPartyInterface(D2DRenderer& inRenderer) const;
-        [[nodiscard]] std::vector<std::uint64_t> GetNearbyPlayerIds() const;
         [[nodiscard]] bool IsPartyLeader() const noexcept;
 
         GameplayMap gameplayMap;
@@ -147,9 +152,15 @@ namespace ActionRPG
         bool uiClickConsumed{};
         bool exitRequested{};
         TownProtocol::PartySnapshot partySnapshot;
+        TownProtocol::PartyDirectoryPage partyDirectoryPage;
+        bool directoryPageRequestPending{};
+        std::wstring partyTitleDraft;
+        std::wstring newPartyTitleDraft;
+        bool newPartyIsPublic{};
+        bool editingPartyTitle{};
+        bool partyCreationPending{};
         std::optional<TownProtocol::PartyInvitation> pendingPartyInvitation;
         bool partyInvitationAnswerPending{};
-        std::size_t selectedNearbyIndex{};
         std::uint8_t selectedPartySlot{};
         std::wstring partyStatusText;
     };

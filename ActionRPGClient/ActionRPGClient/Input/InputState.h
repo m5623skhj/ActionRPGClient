@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <string>
 
 namespace ActionRPG
 {
@@ -30,6 +31,7 @@ namespace ActionRPG
         float clickY{};
         int mouseWheelDelta{};
         bool leftMousePressed{};
+        std::wstring textInput;
         std::vector<InputKey> pressedKeys;
 
         [[nodiscard]] bool WasPressed(const InputKey inKey) const

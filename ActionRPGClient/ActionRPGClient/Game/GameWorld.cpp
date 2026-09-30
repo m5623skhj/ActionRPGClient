@@ -38,9 +38,10 @@ namespace ActionRPG
         struct PartyLayout
         {
             D2D1_RECT_F panel{};
-            float middle{};
             float listTop{};
-            D2D1_RECT_F inviteButton{};
+            D2D1_RECT_F titleField{};
+            D2D1_RECT_F saveButton{};
+            D2D1_RECT_F publicButton{};
             D2D1_RECT_F kickButton{};
             D2D1_RECT_F leaveButton{};
         };
@@ -100,21 +101,55 @@ namespace ActionRPG
 
         PartyLayout CalculatePartyLayout(const float inViewportWidth, const float inViewportHeight)
         {
-            const float panelWidth = std::max(360.0f, std::min(820.0f, inViewportWidth - 40.0f));
-            const float panelHeight = std::max(460.0f, std::min(570.0f, inViewportHeight - 40.0f));
+            const float panelWidth = std::max(560.0f, std::min(820.0f, inViewportWidth - 40.0f));
+            const float panelHeight = std::max(560.0f, std::min(600.0f, inViewportHeight - 40.0f));
             const float left = std::max(20.0f, (inViewportWidth - panelWidth) * 0.5f);
             const float top = std::max(20.0f, (inViewportHeight - panelHeight) * 0.5f);
             const D2D1_RECT_F panel = D2D1::RectF(left, top, left + panelWidth, top + panelHeight);
-            const float middle = left + panelWidth * 0.52f;
-            const float buttonTop = panel.bottom - 88.0f;
+            const float buttonTop = panel.bottom - 76.0f;
             return PartyLayout{
                 panel,
-                middle,
-                top + 90.0f,
-                D2D1::RectF(left + 20.0f, buttonTop, middle - 12.0f, buttonTop + 36.0f),
-                D2D1::RectF(middle + 12.0f, buttonTop, panel.right - 130.0f, buttonTop + 36.0f),
-                D2D1::RectF(panel.right - 118.0f, buttonTop, panel.right - 20.0f, buttonTop + 36.0f)
+                top + 164.0f,
+                D2D1::RectF(left + 22.0f, top + 58.0f, panel.right - 150.0f, top + 96.0f),
+                D2D1::RectF(panel.right - 138.0f, top + 58.0f, panel.right - 22.0f, top + 96.0f),
+                D2D1::RectF(left + 22.0f, top + 108.0f, left + 212.0f, top + 144.0f),
+                D2D1::RectF(left + 22.0f, buttonTop, left + 136.0f, buttonTop + 36.0f),
+                D2D1::RectF(left + 148.0f, buttonTop, left + 262.0f, buttonTop + 36.0f)
             };
+        }
+
+        D2D1_RECT_F GetPartyCreateDialog(const float inViewportWidth,
+            const float inViewportHeight)
+        {
+            const float width = std::min(520.0f, inViewportWidth - 40.0f);
+            const float height = 274.0f;
+            const float left = (inViewportWidth - width) * 0.5f;
+            const float top = (inViewportHeight - height) * 0.5f;
+            return D2D1::RectF(left, top, left + width, top + height);
+        }
+
+        void AppendPartyTitleInput(std::wstring& outTitle,
+            const std::wstring_view inInput)
+        {
+            for (const wchar_t character : inInput)
+            {
+                if (character == 8)
+                {
+                    if (!outTitle.empty())
+                    {
+                        outTitle.pop_back();
+                        if (!outTitle.empty() && outTitle.back() >= 0xD800
+                            && outTitle.back() <= 0xDBFF)
+                        {
+                            outTitle.pop_back();
+                        }
+                    }
+                }
+                else if (character >= L' ' && outTitle.size() < 48)
+                {
+                    outTitle.push_back(character);
+                }
+            }
         }
 
         D2D1_RECT_F GetInvitationDialog(const float inViewportWidth)
@@ -170,6 +205,28 @@ namespace ActionRPG
             return result;
         }
 
+        std::optional<std::string> WideToUtf8(const std::wstring_view inText)
+        {
+            if (inText.empty())
+            {
+                return std::nullopt;
+            }
+            const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                inText.data(), static_cast<int>(inText.size()), nullptr, 0, nullptr, nullptr);
+            if (size <= 0)
+            {
+                return std::nullopt;
+            }
+            std::string result(static_cast<std::size_t>(size), '\0');
+            if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                inText.data(), static_cast<int>(inText.size()), result.data(), size,
+                nullptr, nullptr) != size)
+            {
+                return std::nullopt;
+            }
+            return result;
+        }
+
         std::wstring_view GetPartyResultText(const TownProtocol::PartyResultCode inResult)
         {
             switch (inResult)
@@ -194,6 +251,8 @@ namespace ActionRPG
                 return L"The selected party target is invalid.";
             case TownProtocol::PartyResultCode::Busy:
                 return L"The party is entering a dungeon.";
+            case TownProtocol::PartyResultCode::InvalidTitle:
+                return L"Enter a valid party title (up to 96 UTF-8 bytes).";
             default:
                 return L"Party action failed.";
             }
@@ -400,7 +459,7 @@ namespace ActionRPG
                     partySnapshot = {};
                     pendingPartyInvitation.reset();
                     partyInvitationAnswerPending = false;
-                    systemUiPage = SystemUiPage::Closed;
+                    SetSystemUiPage(SystemUiPage::Closed);
                     partyStatusText.clear();
                     movementSequence = 0;
                     ApplyMap(inEvent.map, Vector2{ inEvent.map.spawnX, inEvent.map.spawnY });
@@ -472,7 +531,7 @@ namespace ActionRPG
                     }
 
                     isDungeonSelectionOpen = false;
-                    systemUiPage = SystemUiPage::Closed;
+                    SetSystemUiPage(SystemUiPage::Closed);
                     dungeonRoomId = inEvent.roomId;
                     combatSeed = inEvent.combatSeed;
                     if (!dungeonClient.Start(
@@ -507,16 +566,40 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartySnapshot>)
                 {
+                    const std::uint64_t previousPartyId = partySnapshot.partyId;
+                    const bool partyChanged = previousPartyId != inEvent.partyId;
                     partySnapshot = std::move(inEvent);
-                    selectedPartySlot = std::min<std::uint8_t>(selectedPartySlot, 7);
+                    if (partyChanged || !editingPartyTitle)
+                    {
+                        partyTitleDraft = Utf8ToWide(partySnapshot.title);
+                        editingPartyTitle = false;
+                    }
+                    selectedPartySlot = 0;
                     if (partySnapshot.partyId == 0)
                     {
                         partyStatusText = L"You are not in a party.";
+                    }
+                    if (previousPartyId != 0 && partySnapshot.partyId == 0
+                        && systemUiPage == SystemUiPage::Party)
+                    {
+                        SetSystemUiPage(SystemUiPage::PartyDirectory);
+                    }
+                    else if (previousPartyId == 0 && partySnapshot.partyId != 0
+                        && (systemUiPage == SystemUiPage::PartyDirectory
+                            || systemUiPage == SystemUiPage::PartyCreate))
+                    {
+                        partyCreationPending = false;
+                        SetSystemUiPage(SystemUiPage::Party);
                     }
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyOperationResult>)
                 {
                     partyStatusText = GetPartyResultText(inEvent.result);
+                    if (inEvent.operation == TownProtocol::PartyOperationType::Create
+                        && inEvent.result != TownProtocol::PartyResultCode::Succeeded)
+                    {
+                        partyCreationPending = false;
+                    }
                     if (inEvent.operation == TownProtocol::PartyOperationType::AnswerInvitation)
                     {
                         if (inEvent.result != TownProtocol::PartyResultCode::Busy)
@@ -524,6 +607,23 @@ namespace ActionRPG
                             pendingPartyInvitation.reset();
                         }
                         partyInvitationAnswerPending = false;
+                    }
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDirectoryPage>)
+                {
+                    if (systemUiPage == SystemUiPage::PartyDirectory)
+                    {
+                        partyDirectoryPage = std::move(inEvent);
+                        directoryPageRequestPending = false;
+                    }
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDirectoryChanged>)
+                {
+                    if (systemUiPage == SystemUiPage::PartyDirectory
+                        && !directoryPageRequestPending
+                        && inEvent.revision > partyDirectoryPage.revision)
+                    {
+                        RequestPartyDirectoryPage(std::max(1U, partyDirectoryPage.page));
                     }
                 }
             }, event);
@@ -606,6 +706,88 @@ namespace ActionRPG
         }
     }
 
+    void GameWorld::SetSystemUiPage(const SystemUiPage inPage)
+    {
+        SystemUiPage page = inPage;
+        if (page == SystemUiPage::Party || page == SystemUiPage::PartyDirectory)
+        {
+            page = partySnapshot.partyId != 0 ? SystemUiPage::Party
+                : SystemUiPage::PartyDirectory;
+        }
+        else if (page == SystemUiPage::PartyCreate && partySnapshot.partyId != 0)
+        {
+            page = SystemUiPage::Party;
+        }
+        if (systemUiPage == page)
+        {
+            return;
+        }
+        if (systemUiPage == SystemUiPage::PartyDirectory)
+        {
+            townClient.UnsubscribePartyDirectory();
+            directoryPageRequestPending = false;
+        }
+        if (page == SystemUiPage::PartyDirectory)
+        {
+            partyDirectoryPage = {};
+            partyDirectoryPage.page = 1;
+            partyDirectoryPage.totalPages = 1;
+            RequestPartyDirectoryPage(1);
+        }
+        if (page == SystemUiPage::Party)
+        {
+            partyTitleDraft = Utf8ToWide(partySnapshot.title);
+            editingPartyTitle = false;
+        }
+        if (page == SystemUiPage::PartyCreate)
+        {
+            newPartyTitleDraft.clear();
+            newPartyIsPublic = false;
+            partyCreationPending = false;
+            partyStatusText.clear();
+        }
+        systemUiPage = page;
+    }
+
+    void GameWorld::RequestPartyDirectoryPage(const std::uint32_t inPage)
+    {
+        if (directoryPageRequestPending)
+        {
+            return;
+        }
+        directoryPageRequestPending = true;
+        townClient.RequestPartyDirectoryPage(inPage);
+    }
+
+    void GameWorld::SubmitPartyTitle()
+    {
+        const std::optional<std::string> title = WideToUtf8(partyTitleDraft);
+        if (!title.has_value() || title->size() > 96)
+        {
+            partyStatusText = L"Enter a valid party title (up to 96 UTF-8 bytes).";
+            return;
+        }
+        townClient.UpdatePartySettings(*title, partySnapshot.isPublic);
+        editingPartyTitle = false;
+    }
+
+    void GameWorld::SubmitPartyCreation()
+    {
+        if (partyCreationPending || localPlayerId == 0)
+        {
+            return;
+        }
+        const std::optional<std::string> title = WideToUtf8(newPartyTitleDraft);
+        if (!title.has_value() || title->size() > 96
+            || title->find_first_not_of(' ') == std::string::npos)
+        {
+            partyStatusText = L"파티 제목을 입력하세요 (UTF-8 최대 96바이트).";
+            return;
+        }
+        partyCreationPending = true;
+        townClient.CreateParty(*title, newPartyIsPublic);
+    }
+
     void GameWorld::UpdateSystemInterface(const InputState& inInput)
     {
         if (pendingPartyInvitation.has_value())
@@ -616,18 +798,18 @@ namespace ActionRPG
         {
             if (systemUiPage == SystemUiPage::Closed)
             {
-                systemUiPage = SystemUiPage::Menu;
+                SetSystemUiPage(SystemUiPage::Menu);
                 isDungeonSelectionOpen = false;
                 activeDungeonZoneId.clear();
                 dungeonOptions.clear();
             }
             else if (systemUiPage == SystemUiPage::Menu)
             {
-                systemUiPage = SystemUiPage::Closed;
+                SetSystemUiPage(SystemUiPage::Closed);
             }
             else
             {
-                systemUiPage = SystemUiPage::Menu;
+                SetSystemUiPage(SystemUiPage::Menu);
             }
             return;
         }
@@ -643,7 +825,7 @@ namespace ActionRPG
                 middle + 10.0f, dialog.bottom - 62.0f, dialog.right - 28.0f, dialog.bottom - 20.0f);
             if (ContainsPoint(cancelButton, inInput.clickX, inInput.clickY))
             {
-                systemUiPage = SystemUiPage::Menu;
+                SetSystemUiPage(SystemUiPage::Menu);
                 uiClickConsumed = true;
             }
             else if (ContainsPoint(exitButton, inInput.clickX, inInput.clickY))
@@ -691,8 +873,8 @@ namespace ActionRPG
             {
                 continue;
             }
-            systemUiPage = systemMenuEntries[index].action == SystemMenuAction::Party
-                ? SystemUiPage::Party : SystemUiPage::ExitConfirmation;
+            SetSystemUiPage(systemMenuEntries[index].action == SystemMenuAction::Party
+                ? SystemUiPage::Party : SystemUiPage::ExitConfirmation);
             uiClickConsumed = true;
             return;
         }
@@ -729,59 +911,140 @@ namespace ActionRPG
             return;
         }
 
-        if (systemUiPage != SystemUiPage::Party || localPlayerId == 0
-            || !inInput.leftMousePressed || uiClickConsumed)
+        if (systemUiPage == SystemUiPage::PartyDirectory)
+        {
+            if (!inInput.leftMousePressed || uiClickConsumed)
+            {
+                return;
+            }
+            const PartyLayout layout = CalculatePartyLayout(
+                camera.GetViewportWidth(), camera.GetViewportHeight());
+            const float center = (layout.panel.left + layout.panel.right) * 0.5f;
+            const float top = layout.panel.bottom - 60.0f;
+            if (ContainsPoint(D2D1::RectF(layout.panel.right - 170.0f,
+                layout.panel.top + 54.0f, layout.panel.right - 22.0f,
+                layout.panel.top + 90.0f), inInput.clickX, inInput.clickY))
+            {
+                SetSystemUiPage(SystemUiPage::PartyCreate);
+                uiClickConsumed = true;
+            }
+            else if (!directoryPageRequestPending && partyDirectoryPage.page > 1
+                && ContainsPoint(D2D1::RectF(center - 150.0f, top, center - 80.0f, top + 36.0f),
+                    inInput.clickX, inInput.clickY))
+            {
+                RequestPartyDirectoryPage(partyDirectoryPage.page - 1);
+                uiClickConsumed = true;
+            }
+            else if (!directoryPageRequestPending
+                && partyDirectoryPage.page < partyDirectoryPage.totalPages
+                && ContainsPoint(D2D1::RectF(center + 80.0f, top, center + 150.0f, top + 36.0f),
+                    inInput.clickX, inInput.clickY))
+            {
+                RequestPartyDirectoryPage(partyDirectoryPage.page + 1);
+                uiClickConsumed = true;
+            }
+            return;
+        }
+
+        if (systemUiPage == SystemUiPage::PartyCreate)
+        {
+            AppendPartyTitleInput(newPartyTitleDraft, inInput.textInput);
+            if (inInput.WasPressed(InputKey::ConfirmSelection))
+            {
+                SubmitPartyCreation();
+                return;
+            }
+            if (!inInput.leftMousePressed || uiClickConsumed)
+            {
+                return;
+            }
+            const D2D1_RECT_F dialog = GetPartyCreateDialog(
+                camera.GetViewportWidth(), camera.GetViewportHeight());
+            const D2D1_RECT_F createButton = D2D1::RectF(
+                dialog.left + 24.0f, dialog.bottom - 64.0f,
+                dialog.left + 154.0f, dialog.bottom - 24.0f);
+            const D2D1_RECT_F cancelButton = D2D1::RectF(
+                dialog.left + 168.0f, dialog.bottom - 64.0f,
+                dialog.left + 298.0f, dialog.bottom - 24.0f);
+            const D2D1_RECT_F visibilityCheckbox = D2D1::RectF(
+                dialog.left + 24.0f, dialog.top + 140.0f,
+                dialog.right - 24.0f, dialog.top + 170.0f);
+            if (ContainsPoint(createButton, inInput.clickX, inInput.clickY))
+            {
+                SubmitPartyCreation();
+                uiClickConsumed = true;
+            }
+            else if (ContainsPoint(cancelButton, inInput.clickX, inInput.clickY))
+            {
+                SetSystemUiPage(SystemUiPage::PartyDirectory);
+                uiClickConsumed = true;
+            }
+            else if (ContainsPoint(visibilityCheckbox, inInput.clickX, inInput.clickY)
+                && !partyCreationPending)
+            {
+                newPartyIsPublic = !newPartyIsPublic;
+                uiClickConsumed = true;
+            }
+            return;
+        }
+
+        if (systemUiPage != SystemUiPage::Party || localPlayerId == 0)
         {
             return;
         }
 
-        const std::vector<std::uint64_t> nearbyPlayerIds = GetNearbyPlayerIds();
-        if (nearbyPlayerIds.empty())
+        if (editingPartyTitle)
         {
-            selectedNearbyIndex = 0;
+            AppendPartyTitleInput(partyTitleDraft, inInput.textInput);
+            if (inInput.WasPressed(InputKey::ConfirmSelection))
+            {
+                SubmitPartyTitle();
+                return;
+            }
         }
-        else
+        if (!inInput.leftMousePressed || uiClickConsumed)
         {
-            selectedNearbyIndex = std::min(selectedNearbyIndex, nearbyPlayerIds.size() - 1);
+            return;
         }
 
         const PartyLayout layout = CalculatePartyLayout(
             camera.GetViewportWidth(), camera.GetViewportHeight());
+        if (IsPartyLeader() && ContainsPoint(layout.titleField,
+            inInput.clickX, inInput.clickY))
+        {
+            editingPartyTitle = true;
+            uiClickConsumed = true;
+            return;
+        }
+        if (IsPartyLeader() && ContainsPoint(layout.saveButton,
+            inInput.clickX, inInput.clickY))
+        {
+            SubmitPartyTitle();
+            uiClickConsumed = true;
+            return;
+        }
+        if (IsPartyLeader() && ContainsPoint(layout.publicButton,
+            inInput.clickX, inInput.clickY))
+        {
+            townClient.UpdatePartySettings(partySnapshot.title, !partySnapshot.isPublic);
+            uiClickConsumed = true;
+            return;
+        }
         constexpr float ROW_HEIGHT = 38.0f;
-        for (std::size_t index = 0; index < nearbyPlayerIds.size() && index < 8; ++index)
+        for (std::size_t index = 0; index < partySnapshot.members.size(); ++index)
         {
             const float top = layout.listTop + static_cast<float>(index) * ROW_HEIGHT;
             const D2D1_RECT_F row = D2D1::RectF(
-                layout.panel.left + 18.0f, top, layout.middle - 12.0f,
+                layout.panel.left + 22.0f, top, layout.panel.right - 22.0f,
                 top + ROW_HEIGHT - 4.0f);
             if (ContainsPoint(row, inInput.clickX, inInput.clickY))
             {
-                selectedNearbyIndex = index;
-                uiClickConsumed = true;
-                return;
-            }
-        }
-        for (std::uint8_t slot = 0; slot < 8; ++slot)
-        {
-            const float top = layout.listTop + static_cast<float>(slot) * ROW_HEIGHT;
-            const D2D1_RECT_F row = D2D1::RectF(
-                layout.middle + 12.0f, top, layout.panel.right - 18.0f,
-                top + ROW_HEIGHT - 4.0f);
-            if (ContainsPoint(row, inInput.clickX, inInput.clickY))
-            {
-                selectedPartySlot = slot;
+                selectedPartySlot = partySnapshot.members[index].slot;
                 uiClickConsumed = true;
                 return;
             }
         }
 
-        if (ContainsPoint(layout.inviteButton, inInput.clickX, inInput.clickY)
-            && !nearbyPlayerIds.empty())
-        {
-            townClient.InviteToParty(nearbyPlayerIds[selectedNearbyIndex]);
-            uiClickConsumed = true;
-            return;
-        }
         if (ContainsPoint(layout.leaveButton, inInput.clickX, inInput.clickY)
             && partySnapshot.partyId != 0)
         {
@@ -1065,86 +1328,67 @@ namespace ActionRPG
             inRenderer.DrawRectangle(layout.panel.left, layout.panel.top,
                 layout.panel.right, layout.panel.bottom,
                 D2D1::ColorF(0.45f, 0.68f, 0.88f), 2.0f);
-            inRenderer.DrawText(L"파티", layout.panel.left + 22.0f, layout.panel.top + 14.0f,
+            inRenderer.DrawText(L"내 파티", layout.panel.left + 22.0f, layout.panel.top + 14.0f,
                 layout.panel.right - 160.0f, layout.panel.top + 44.0f,
                 D2D1::ColorF(0.90f, 0.94f, 1.0f));
             inRenderer.DrawText(L"ESC  메뉴로", layout.panel.right - 150.0f,
                 layout.panel.top + 16.0f, layout.panel.right - 20.0f,
                 layout.panel.top + 44.0f, D2D1::ColorF(0.68f, 0.74f, 0.82f));
-            inRenderer.DrawText(L"주변 플레이어", layout.panel.left + 22.0f,
-                layout.panel.top + 54.0f, layout.middle - 12.0f, layout.panel.top + 82.0f,
-                D2D1::ColorF(0.82f, 0.86f, 0.92f));
-            inRenderer.DrawText(L"파티 슬롯", layout.middle + 12.0f,
-                layout.panel.top + 54.0f, layout.panel.right - 22.0f,
-                layout.panel.top + 82.0f, D2D1::ColorF(0.82f, 0.86f, 0.92f));
-
+            inRenderer.DrawText(L"파티 제목", layout.panel.left + 22.0f,
+                layout.panel.top + 42.0f, layout.panel.right - 22.0f,
+                layout.panel.top + 62.0f, D2D1::ColorF(0.82f, 0.86f, 0.92f));
+            inRenderer.FillRectangle(layout.titleField.left, layout.titleField.top,
+                layout.titleField.right, layout.titleField.bottom,
+                editingPartyTitle ? D2D1::ColorF(0.22f, 0.20f, 0.12f)
+                    : D2D1::ColorF(0.08f, 0.10f, 0.14f));
+            inRenderer.DrawText(partyTitleDraft, layout.titleField.left + 12.0f,
+                layout.titleField.top + 7.0f, layout.titleField.right - 8.0f,
+                layout.titleField.bottom - 2.0f, D2D1::ColorF(0.94f, 0.94f, 0.92f));
+            inRenderer.FillRectangle(layout.saveButton.left, layout.saveButton.top,
+                layout.saveButton.right, layout.saveButton.bottom,
+                IsPartyLeader() ? D2D1::ColorF(0.16f, 0.34f, 0.50f)
+                    : D2D1::ColorF(0.12f, 0.13f, 0.15f));
+            inRenderer.DrawText(L"제목 저장", layout.saveButton.left + 12.0f,
+                layout.saveButton.top + 7.0f, layout.saveButton.right - 8.0f,
+                layout.saveButton.bottom - 2.0f, D2D1::ColorF(0.92f, 0.95f, 1.0f));
+            inRenderer.FillRectangle(layout.publicButton.left, layout.publicButton.top,
+                layout.publicButton.right, layout.publicButton.bottom,
+                IsPartyLeader() ? D2D1::ColorF(0.17f, 0.35f, 0.25f)
+                    : D2D1::ColorF(0.12f, 0.13f, 0.15f));
+            inRenderer.DrawText(partySnapshot.isPublic ? L"공개 파티 · 변경" : L"비공개 파티 · 변경",
+                layout.publicButton.left + 12.0f, layout.publicButton.top + 7.0f,
+                layout.publicButton.right - 8.0f, layout.publicButton.bottom - 2.0f,
+                D2D1::ColorF(0.92f, 0.95f, 1.0f));
             constexpr float ROW_HEIGHT = 38.0f;
-            const std::vector<std::uint64_t> nearbyPlayerIds = GetNearbyPlayerIds();
-            for (std::size_t index = 0; index < nearbyPlayerIds.size() && index < 8; ++index)
-            {
-                const auto playerIterator = remotePlayers.find(nearbyPlayerIds[index]);
-                if (playerIterator == remotePlayers.end())
-                {
-                    continue;
-                }
-                const float top = layout.listTop + static_cast<float>(index) * ROW_HEIGHT;
-                const bool selected = index == selectedNearbyIndex;
-                inRenderer.FillRectangle(layout.panel.left + 18.0f, top, layout.middle - 12.0f,
-                    top + ROW_HEIGHT - 4.0f, selected
-                        ? D2D1::ColorF(0.30f, 0.22f, 0.08f, 0.95f)
-                        : D2D1::ColorF(0.08f, 0.10f, 0.14f, 0.90f));
-                const std::wstring label = Utf8ToWide(playerIterator->second.name)
-                    + L"  #" + std::to_wstring(nearbyPlayerIds[index]);
-                inRenderer.DrawText(label, layout.panel.left + 26.0f, top + 6.0f,
-                    layout.middle - 18.0f, top + 31.0f, D2D1::ColorF(0.90f, 0.92f, 0.94f));
-            }
 
-            for (std::uint8_t slot = 0; slot < 8; ++slot)
+            for (std::size_t index = 0; index < partySnapshot.members.size(); ++index)
             {
-                const float top = layout.listTop + static_cast<float>(slot) * ROW_HEIGHT;
-                const bool selected = slot == selectedPartySlot;
-                inRenderer.FillRectangle(layout.middle + 12.0f, top, layout.panel.right - 18.0f,
+                const auto& member = partySnapshot.members[index];
+                const float top = layout.listTop + static_cast<float>(index) * ROW_HEIGHT;
+                const bool selected = member.slot == selectedPartySlot;
+                inRenderer.FillRectangle(layout.panel.left + 22.0f, top,
+                    layout.panel.right - 22.0f,
                     top + ROW_HEIGHT - 4.0f, selected
                         ? D2D1::ColorF(0.30f, 0.22f, 0.08f, 0.95f)
                         : D2D1::ColorF(0.08f, 0.10f, 0.14f, 0.90f));
-                const auto member = std::find_if(partySnapshot.members.begin(),
-                    partySnapshot.members.end(), [slot](const TownProtocol::PartyMemberInfo& inMember)
-                    {
-                        return inMember.slot == slot;
-                    });
-                std::wstring label = L"[" + std::to_wstring(slot) + L"] ";
-                if (member == partySnapshot.members.end())
+                std::wstring label;
+                if (member.playerId == partySnapshot.leaderPlayerId)
                 {
-                    label += L"비어 있음";
+                    label = L"[파티장] ";
                 }
-                else
-                {
-                    if (member->playerId == partySnapshot.leaderPlayerId)
-                    {
-                        label += L"[파티장] ";
-                    }
-                    label += Utf8ToWide(member->playerName);
-                }
-                inRenderer.DrawText(label, layout.middle + 20.0f, top + 6.0f,
+                label += Utf8ToWide(member.playerName);
+                inRenderer.DrawText(label, layout.panel.left + 30.0f, top + 6.0f,
                     layout.panel.right - 24.0f, top + 31.0f,
                     D2D1::ColorF(0.90f, 0.92f, 0.94f));
             }
 
-            const bool canInvite = !nearbyPlayerIds.empty();
             const bool canKick = IsPartyLeader();
-            const bool canLeave = partySnapshot.partyId != 0;
-            inRenderer.FillRectangle(layout.inviteButton.left, layout.inviteButton.top,
-                layout.inviteButton.right, layout.inviteButton.bottom,
-                canInvite ? D2D1::ColorF(0.16f, 0.34f, 0.50f) : D2D1::ColorF(0.12f, 0.13f, 0.15f));
             inRenderer.FillRectangle(layout.kickButton.left, layout.kickButton.top,
                 layout.kickButton.right, layout.kickButton.bottom,
                 canKick ? D2D1::ColorF(0.48f, 0.18f, 0.10f) : D2D1::ColorF(0.12f, 0.13f, 0.15f));
             inRenderer.FillRectangle(layout.leaveButton.left, layout.leaveButton.top,
                 layout.leaveButton.right, layout.leaveButton.bottom,
-                canLeave ? D2D1::ColorF(0.36f, 0.15f, 0.14f) : D2D1::ColorF(0.12f, 0.13f, 0.15f));
-            inRenderer.DrawText(L"선택한 플레이어 초대", layout.inviteButton.left + 14.0f,
-                layout.inviteButton.top + 6.0f, layout.inviteButton.right - 10.0f,
-                layout.inviteButton.bottom - 4.0f, D2D1::ColorF(0.92f, 0.95f, 1.0f));
+                D2D1::ColorF(0.36f, 0.15f, 0.14f));
             inRenderer.DrawText(L"강퇴", layout.kickButton.left + 14.0f,
                 layout.kickButton.top + 6.0f, layout.kickButton.right - 10.0f,
                 layout.kickButton.bottom - 4.0f, D2D1::ColorF(0.96f, 0.90f, 0.86f));
@@ -1154,6 +1398,143 @@ namespace ActionRPG
             inRenderer.DrawText(partyStatusText, layout.panel.left + 22.0f,
                 layout.panel.bottom - 42.0f, layout.panel.right - 22.0f,
                 layout.panel.bottom - 12.0f, D2D1::ColorF(0.96f, 0.78f, 0.34f));
+        }
+        else if (systemUiPage == SystemUiPage::PartyDirectory)
+        {
+            const PartyLayout layout = CalculatePartyLayout(
+                camera.GetViewportWidth(), camera.GetViewportHeight());
+            inRenderer.FillRectangle(layout.panel.left, layout.panel.top,
+                layout.panel.right, layout.panel.bottom,
+                D2D1::ColorF(0.035f, 0.045f, 0.065f, 0.98f));
+            inRenderer.DrawRectangle(layout.panel.left, layout.panel.top,
+                layout.panel.right, layout.panel.bottom,
+                D2D1::ColorF(0.45f, 0.68f, 0.88f), 2.0f);
+            inRenderer.DrawText(L"공개 파티 목록", layout.panel.left + 22.0f,
+                layout.panel.top + 14.0f, layout.panel.right - 160.0f,
+                layout.panel.top + 44.0f, D2D1::ColorF(0.90f, 0.94f, 1.0f));
+            inRenderer.DrawText(L"ESC  메뉴로", layout.panel.right - 150.0f,
+                layout.panel.top + 16.0f, layout.panel.right - 20.0f,
+                layout.panel.top + 44.0f, D2D1::ColorF(0.68f, 0.74f, 0.82f));
+            inRenderer.DrawText(L"공개 파티 " + std::to_wstring(partyDirectoryPage.totalCount)
+                + L"개", layout.panel.left + 22.0f, layout.panel.top + 58.0f,
+                layout.panel.right - 22.0f, layout.panel.top + 84.0f,
+                D2D1::ColorF(0.82f, 0.86f, 0.92f));
+            constexpr float ROW_HEIGHT = 48.0f;
+            const float listTop = layout.panel.top + 92.0f;
+            for (std::size_t index = 0; index < partyDirectoryPage.parties.size(); ++index)
+            {
+                const auto& party = partyDirectoryPage.parties[index];
+                const float top = listTop + static_cast<float>(index) * ROW_HEIGHT;
+                inRenderer.FillRectangle(layout.panel.left + 22.0f, top,
+                    layout.panel.right - 22.0f, top + ROW_HEIGHT - 4.0f,
+                    D2D1::ColorF(0.08f, 0.10f, 0.14f, 0.90f));
+                const std::wstring heading = Utf8ToWide(party.title) + L"  ["
+                    + std::to_wstring(party.members.size()) + L"/8]  파티장 "
+                    + Utf8ToWide(party.leaderName);
+                inRenderer.DrawText(heading, layout.panel.left + 30.0f, top + 2.0f,
+                    layout.panel.right - 30.0f, top + 24.0f,
+                    D2D1::ColorF(0.96f, 0.92f, 0.80f));
+                std::wstring members = L"인원: ";
+                for (const auto& member : party.members)
+                {
+                    if (members.size() > 4)
+                    {
+                        members += L", ";
+                    }
+                    members += Utf8ToWide(member.playerName);
+                }
+                inRenderer.DrawText(members, layout.panel.left + 30.0f, top + 24.0f,
+                    layout.panel.right - 30.0f, top + 44.0f,
+                    D2D1::ColorF(0.75f, 0.82f, 0.90f));
+            }
+            const float center = (layout.panel.left + layout.panel.right) * 0.5f;
+            const float buttonTop = layout.panel.bottom - 60.0f;
+            inRenderer.FillRectangle(layout.panel.right - 170.0f,
+                layout.panel.top + 54.0f, layout.panel.right - 22.0f,
+                layout.panel.top + 90.0f,
+                D2D1::ColorF(0.16f, 0.28f, 0.42f));
+            inRenderer.DrawText(L"파티 생성", layout.panel.right - 158.0f,
+                layout.panel.top + 60.0f, layout.panel.right - 30.0f,
+                layout.panel.top + 86.0f,
+                D2D1::ColorF(0.92f, 0.95f, 1.0f));
+            inRenderer.FillRectangle(center - 150.0f, buttonTop,
+                center - 80.0f, buttonTop + 36.0f,
+                partyDirectoryPage.page > 1 ? D2D1::ColorF(0.20f, 0.32f, 0.46f)
+                    : D2D1::ColorF(0.12f, 0.13f, 0.15f));
+            inRenderer.FillRectangle(center + 80.0f, buttonTop,
+                center + 150.0f, buttonTop + 36.0f,
+                partyDirectoryPage.page < partyDirectoryPage.totalPages
+                    ? D2D1::ColorF(0.20f, 0.32f, 0.46f)
+                    : D2D1::ColorF(0.12f, 0.13f, 0.15f));
+            inRenderer.DrawText(L"<", center - 128.0f, buttonTop + 6.0f,
+                center - 88.0f, buttonTop + 32.0f, D2D1::ColorF(0.94f, 0.94f, 0.92f));
+            inRenderer.DrawText(L">", center + 106.0f, buttonTop + 6.0f,
+                center + 146.0f, buttonTop + 32.0f, D2D1::ColorF(0.94f, 0.94f, 0.92f));
+            inRenderer.DrawText(std::to_wstring(std::max(1U, partyDirectoryPage.page)) + L"/"
+                + std::to_wstring(std::max(1U, partyDirectoryPage.totalPages)),
+                center - 70.0f, buttonTop + 6.0f, center + 70.0f, buttonTop + 32.0f,
+                D2D1::ColorF(0.94f, 0.94f, 0.92f));
+        }
+        else if (systemUiPage == SystemUiPage::PartyCreate)
+        {
+            const D2D1_RECT_F dialog = GetPartyCreateDialog(
+                camera.GetViewportWidth(), camera.GetViewportHeight());
+            const D2D1_RECT_F createButton = D2D1::RectF(
+                dialog.left + 24.0f, dialog.bottom - 64.0f,
+                dialog.left + 154.0f, dialog.bottom - 24.0f);
+            const D2D1_RECT_F cancelButton = D2D1::RectF(
+                dialog.left + 168.0f, dialog.bottom - 64.0f,
+                dialog.left + 298.0f, dialog.bottom - 24.0f);
+            inRenderer.FillRectangle(dialog.left, dialog.top, dialog.right, dialog.bottom,
+                D2D1::ColorF(0.035f, 0.045f, 0.065f, 0.98f));
+            inRenderer.DrawRectangle(dialog.left, dialog.top, dialog.right, dialog.bottom,
+                D2D1::ColorF(0.45f, 0.68f, 0.88f), 2.0f);
+            inRenderer.DrawText(L"파티 생성", dialog.left + 24.0f, dialog.top + 20.0f,
+                dialog.right - 24.0f, dialog.top + 52.0f,
+                D2D1::ColorF(0.90f, 0.94f, 1.0f));
+            inRenderer.DrawText(L"파티 제목", dialog.left + 24.0f, dialog.top + 58.0f,
+                dialog.right - 24.0f, dialog.top + 84.0f,
+                D2D1::ColorF(0.82f, 0.86f, 0.92f));
+            inRenderer.FillRectangle(dialog.left + 24.0f, dialog.top + 88.0f,
+                dialog.right - 24.0f, dialog.top + 128.0f,
+                D2D1::ColorF(0.12f, 0.16f, 0.23f));
+            inRenderer.DrawText(newPartyTitleDraft.empty() ? L"제목을 입력하세요"
+                : newPartyTitleDraft, dialog.left + 36.0f, dialog.top + 96.0f,
+                dialog.right - 36.0f, dialog.top + 124.0f,
+                D2D1::ColorF(0.94f, 0.94f, 0.92f));
+            inRenderer.FillRectangle(dialog.left + 24.0f, dialog.top + 144.0f,
+                dialog.left + 46.0f, dialog.top + 166.0f,
+                D2D1::ColorF(0.10f, 0.14f, 0.19f));
+            inRenderer.DrawRectangle(dialog.left + 24.0f, dialog.top + 144.0f,
+                dialog.left + 46.0f, dialog.top + 166.0f,
+                D2D1::ColorF(0.65f, 0.78f, 0.88f), 1.5f);
+            if (newPartyIsPublic)
+            {
+                inRenderer.FillRectangle(dialog.left + 29.0f, dialog.top + 149.0f,
+                    dialog.left + 41.0f, dialog.top + 161.0f,
+                    D2D1::ColorF(0.32f, 0.72f, 0.45f));
+            }
+            inRenderer.DrawText(L"공개 파티로 생성", dialog.left + 58.0f,
+                dialog.top + 141.0f, dialog.right - 24.0f,
+                dialog.top + 169.0f, D2D1::ColorF(0.88f, 0.91f, 0.94f));
+            inRenderer.FillRectangle(createButton.left, createButton.top,
+                createButton.right, createButton.bottom,
+                partyCreationPending ? D2D1::ColorF(0.12f, 0.13f, 0.15f)
+                    : D2D1::ColorF(0.16f, 0.34f, 0.50f));
+            inRenderer.FillRectangle(cancelButton.left, cancelButton.top,
+                cancelButton.right, cancelButton.bottom,
+                D2D1::ColorF(0.18f, 0.20f, 0.24f));
+            inRenderer.DrawText(partyCreationPending ? L"생성 중" : L"생성",
+                createButton.left + 14.0f, createButton.top + 7.0f,
+                createButton.right - 10.0f, createButton.bottom - 4.0f,
+                D2D1::ColorF(0.92f, 0.95f, 1.0f));
+            inRenderer.DrawText(L"취소", cancelButton.left + 14.0f,
+                cancelButton.top + 7.0f, cancelButton.right - 10.0f,
+                cancelButton.bottom - 4.0f,
+                D2D1::ColorF(0.92f, 0.95f, 1.0f));
+            inRenderer.DrawText(partyStatusText, dialog.left + 24.0f,
+                dialog.top + 176.0f, dialog.right - 24.0f,
+                dialog.top + 202.0f, D2D1::ColorF(0.96f, 0.78f, 0.34f));
         }
 
         if (pendingPartyInvitation.has_value())
@@ -1183,26 +1564,6 @@ namespace ActionRPG
                 declineButton.right - 12.0f, declineButton.bottom - 4.0f,
                 D2D1::ColorF(1.0f, 0.92f, 0.88f));
         }
-    }
-
-    std::vector<std::uint64_t> GameWorld::GetNearbyPlayerIds() const
-    {
-        std::vector<std::uint64_t> result;
-        result.reserve(remotePlayers.size());
-        for (const auto& [playerId, remotePlayer] : remotePlayers)
-        {
-            const bool alreadyInParty = std::ranges::any_of(partySnapshot.members,
-                [playerId](const TownProtocol::PartyMemberInfo& inMember)
-                {
-                    return inMember.playerId == playerId;
-                });
-            if (!alreadyInParty)
-            {
-                result.push_back(playerId);
-            }
-        }
-        std::ranges::sort(result);
-        return result;
     }
 
     bool GameWorld::IsPartyLeader() const noexcept

@@ -20,7 +20,8 @@ namespace ActionRPG
         TownProtocol::PlayerMove, TownProtocol::PlayerDisappear,
         TownProtocol::EnterDungeonResponse, TownProtocol::MapChanged,
         TownProtocol::DungeonSelectionOpen, TownProtocol::PartyInvitation,
-        TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult>;
+        TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult,
+        TownProtocol::PartyDirectoryPage, TownProtocol::PartyDirectoryChanged>;
 
     class TownClient final
     {
@@ -41,6 +42,10 @@ namespace ActionRPG
         void AnswerPartyInvitation(std::uint64_t inInvitationId, bool inAccepted);
         void LeaveParty();
         void KickPartyMember(std::uint64_t inTargetPlayerId);
+        void CreateParty(std::string inTitle, bool inIsPublic);
+        void UpdatePartySettings(std::string inTitle, bool inIsPublic);
+        void RequestPartyDirectoryPage(std::uint32_t inPage);
+        void UnsubscribePartyDirectory();
         [[nodiscard]] std::vector<TownEvent> ConsumeEvents();
         [[nodiscard]] bool IsConnected() const noexcept;
 

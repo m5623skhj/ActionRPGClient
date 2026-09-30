@@ -27,6 +27,7 @@ namespace ActionRPG
         auto previousTime = Clock::now();
         double accumulatedSeconds = 0.0;
         std::vector<InputKey> pendingPressedKeys;
+        std::wstring pendingTextInput;
         int pendingMouseWheelDelta = 0;
         bool pendingLeftMousePressed = false;
         float pendingClickX = 0.0f;
@@ -61,6 +62,7 @@ namespace ActionRPG
                 pendingPressedKeys.end(),
                 inputState.pressedKeys.begin(),
                 inputState.pressedKeys.end());
+            pendingTextInput += inputState.textInput;
             pendingMouseWheelDelta += inputState.mouseWheelDelta;
             if (inputState.leftMousePressed && !pendingLeftMousePressed)
             {
@@ -72,12 +74,14 @@ namespace ActionRPG
             {
                 InputState updateInput = inputState;
                 updateInput.pressedKeys = std::move(pendingPressedKeys);
+                updateInput.textInput = std::move(pendingTextInput);
                 updateInput.mouseWheelDelta = pendingMouseWheelDelta;
                 updateInput.leftMousePressed = pendingLeftMousePressed;
                 updateInput.clickX = pendingClickX;
                 updateInput.clickY = pendingClickY;
                 game.Update(static_cast<float>(FIXED_UPDATE_SECONDS), updateInput);
                 pendingPressedKeys.clear();
+                pendingTextInput.clear();
                 pendingMouseWheelDelta = 0;
                 pendingLeftMousePressed = false;
                 accumulatedSeconds -= FIXED_UPDATE_SECONDS;

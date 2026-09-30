@@ -51,6 +51,7 @@ namespace ActionRPG
         float pendingClickY{};
         int pendingMouseWheelDelta{};
         bool pendingLeftMousePressed{};
+        std::wstring pendingTextInput;
         std::array<bool, 256> keyStates{};
         std::vector<InputKey> pendingPressedKeys;
     };

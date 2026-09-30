@@ -173,6 +173,54 @@ namespace ActionRPG
         });
     }
 
+    void TownClient::UpdatePartySettings(std::string inTitle, const bool inIsPublic)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartySettingsRequest{ std::move(inTitle), inIsPublic })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
+    void TownClient::CreateParty(std::string inTitle, const bool inIsPublic)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyCreateRequest{ std::move(inTitle), inIsPublic })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
+    void TownClient::RequestPartyDirectoryPage(const std::uint32_t inPage)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyDirectoryPageRequest{ inPage })]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
+    void TownClient::UnsubscribePartyDirectory()
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyDirectoryUnsubscribe{})]() mutable
+        {
+            if (connected.load())
+            {
+                QueuePacket(std::move(packet));
+            }
+        });
+    }
+
     std::vector<TownEvent> TownClient::ConsumeEvents()
     {
         std::scoped_lock lock(eventMutex);
@@ -322,6 +370,14 @@ namespace ActionRPG
             break;
         case TownProtocol::PacketType::PartyOperationResult:
             if (auto packet = TownProtocol::DecodePartyOperationResult(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartyDirectoryPage:
+            if (auto packet = TownProtocol::DecodePartyDirectoryPage(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartyDirectoryChanged:
+            if (auto packet = TownProtocol::DecodePartyDirectoryChanged(receiveBody)) PushEvent(std::move(*packet));
             else HandleDisconnect();
             break;
         default:

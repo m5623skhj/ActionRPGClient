@@ -112,12 +112,14 @@ namespace ActionRPG
             .clickY = pendingClickY,
             .mouseWheelDelta = pendingMouseWheelDelta,
             .leftMousePressed = pendingLeftMousePressed,
+            .textInput = std::move(pendingTextInput),
             .pressedKeys = std::move(pendingPressedKeys)
         };
 
         pendingPressedKeys.clear();
         pendingMouseWheelDelta = 0;
         pendingLeftMousePressed = false;
+        pendingTextInput.clear();
         return inputState;
     }
 
@@ -198,11 +200,19 @@ namespace ActionRPG
             pendingMouseWheelDelta += GET_WHEEL_DELTA_WPARAM(inWParam);
             return 0;
 
+        case WM_CHAR:
+            if (inWParam <= 0xFFFF)
+            {
+                pendingTextInput.push_back(static_cast<wchar_t>(inWParam));
+            }
+            return 0;
+
         case WM_KILLFOCUS:
             keyStates.fill(false);
             pendingPressedKeys.clear();
             pendingMouseWheelDelta = 0;
             pendingLeftMousePressed = false;
+            pendingTextInput.clear();
             return 0;
 
         case WM_CLOSE:
