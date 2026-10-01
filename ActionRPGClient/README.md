@@ -83,6 +83,21 @@ msbuild .\ActionRPGClient\ActionRPGClient.vcxproj /p:Configuration=Debug /p:Plat
 
 Debug 실행 파일은 `artifacts/bin/x64/Debug/ActionRPGClient.exe`에 생성됩니다.
 
+### 빌드 없이 에셋 반영
+
+클라이언트를 한 번 이상 빌드한 상태라면 `SyncClientAssets.bat`으로 C++ 빌드 없이
+프로젝트의 `Assets`를 실행 파일 옆에 즉시 동기화할 수 있습니다.
+
+```bat
+SyncClientAssets.bat
+SyncClientAssets.bat Release
+```
+
+인자를 생략하면 `Debug | x64`에 반영합니다. `Release`를 지정하면
+`Release | x64` 실행 폴더에 반영합니다. 원본에서 삭제한 에셋은 실행 폴더에서도
+삭제되므로 프로젝트의 `Assets`를 원본으로 관리해야 합니다. 실행 중인 클라이언트는
+이미지와 데이터를 캐시할 수 있으므로 동기화 후 재시작합니다.
+
 클라이언트는 기본적으로 `127.0.0.1:7777`의 TownServer에 연결합니다. 서버를 먼저
 실행한 뒤 클라이언트를 여러 번 실행하면 원격 플레이어의 Appear, 이동,
 Disappear를 확인할 수 있습니다.
