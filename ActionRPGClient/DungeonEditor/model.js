@@ -15,7 +15,7 @@ window.DungeonModel = (() => {
     return prefix + i;
   };
   function createDocument() {
-    return { schemaVersion: 2, dungeonId: "Dungeon", name: "새 던전", maxPlayers: 4,
+    return { schemaVersion: 3, dataId: 1, dungeonId: "Dungeon", name: "새 던전", maxPlayers: 4,
       entryRoomId: "", rooms: [], connections: [], assets: [] };
   }
   function createRoom(document) {
@@ -24,7 +24,7 @@ window.DungeonModel = (() => {
     return { id: unique("Room", document.rooms), name: "새 방", kind: "normal", layout: { x, y: 0 },
       world: { left: 0, top: 0, right: 1280, bottom: 720 },
       sectorWidth: 480, sectorHeight: 480, images: [], walkablePolygons: [], blockedPolygons: [],
-      playerSpawns: [], entryPoints: [], defaultEntryPointId: "", warpZones: [], objects: [] };
+      playerSpawns: [], entryPoints: [], defaultEntryPointId: "", warpZones: [], objects: [], monsters: [] };
   }
   // Reject malformed containers before UI access; semantic errors stay editable.
   function parse(text) {
@@ -38,7 +38,7 @@ window.DungeonModel = (() => {
     const polygon = value => list(value, 64) && value.every(point);
     const location = value => obj(value) && str(value.id) && point(value.position);
     const rectangle = value => obj(value) && ["x", "y", "width", "height"].every(key => num(value[key]));
-    const migrated = obj(document) && document.schemaVersion === 1;
+    const migrated = obj(document) && [1, 2].includes(document.schemaVersion);
     // Old geometry is preserved. Infer a side only from its physical boundary, never the graph.
     if (obj(document) && document.schemaVersion === 1 && list(document.rooms, 256)) {
       for (const room of document.rooms) {
@@ -52,7 +52,12 @@ window.DungeonModel = (() => {
       }
       document.schemaVersion = 2;
     }
-    if (!obj(document) || document.schemaVersion !== 2 || !str(document.dungeonId) ||
+    if (obj(document) && document.schemaVersion === 2 && list(document.rooms, 256)) {
+      document.dataId = 1;
+      for (const room of document.rooms) { if (!obj(room)) fail(); room.monsters = []; }
+      document.schemaVersion = 3;
+    }
+    if (!obj(document) || !num(document.dataId) || document.schemaVersion !== 3 || !str(document.dungeonId) ||
         !str(document.name) || !str(document.entryRoomId) || !num(document.maxPlayers) ||
         !list(document.rooms, 256) || !list(document.connections, 1024) || !list(document.assets, 512)) fail();
     for (const room of document.rooms) {
@@ -69,6 +74,8 @@ window.DungeonModel = (() => {
           !list(room.warpZones, 256) || !room.warpZones.every(zone => obj(zone) && str(zone.id) &&
             polygon(zone.polygon) && ["connectionId", "targetRoomId", "targetEntryPointId"].every(key => str(zone[key])) &&
             ["", ...SIDES].includes(zone.direction) && rectangle(zone.visual) && ["gate", "pad"].includes(zone.visual.kind) && str(zone.visual.asset)) ||
+          !list(room.monsters, 256) || !room.monsters.every(item => location(item) && num(item.dataId) &&
+            typeof item.facingLeft === "boolean") ||
           !list(room.objects, 256) || !room.objects.every(item => rectangle(item) && ["id", "name", "type", "asset"].every(key => str(item[key])) &&
             obj(item.properties) && JSON.stringify(item.properties).length <= 20000)) fail();
       delete room.walkSpeed; delete room.runSpeed;
@@ -205,6 +212,10 @@ window.DungeonModel = (() => {
         seen.add(value.id.toLowerCase());
       }
     };
+    if (!Number.isInteger(document.dataId) || document.dataId < 1 || document.dataId > 1000000)
+      add("서버 던전 Data ID는 1~1000000의 정수여야 합니다.");
+    if (document.rooms.reduce((sum, room) => sum + room.monsters.length, 0) > 4096)
+      add("던전 전체 몬스터는 4096개까지 배치할 수 있습니다.");
     if (!ID.test(document.dungeonId)) add("던전 ID 형식이 올바르지 않습니다.");
     if (!document.name.trim()) add("던전 이름을 입력하세요.");
     if (!Number.isInteger(document.maxPlayers) || document.maxPlayers < 1 || document.maxPlayers > 32) add("최대 인원은 1~32명이어야 합니다.");
@@ -235,7 +246,7 @@ window.DungeonModel = (() => {
         error("섹터 수가 65536개를 초과합니다. 섹터 크기를 늘리세요.");
       if (!room.images.length) error("배경 이미지를 추가하세요.");
       if (room.images.length > 64 || room.walkablePolygons.length > 256 || room.blockedPolygons.length > 256 ||
-          room.entryPoints.length > 256 || room.warpZones.length > 256 || room.playerSpawns.length > 32 || room.objects.length > 256) error("방의 요소 수 제한을 초과했습니다.");
+          room.entryPoints.length > 256 || room.warpZones.length > 256 || room.playerSpawns.length > 32 || room.objects.length > 256 || room.monsters.length > 256) error("방의 요소 수 제한을 초과했습니다.");
       for (const image of room.images) {
         if (!assets.has(image.asset)) error("배경 이미지 파일을 찾을 수 없습니다: " + image.asset);
         if (image.width <= 0 || image.height <= 0 || image.width > 100000 || image.height > 100000) error("이미지 표시 크기가 올바르지 않습니다.");
@@ -255,6 +266,7 @@ window.DungeonModel = (() => {
       if (vertices > 32768) error("방의 전체 꼭짓점 수가 맵 형식 제한(32768개)을 초과했습니다.");
       checkIds(room.playerSpawns, label + "입장 위치", room.id);
       checkIds(room.warpZones, label + "워프존", room.id);
+      checkIds(room.monsters, label + "몬스터", room.id);
       checkIds(room.objects, label + "특수 오브젝트", room.id);
       const checkVisual = (visual, name) => {
         if (visual.width <= 0 || visual.height <= 0 || visual.width > 100000 || visual.height > 100000 ||
@@ -267,6 +279,19 @@ window.DungeonModel = (() => {
         if (!ID.test(item.type) || !item.name.trim()) error(item.id + ": 오브젝트 종류와 이름을 입력하세요.");
       }
       if (!room.entryPoints.some(entry => entry.id === room.defaultEntryPointId)) error("기본 워프 도착점을 지정하세요.");
+      for (const monster of room.monsters) {
+        if (monster.dataId !== 1) error(monster.id + ": 지원하지 않는 몬스터 Data ID입니다.");
+        if (valid && !movable(room, monster.position)) error(monster.id + ": 몬스터의 발 영역이 이동 가능 지역 안에 있어야 합니다.");
+        if (room.warpZones.some(zone => contains(monster.position, zone.polygon)))
+          error(monster.id + ": 워프존 안에는 몬스터를 배치할 수 없습니다.");
+        if (room.playerSpawns.some(point => Math.hypot((point.position.x - monster.position.x) / 64,
+            (point.position.y - monster.position.y) / 36) < 1))
+          error(monster.id + ": 플레이어 입장 위치와 겹칩니다.");
+      }
+      for (let i = 0; i < room.monsters.length; ++i) for (let j = i + 1; j < room.monsters.length; ++j) {
+        const a = room.monsters[i].position, b = room.monsters[j].position;
+        if (Math.hypot((a.x - b.x) / 64, (a.y - b.y) / 36) < 1) error("몬스터 " + (i + 1) + " / " + (j + 1) + "의 발 영역이 겹칩니다.");
+      }
       for (const point of [...room.entryPoints, ...room.playerSpawns])
         if (valid && !movable(room, point.position)) error(point.id + ": 발 영역(가로 반경 32, 세로 반경 18)이 이동 가능한 지형 안에 있어야 합니다.");
       if (room.id === document.entryRoomId && room.playerSpawns.length < document.maxPlayers) error("최대 인원만큼 최초 입장 위치를 지정하세요.");
@@ -325,6 +350,12 @@ window.DungeonModel = (() => {
     const rect = (x, y, width, height, fill, stroke = "", lineWidth = 4) => ({ type: "rect", x, y, width, height, fill, stroke, lineWidth });
     const ellipse = (x, y, rx, ry, fill, stroke = "", lineWidth = 4) => ({ type: "ellipse", x, y, rx, ry, fill, stroke, lineWidth });
     const polygon = (points, fill, stroke = "", lineWidth = 4) => ({ type: "polygon", points, fill, stroke, lineWidth });
+    if (kind === "dummy") return [
+      rect(44, 58, 12, 34, "#573a27"), rect(22, 90, 56, 10, "#39271f"),
+      rect(8, 32, 84, 12, "#573a27"), rect(28, 24, 44, 42, "#a87642"),
+      rect(32, 28, 36, 34, "#c49a60"), rect(38, 36, 24, 18, "#8c4935"),
+      rect(44, 40, 12, 10, "#ebd0a0"), rect(34, 0, 32, 24, "#a87642"),
+      rect(38, 4, 24, 16, "#c49a60"), rect(40, 10, 4, 4, "#39271f"), rect(56, 10, 4, 4, "#39271f") ];
     if (kind === "boss") return [
       rect(6, 6, 88, 88, "#49351c", "#ffd36d", 6),
       ellipse(50, 43, 27, 25, "#ffd36d"), rect(34, 55, 32, 23, "#ffd36d"),
@@ -423,7 +454,7 @@ window.DungeonModel = (() => {
     const mapId = roomId => document.dungeonId + "_" + roomId;
     const assetPath = path => "Images/Dungeons/" + document.dungeonId + "_" + path.split("/").pop();
     const visual = (value, kind) => ({ ...value, asset: value.asset ? assetPath(value.asset) : builtinAssetPath(document, kind) });
-    const manifest = { version: 2, dungeonId: document.dungeonId, name: document.name, maxPlayers: document.maxPlayers,
+    const manifest = { version: 3, dataId: document.dataId, dungeonId: document.dungeonId, name: document.name, maxPlayers: document.maxPlayers,
       entryRoomId: document.entryRoomId, entryMapId: mapId(document.entryRoomId),
       rooms: document.rooms.map(room => ({ id: room.id, name: room.name, kind: room.kind, mapId: mapId(room.id),
         mapPath: "Maps/" + mapId(room.id) + ".json", layout: clone(room.layout), playerSpawns: clone(room.playerSpawns) })),
@@ -438,12 +469,12 @@ window.DungeonModel = (() => {
       const objects = room.objects.map(item => visual(item, "object"));
       const decorations = [...objects, ...gates.map(zone => zone.visual)].map(item => ({
         asset: item.asset, x: item.x, y: item.y, width: item.width, height: item.height }));
-      files.push({ name: "Maps/" + mapId(room.id) + ".json", data: JSON.stringify({ version: 4, format: "DungeonRoom", mapId: mapId(room.id),
+      files.push({ name: "Maps/" + mapId(room.id) + ".json", data: JSON.stringify({ version: 5, format: "DungeonRoom", mapId: mapId(room.id),
         world: room.world, sectorWidth: room.sectorWidth, sectorHeight: room.sectorHeight,
         spawn: room.id === document.entryRoomId ? room.playerSpawns[0].position : entry.position,
         images: [...room.images.map(image => ({ ...image, asset: assetPath(image.asset) })), ...decorations],
         walkablePolygons: room.walkablePolygons, blockedPolygons: room.blockedPolygons, entryPoints: room.entryPoints,
-        objects, transitionZones: gates.map(zone => ({ id: zone.id, polygon: zone.polygon, connectionId: zone.connectionId,
+        objects, monsters: clone(room.monsters), transitionZones: gates.map(zone => ({ id: zone.id, polygon: zone.polygon, connectionId: zone.connectionId,
           direction: zone.direction, visual: zone.visual,
           action: { type: "MapTransfer", targetMapId: mapId(zone.targetRoomId), targetEntryPointId: zone.targetEntryPointId } })) }, null, 2) + "\n" });
     }

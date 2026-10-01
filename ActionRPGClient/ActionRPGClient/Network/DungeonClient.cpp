@@ -8,8 +8,10 @@
 #include <RUDPClientCore.h>
 
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -208,10 +210,19 @@ namespace ActionRPG
     void DungeonClient::Stop()
     {
         impl->StopClient();
+        worldJson.clear(); worldBytes = 0; receivingWorld = false;
+    }
+
+    void DungeonClient::RequestWorld()
+    {
+        worldJson.clear(); worldBytes = 0; receivingWorld = true;
+        worldDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        DungeonProtocol::DungeonWorldRequest request; request.offset = 0; SendReliable(request);
     }
 
     DungeonConnectionState DungeonClient::GetConnectionState() const
     {
+        if (receivingWorld && std::chrono::steady_clock::now() > worldDeadline) return DungeonConnectionState::Failed;
         return impl->GetConnectionState();
     }
 
@@ -274,6 +285,41 @@ namespace ActionRPG
                 {
                     events.emplace_back(DungeonAuthResultEvent{ packet.succeeded != 0 });
                 }
+                break;
+            }
+            case DungeonProtocol::PacketType::DUNGEON_WORLD_CHUNK:
+            {
+                DungeonProtocol::DungeonWorldChunk packet;
+                packet.BufferToPacket(*buffer);
+                if (!receivingWorld || packet.totalBytes == 0 || packet.totalBytes > 4 * 1024 * 1024
+                    || (worldBytes != 0 && worldBytes != packet.totalBytes) || packet.offset != worldJson.size()
+                    || packet.payload.empty() || packet.payload.size() > 768
+                    || packet.payload.size() > packet.totalBytes - std::min(packet.offset, packet.totalBytes)
+                    || buffer->GetBufferError() != 0 || buffer->GetUseSize() != 0)
+                { invalidPacket = true; break; }
+                worldBytes = packet.totalBytes; worldJson += packet.payload;
+                worldDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+                if (worldJson.size() == worldBytes)
+                {
+                    receivingWorld = false;
+                    events.emplace_back(DungeonWorldEvent{std::move(worldJson)});
+                    worldJson.clear();
+                }
+                else
+                {
+                    DungeonProtocol::DungeonWorldRequest request;
+                    request.offset = static_cast<std::uint32_t>(worldJson.size()); SendReliable(request);
+                }
+                break;
+            }
+            case DungeonProtocol::PacketType::DUNGEON_PLAYER_STATE:
+            {
+                DungeonProtocol::DungeonPlayerState packet;
+                packet.BufferToPacket(*buffer);
+                if (receivingWorld || packet.sequence == 0 || packet.mapId.empty() || packet.mapId.size() > 64
+                    || !std::isfinite(packet.x) || !std::isfinite(packet.y) || std::abs(packet.x) > 1000000 || std::abs(packet.y) > 1000000)
+                    invalidPacket = true;
+                else events.emplace_back(DungeonPlayerStateEvent{packet.sequence, std::move(packet.mapId), packet.x, packet.y});
                 break;
             }
             default:

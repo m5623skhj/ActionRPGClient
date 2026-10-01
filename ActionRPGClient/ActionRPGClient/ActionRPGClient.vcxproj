@@ -101,6 +101,8 @@
     <ClCompile Include="Core\IniDocument.cpp" />
     <ClCompile Include="Game\Game.cpp" />
     <ClCompile Include="Game\GameplayMap.cpp" />
+    <ClCompile Include="Game\Monster.cpp" />
+    <ClCompile Include="Game\DungeonWorld.cpp" />
     <ClCompile Include="Game\GameWorld.cpp" />
     <ClCompile Include="Game\InputCommandQueue.cpp" />
     <ClCompile Include="Game\MapBackground.cpp" />
@@ -127,6 +129,8 @@
     <ClInclude Include="Game\Camera.h" />
     <ClInclude Include="Game\Game.h" />
     <ClInclude Include="Game\GameplayMap.h" />
+    <ClInclude Include="Game\Monster.h" />
+    <ClInclude Include="Game\DungeonWorld.h" />
     <ClInclude Include="Game\GameWorld.h" />
     <ClInclude Include="Game\InputCommandQueue.h" />
     <ClInclude Include="Game\MapBackground.h" />
@@ -160,6 +164,7 @@
     <None Include="..\Assets\Data\system_menu.ini" />
     <None Include="ClientOptionFile\CoreOption.txt" />
     <None Include="..\Assets\README.md" />
+    <None Include="..\Assets\Images\Monsters\dummy.png" />
     <None Include="..\Assets\Images\Characters\player_idle.png" />
     <None Include="..\Assets\Images\Characters\player_run.png" />
     <None Include="..\Assets\Images\Characters\player_shoot.png" />

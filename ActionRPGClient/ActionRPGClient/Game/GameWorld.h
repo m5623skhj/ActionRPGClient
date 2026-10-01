@@ -2,6 +2,7 @@
 
 #include "Core/IniDocument.h"
 #include "Game/Camera.h"
+#include "Game/DungeonWorld.h"
 #include "Game/GameplayMap.h"
 #include "Game/InputCommandQueue.h"
 #include "Game/MapBackground.h"
@@ -18,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -71,6 +73,7 @@ namespace ActionRPG
             WaitingRoom,
             Connecting,
             WaitingAuthentication,
+            WaitingWorld,
             Entered
         };
 
@@ -110,6 +113,7 @@ namespace ActionRPG
         void RequestDungeon(std::uint32_t inDungeonId);
         void ApplyMap(const TownProtocol::MapInfo& inMap, Vector2 inPosition);
         void ResetDungeonEntry();
+        void ApplyDungeonMap(const std::string& inMapId, Vector2 inPosition);
         void UpdateRemotePlayers(float inDeltaSeconds);
         void SendMovementInput(const InputState& inInput, float inDeltaSeconds);
         void RenderTransitionZones(D2DRenderer& inRenderer) const;
@@ -150,6 +154,15 @@ namespace ActionRPG
         std::vector<TownProtocol::DungeonOption> dungeonOptions;
         std::uint64_t dungeonRoomId{};
         std::uint64_t combatSeed{};
+        std::optional<DungeonWorld> dungeonWorld;
+        std::unordered_map<std::string, std::vector<std::unique_ptr<Monster>>> dungeonMonsters;
+        std::string dungeonMapId;
+        std::unique_ptr<Monster> dummyTemplate;
+        std::optional<TownProtocol::MapInfo> lastTownMap;
+        Vector2 lastTownPosition{};
+        bool lastDungeonRun{};
+        std::uint32_t dungeonMovementSequence{};
+        std::uint32_t lastDungeonStateSequence{};
         std::vector<SystemMenuEntry> systemMenuEntries;
         SystemUiPage systemUiPage = SystemUiPage::Closed;
         float systemMenuScrollOffset{};

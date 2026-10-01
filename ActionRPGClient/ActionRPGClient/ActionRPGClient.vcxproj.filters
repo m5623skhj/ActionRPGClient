@@ -18,6 +18,8 @@
     <ClCompile Include="Core\IniDocument.cpp"><Filter>Core</Filter></ClCompile>
     <ClCompile Include="Game\Game.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\GameplayMap.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\Monster.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\DungeonWorld.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\GameWorld.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\InputCommandQueue.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\MapBackground.cpp"><Filter>Game</Filter></ClCompile>
@@ -44,6 +46,8 @@
     <ClInclude Include="Game\Camera.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\Game.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\GameplayMap.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\Monster.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\DungeonWorld.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\GameWorld.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\InputCommandQueue.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\MapBackground.h"><Filter>Game</Filter></ClInclude>

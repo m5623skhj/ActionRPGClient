@@ -88,3 +88,6 @@ body.busy #workspace { pointer-events: none; opacity: .75; }
   .brand small { display: none; }
   .toolbar { padding: 10px 14px; gap: 10px; }
 }
+
+.monster-palette { display:flex; align-items:center; gap:12px; width:100%; text-align:left; }
+.monster-palette img { image-rendering:pixelated; cursor:grab; }

@@ -22,6 +22,7 @@ namespace ActionRPG
 
         void Spawn(std::string_view inDefinitionId, Vector2 inThrowerPosition,
             float inThrowerHeight, Vector2 inDirection);
+        void Clear() { projectiles.clear(); }
         void Update(float inDeltaSeconds, const GameplayMap& inGameplayMap);
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const;
 

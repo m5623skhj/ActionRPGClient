@@ -97,12 +97,17 @@ namespace ActionRPG
                 runningRequested = false;
             }
         }
+        void ResetMovementSpeeds() { walkSpeed = DEFAULT_WALK_SPEED; runSpeed = DEFAULT_RUN_SPEED; }
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
 
     protected:
         Character(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,
             D2DRenderer& inRenderer, const CharacterAnimationSet& inAnimations);
 
+        void SetFacingLeft(bool inFacingLeft) { facingLeft = inFacingLeft; }
+
+        static constexpr float DEFAULT_WALK_SPEED = 280.0f;
+        static constexpr float DEFAULT_RUN_SPEED = 480.0f;
         static constexpr float WIDTH = 64.0f;
         static constexpr float HEIGHT = 96.0f;
 
@@ -175,8 +180,8 @@ namespace ActionRPG
         std::uint32_t airShotCount{};
         std::uint32_t attackShotCount{};
         std::uint32_t pendingAttackShots{};
-        float walkSpeed = 280.0f;
-        float runSpeed = 480.0f;
+        float walkSpeed = DEFAULT_WALK_SPEED;
+        float runSpeed = DEFAULT_RUN_SPEED;
         bool runningRequested{};
         IniDocument animationDefinitions;
         SpriteAnimation idleAnimation;

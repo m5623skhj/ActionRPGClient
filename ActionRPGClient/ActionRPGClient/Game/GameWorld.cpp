@@ -2,6 +2,7 @@
 
 #include "Graphics/D2DRenderer.h"
 #include "Network/DungeonClient.h"
+#include "Network/DungeonProtocol.h"
 #include "Network/TownClient.h"
 #include "Resources/AssetCatalog.h"
 
@@ -335,7 +336,7 @@ namespace ActionRPG
         InputState gameplayInput = inInput;
         if (isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
             || pendingPartyInvitation.has_value()
-            || dungeonEntryState != DungeonEntryState::Idle)
+            || (dungeonEntryState != DungeonEntryState::Idle && dungeonEntryState != DungeonEntryState::Entered))
         {
             gameplayInput = InputState{};
         }
@@ -431,7 +432,14 @@ namespace ActionRPG
                     inRenderer, position.x, position.y, remotePlayer.facingLeft);
             }
         }
+        const auto monsters = dungeonMonsters.find(dungeonMapId);
+        if (monsters != dungeonMonsters.end())
+            for (const auto& monster : monsters->second)
+                if (monster->GetGroundPosition().y <= player.GetGroundPosition().y) monster->Render(inRenderer, camera);
         player.Render(inRenderer, camera);
+        if (monsters != dungeonMonsters.end())
+            for (const auto& monster : monsters->second)
+                if (monster->GetGroundPosition().y > player.GetGroundPosition().y) monster->Render(inRenderer, camera);
         inRenderer.PopAxisAlignedClip();
         RenderDungeonSelection(inRenderer);
         RenderSystemInterface(inRenderer);
@@ -459,6 +467,8 @@ namespace ActionRPG
             return L"Dungeon: connecting";
         case DungeonEntryState::WaitingAuthentication:
             return L"Dungeon: authenticating";
+        case DungeonEntryState::WaitingWorld:
+            return L"Loading dungeon...";
         case DungeonEntryState::Entered:
             return L"Dungeon: entered";
         default:
@@ -499,6 +509,7 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerAppear>)
                 {
+                    if (dungeonEntryState == DungeonEntryState::Entered || dungeonEntryState == DungeonEntryState::WaitingWorld) return;
                     if (inEvent.playerId != localPlayerId)
                     {
                         remotePlayers.erase(inEvent.playerId);
@@ -516,6 +527,7 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerMove>)
                 {
+                    if (dungeonEntryState == DungeonEntryState::Entered || dungeonEntryState == DungeonEntryState::WaitingWorld) return;
                     if (inEvent.playerId == localPlayerId)
                     {
                         const std::int8_t currentDirectionX = static_cast<std::int8_t>(
@@ -699,7 +711,34 @@ namespace ActionRPG
                         ResetDungeonEntry();
                         return;
                     }
-                    dungeonEntryState = DungeonEntryState::Entered;
+                    dungeonEntryState = DungeonEntryState::WaitingWorld;
+                    dungeonClient.RequestWorld();
+                }
+                else if constexpr (std::is_same_v<EventType, DungeonWorldEvent>)
+                {
+                    if (dungeonEntryState != DungeonEntryState::WaitingWorld) { ResetDungeonEntry(); return; }
+                    try
+                    {
+                        dungeonWorld = DungeonWorld::Parse(inEvent.json, dungeonRoomId, localPlayerId);
+                        dungeonMovementSequence = lastDungeonStateSequence = 0;
+                        lastTownPosition = player.GetGroundPosition();
+                        ApplyDungeonMap(dungeonWorld->GetEntryMapId(), dungeonWorld->GetSpawn());
+                        dungeonEntryState = DungeonEntryState::Entered;
+                    }
+                    catch (const std::exception&) { ResetDungeonEntry(); }
+                }
+                else if constexpr (std::is_same_v<EventType, DungeonPlayerStateEvent>)
+                {
+                    if (dungeonEntryState != DungeonEntryState::Entered || !dungeonWorld
+                        || inEvent.sequence <= lastDungeonStateSequence) return;
+                    lastDungeonStateSequence = inEvent.sequence;
+                    try
+                    {
+                        if (inEvent.mapId != dungeonMapId) ApplyDungeonMap(inEvent.mapId, {inEvent.x, inEvent.y});
+                        else if (inEvent.sequence == dungeonMovementSequence)
+                            player.ReconcileGroundPosition({inEvent.x, inEvent.y});
+                    }
+                    catch (const std::exception&) { ResetDungeonEntry(); }
                 }
             }, event);
         }
@@ -1113,6 +1152,8 @@ namespace ActionRPG
 
     void GameWorld::ApplyMap(const TownProtocol::MapInfo& inMap, const Vector2 inPosition)
     {
+        if (dungeonEntryState != DungeonEntryState::Idle) ResetDungeonEntry();
+        lastTownMap = inMap;
         remotePlayers.clear();
         gameplayMap.Configure(inMap);
         mapBackground.Configure(inMap);
@@ -1121,6 +1162,7 @@ namespace ActionRPG
         player.SetGroundPosition(inPosition);
         player.ResetActionState();
         commandQueue.Clear();
+        projectileSystem.Clear();
         {
             std::scoped_lock lock(playerHitMutex);
             pendingPlayerHits.clear();
@@ -1137,12 +1179,51 @@ namespace ActionRPG
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
     }
 
+    void GameWorld::ApplyDungeonMap(const std::string& inMapId, const Vector2 inPosition)
+    {
+        const auto& room = dungeonWorld->GetMap(inMapId);
+        if (!dungeonMonsters.contains(inMapId))
+        {
+            std::vector<std::unique_ptr<Monster>> monsters;
+            for (const auto& spawn : room.monsters)
+            {
+                // One image set is loaded; copies share the bitmap resources.
+                if (!dummyTemplate) dummyTemplate = std::make_unique<Monster>(spawn, assetCatalog, renderer);
+                monsters.push_back(std::make_unique<Monster>(*dummyTemplate, spawn));
+            }
+            std::sort(monsters.begin(), monsters.end(), [](const auto& a, const auto& b)
+                { return a->GetGroundPosition().y < b->GetGroundPosition().y; });
+            dungeonMonsters.emplace(inMapId, std::move(monsters));
+        }
+        gameplayMap.Configure(room.map);
+        mapBackground.Configure(room.map);
+        transitionZones = room.map.transitionZones;
+        dungeonMapId = inMapId;
+        remotePlayers.clear();
+        player.SetGroundPosition(inPosition); player.ResetActionState(); player.ResetMovementSpeeds(); player.SetRunningEnabled(true);
+        commandQueue.Clear();
+        projectileSystem.Clear();
+        { std::scoped_lock lock(playerHitMutex); pendingPlayerHits.clear(); }
+        hasSentMovementInput = false; lastDungeonRun = false; movementSendAccumulator = 0;
+        isDungeonSelectionOpen = false; dungeonOptions.clear();
+        camera.Follow(inPosition, gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
+            gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
+    }
+
     void GameWorld::ResetDungeonEntry()
     {
         dungeonClient.Stop();
+        const bool restoreTown = dungeonWorld.has_value();
+        dungeonWorld.reset(); dungeonMonsters.clear(); dungeonMapId.clear();
+        player.SetRunningEnabled(false);
         dungeonEntryState = DungeonEntryState::Idle;
         dungeonRoomId = 0;
         combatSeed = 0;
+        if (restoreTown && lastTownMap)
+        {
+            const auto map = *lastTownMap;
+            ApplyMap(map, lastTownPosition);
+        }
         activeDungeonZoneId.clear();
         dungeonOptions.clear();
     }
@@ -1645,6 +1726,23 @@ namespace ActionRPG
     {
         constexpr float MOVEMENT_HEARTBEAT_SECONDS = 0.25f;
         movementSendAccumulator += inDeltaSeconds;
+        if (dungeonEntryState == DungeonEntryState::Entered)
+        {
+            const auto dx = static_cast<std::int8_t>(player.IsHitReacting() ? 0 :
+                static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
+            const auto dy = static_cast<std::int8_t>(player.IsHitReacting() ? 0 :
+                static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
+            const bool running = player.IsRunning();
+            if (hasSentMovementInput && dx == lastSentDirectionX && dy == lastSentDirectionY
+                && running == lastDungeonRun && movementSendAccumulator < 0.1f) return;
+            DungeonProtocol::DungeonMoveInput packet;
+            packet.sequence = ++dungeonMovementSequence;
+            packet.directionX = dx; packet.directionY = dy; packet.running = running ? 1 : 0;
+            dungeonClient.SendReliable(packet);
+            lastSentDirectionX = dx; lastSentDirectionY = dy; lastDungeonRun = running;
+            movementSendAccumulator = 0; hasSentMovementInput = true;
+            return;
+        }
         if (localPlayerId == 0 || dungeonEntryState != DungeonEntryState::Idle)
         {
             return;

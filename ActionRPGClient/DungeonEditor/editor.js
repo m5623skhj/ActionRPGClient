@@ -3,8 +3,8 @@
   const M = window.DungeonModel, $ = id => document.getElementById(id);
   const canvas = $("canvas"), ctx = canvas.getContext("2d"), mini = $("minimap");
   const kinds = { images: "이미지", walkablePolygons: "이동 가능", blockedPolygons: "진입 불가",
-    playerSpawns: "입장 위치", entryPoints: "워프 도착점", warpZones: "게이트·발판", objects: "특수 오브젝트" };
-  const modeKinds = { walkable: "walkablePolygons", blocked: "blockedPolygons", spawn: "playerSpawns", entry: "entryPoints", warp: "warpZones", object: "objects" };
+    playerSpawns: "입장 위치", entryPoints: "워프 도착점", warpZones: "게이트·발판", objects: "특수 오브젝트", monsters: "몬스터" };
+  const modeKinds = { walkable: "walkablePolygons", blocked: "blockedPolygons", spawn: "playerSpawns", entry: "entryPoints", warp: "warpZones", object: "objects", monster: "monsters" };
   const sideNames = { north: "위쪽", east: "오른쪽", south: "아래쪽", west: "왼쪽" };
   let project = M.createDocument(), roomIndex = -1, selection = null, view = "overview", mode = "select";
   let pending = [], connectionSource = null, projectHandle = null, filename = "새 던전", dirty = false, busy = false;
@@ -83,6 +83,7 @@
       view === "overview" ? "방 드래그: 미니맵 배치 · 방 사이 선 클릭: 연결 속성 · 가운데 버튼 / Space+드래그: 화면 이동" :
       pending.length ? "좌클릭: 꼭짓점 추가 · Enter: 완성 · Backspace: 마지막 점 취소 · Esc: 취소" :
       mode === "select" ? "요소나 꼭짓점을 드래그하세요. 겹친 요소는 왼쪽 목록에서 선택하세요. 휠: 확대·축소" :
+      mode === "monster" ? "클릭한 발 위치에 Dummy (Data ID 1)를 배치합니다. 선택 모드에서 이동·삭제할 수 있습니다." :
       mode === "spawn" ? "클릭한 발 위치에 파티원 입장 슬롯을 추가합니다. 최대 인원만큼 배치하세요." :
       mode === "entry" ? "목적지 입구 경계 안쪽에 도착할 발 위치를 클릭하세요." :
       mode === "object" ? "클릭한 위치에 특수 오브젝트를 추가합니다. 이미지·종류·추가 속성을 설정하세요." :
@@ -165,6 +166,7 @@
     $("inspector-title").textContent = selection?.kind === "connections" ? "연결 속성" : current ? "방 / 요소 속성" : "던전 속성";
     section("던전");
     field("던전 ID", project.dungeonId, value => { project.dungeonId = value; });
+    field("서버 던전 Data ID", project.dataId, value => { project.dataId = value; }, true, true);
     field("던전 이름", project.name, value => { project.name = value; });
     field("최대 입장 인원", project.maxPlayers, value => { project.maxPlayers = value; }, true, true);
     dropdown("최초 입장 방", () => project.entryRoomId, () => project.rooms.map(value => ({ value: value.id, label: roomLabel(value) })), value => { project.entryRoomId = value; });
@@ -227,6 +229,17 @@
       button("이 이미지 복제", () => {
         if (current.images.length >= 64) return notify("방당 이미지는 64개까지 가능합니다.", "error");
         current.images.push(M.clone(value)); selection.index = current.images.length - 1; touch(); renderInspector();
+      });
+    } else if (selection.kind === "monsters") {
+      textInfo("Dummy · Data ID " + value.dataId + " · 고정 표적");
+      field("배치 ID", value.id, next => { if (!validId(next, current.monsters, value.id)) return false; value.id = next; });
+      field("발 위치 X", value.position.x, next => { value.position.x = next; }, true);
+      field("발 위치 Y", value.position.y, next => { value.position.y = next; }, true);
+      checked("왼쪽 보기", () => value.facingLeft, next => { value.facingLeft = next; });
+      button("몬스터 복제", () => {
+        if (current.monsters.length >= 256) return notify("방당 몬스터는 256개까지 가능합니다.", "error");
+        const copy = M.clone(value); copy.id = M.unique("Monster", current.monsters); copy.position.x += 64;
+        current.monsters.push(copy); selection.index = current.monsters.length - 1; touch(); renderInspector();
       });
     } else if (selection.kind === "objects") {
       field("오브젝트 ID", value.id, next => { if (!validId(next, current.objects, value.id)) return false; value.id = next; });
@@ -476,6 +489,17 @@
       ctx.font = 12 / camera.scale + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
       ctx.fillText(prefix + (index + 1) + " " + value.id, p.x, p.y - 20);
     });
+    current.monsters.forEach((value, index) => {
+      const p = value.position, active = selection?.kind === "monsters" && selection.index === index;
+      ctx.save();
+      if (value.facingLeft) { ctx.translate(p.x * 2, 0); ctx.scale(-1, 1); }
+      M.paintIcon(ctx, "dummy", p.x - 32, p.y - 96, 64, 96);
+      ctx.restore();
+      ctx.strokeStyle = active ? "#fff" : "#e8ad69"; ctx.lineWidth = (active ? 3 : 1) / camera.scale;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, 32, 18, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "#ffe3a4"; ctx.font = 12 / camera.scale + "px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(value.id + " · Dummy (1)", p.x, p.y - 102);
+    });
     ctx.restore();
     ctx.strokeStyle = "#adc6d9"; ctx.lineWidth = 1 / camera.scale; ctx.strokeRect(w.left, w.top, w.right - w.left, w.bottom - w.top);
     if (pending.length) {
@@ -515,10 +539,11 @@
     const polygon = active && (Array.isArray(active) ? active : active.polygon);
     if (polygon) for (let i = 0; i < polygon.length; ++i)
       if (Math.hypot(p.x - polygon[i].x, p.y - polygon[i].y) < 9 / camera.scale) return { ...selection, vertex: i };
-    for (const kind of ["entryPoints", "playerSpawns", "warpZones", "objects", "blockedPolygons", "walkablePolygons", "images"])
+    for (const kind of ["monsters", "entryPoints", "playerSpawns", "warpZones", "objects", "blockedPolygons", "walkablePolygons", "images"])
       for (let i = current[kind].length - 1; i >= 0; --i) {
         const value = current[kind][i];
-        const hit = value.position ? Math.hypot((p.x - value.position.x) / 32, (p.y - value.position.y) / 18) <= 1 :
+        const hit = kind === "monsters" ? p.x >= value.position.x - 32 && p.x <= value.position.x + 32 &&
+          p.y >= value.position.y - 96 && p.y <= value.position.y + 18 : value.position ? Math.hypot((p.x - value.position.x) / 32, (p.y - value.position.y) / 18) <= 1 :
           kind === "images" || kind === "objects" ? p.x >= value.x && p.x <= value.x + value.width && p.y >= value.y && p.y <= value.y + value.height :
           (kind === "warpZones" && p.x >= value.visual.x && p.x <= value.visual.x + value.visual.width &&
             p.y >= value.visual.y && p.y <= value.visual.y + value.visual.height) ||
@@ -539,7 +564,8 @@
   function addPoint(p) {
     const current = room(); if (!current) return;
     const kind = modeKinds[mode];
-    if (mode === "object") {
+    if (mode === "monster") { addMonster(p); }
+    else if (mode === "object") {
       if (current.objects.length >= 256) return notify("특수 오브젝트는 256개까지 가능합니다.", "error");
       current.objects.push({ id: M.unique("Object", current.objects), name: "특수 오브젝트", type: "generic",
         asset: "", x: round(p.x - 24), y: round(p.y - 24), width: 48, height: 48, properties: {} });
@@ -557,7 +583,7 @@
   }
   function finishPolygon() {
     const current = room(), kind = modeKinds[mode];
-    if (!current || !kind || ["spawn", "entry", "object"].includes(mode)) return;
+    if (!current || !kind || ["spawn", "entry", "object", "monster"].includes(mode)) return;
     const problem = M.polygonProblem(pending);
     if (problem) return notify(problem, "error");
     if (current[kind].length >= 256) return notify("영역은 종류별로 256개까지 가능합니다.", "error");
@@ -582,6 +608,34 @@
     const used = M.usedAssets(project);
     project.assets = project.assets.filter(asset => used.has(asset.asset)); imageCache.clear();
   }
+  function addMonster(p) {
+    const current = room(); if (!current || view !== "room") return notify("방 내부를 먼저 여세요.", "warning");
+    if (busy || unfinished()) return;
+    if (current.monsters.length >= 256) return notify("방당 몬스터는 256개까지 가능합니다.", "error");
+    const position = { x: round(p.x), y: round(p.y) };
+    if (!M.movable(current, position)) return notify("몬스터의 발 영역이 이동 가능한 지형 안에 있도록 놓으세요.", "error");
+    current.monsters.push({ id: M.unique("Monster", current.monsters), dataId: 1, position, facingLeft: false });
+    selection = { kind: "monsters", index: current.monsters.length - 1 }; touch(); renderInspector();
+  }
+  $("dummy-preview").src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(M.iconSvg("dummy"));
+  $("dummy-preview").ondragstart = event => {
+    if (busy || view !== "room" || !room()) { event.preventDefault(); return; }
+    event.dataTransfer.setData("application/x-dungeon-monster", "1"); event.dataTransfer.effectAllowed = "copy";
+  };
+  $("dummy-palette").onclick = () => {
+    if (busy || !room() || !discardPending()) return;
+    if (view !== "room") switchView("room");
+    mode = "monster"; updateHeading();
+  };
+  canvas.addEventListener("dragover", event => {
+    if (!busy && view === "room" && event.dataTransfer.types.includes("application/x-dungeon-monster")) {
+      event.preventDefault(); event.dataTransfer.dropEffect = "copy";
+    }
+  });
+  canvas.addEventListener("drop", event => {
+    if (event.dataTransfer.getData("application/x-dungeon-monster") !== "1") return;
+    event.preventDefault(); if (!busy) addMonster(worldPoint(screenPoint(event)));
+  });
   canvas.addEventListener("pointerdown", event => {
     if (busy || ![0, 1].includes(event.button)) return;
     canvas.focus(); const screen = screenPoint(event), p = worldPoint(screen);
@@ -661,7 +715,7 @@
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key.toLowerCase() === "f") fit();
     if (view === "room") {
-      const shortcuts = { v: "select", w: "walkable", b: "blocked", p: "spawn", e: "entry", z: "warp", o: "object" };
+      const shortcuts = { v: "select", w: "walkable", b: "blocked", p: "spawn", e: "entry", z: "warp", o: "object", m: "monster", m: "monster", m: "monster" };
       if (shortcuts[event.key.toLowerCase()]) setMode(shortcuts[event.key.toLowerCase()]);
     }
   });
@@ -791,7 +845,7 @@
   async function loadFile(file, handle) {
     if (file.size > 105 * 1024 * 1024) throw new Error("작업 파일은 105MB 이하여야 합니다.");
     const value = M.parse(await file.text()); replaceDocument(value, file.name, handle);
-    if (value.wasMigrated) { dirty = true; updateStatus(); notify("이전 작업 파일을 새 형식으로 변환했습니다. 속도를 제거했으며 게이트 방향을 확인한 뒤 작업 저장하세요.", "warning"); }
+    if (value.wasMigrated) { dirty = true; updateStatus(); notify("이전 작업 파일을 새 형식으로 변환했습니다. 몬스터 배치 목록과 서버 던전 Data ID를 추가했습니다. Data ID와 게이트 방향을 확인한 뒤 작업 저장하세요.", "warning"); }
     else notify("작업 파일을 불러왔습니다. 이미지 해석 여부는 미리보기와 출력 과정에서 확인합니다.");
   }
   $("open").onclick = () => {
@@ -830,11 +884,24 @@
       const builtinKinds = new Set(project.rooms.flatMap(r => [...r.warpZones.filter(zone => !zone.visual.asset).map(zone => zone.visual.kind),
         ...r.objects.filter(item => !item.asset).map(() => "object")]));
       for (const kind of builtinKinds) files.push({ name: "Assets/" + M.builtinAssetPath(project, kind), data: await iconPng(kind) });
+      const jsonFiles = files.filter(file => file.name === "Dungeon.json" || file.name.startsWith("Maps/"));
+      const encoder = new TextEncoder();
+      if (jsonFiles.some(file => encoder.encode(file.data).length > 4 * 1024 * 1024) ||
+          jsonFiles.reduce((sum, file) => sum + encoder.encode(JSON.stringify(JSON.parse(file.data))).length, 0) > 3.5 * 1024 * 1024)
+        throw new Error("던전 JSON이 서버 전송 한도(3.5MB)를 초과합니다. 방과 추가 속성의 크기를 줄이세요.");
+      files.push({ name: "Assets/Images/Monsters/dummy.png", data: await dummyPng() });
       const blob = window.DungeonArchive.create(files);
       if (handle) { await writeFile(handle, blob); notify("던전 맵 · 이미지 · 미니맵을 출력했습니다: " + handle.name); }
       else { download(blob, project.dungeonId + ".zip"); notify("던전 ZIP 다운로드를 요청했습니다. 브라우저의 다운로드 완료를 확인하세요."); }
     });
   };
+  async function dummyPng() {
+    const output = document.createElement("canvas"); output.width = 64; output.height = 96;
+    M.paintIcon(output.getContext("2d"), "dummy", 0, 0, 64, 96);
+    const blob = await new Promise((resolve, reject) => output.toBlob(value => value ? resolve(value) :
+      reject(new Error("Dummy 이미지 생성 실패")), "image/png"));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
   async function iconPng(kind) {
     const output = document.createElement("canvas"); output.width = output.height = 128;
     M.paintIcon(output.getContext("2d"), kind, 0, 0, 128, 128);
