@@ -19,6 +19,7 @@ namespace ActionRPG
     {
     public:
         void Record(const InputState& inInput, double inCurrentTimeSeconds);
+        void Clear() { events.clear(); }
         [[nodiscard]] bool TryConsume(std::span<const InputKey> inSequence, double inMaxStepSeconds);
 
     private:

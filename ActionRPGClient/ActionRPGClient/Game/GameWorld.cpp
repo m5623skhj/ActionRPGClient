@@ -327,6 +327,7 @@ namespace ActionRPG
         uiClickConsumed = false;
         ProcessNetworkEvents(inInput);
         ProcessDungeonEvents();
+        ProcessPlayerHits();
         UpdateSystemInterface(inInput);
         UpdatePartyInterface(inInput);
         UpdateDungeonSelection(inInput);
@@ -338,24 +339,31 @@ namespace ActionRPG
         {
             gameplayInput = InputState{};
         }
+        if (player.IsHitReacting())
+        {
+            gameplayInput = InputState{};
+        }
         worldTimeSeconds += inDeltaSeconds;
         projectileSystem.Update(inDeltaSeconds, gameplayMap);
         commandQueue.Record(gameplayInput, worldTimeSeconds);
 
-        const std::optional<SkillActivation> skillActivation = skillCommandSystem.TryActivate(commandQueue);
-        if (skillActivation.has_value())
+        if (!player.IsHitReacting())
         {
-            player.ActivateCommandSkill(skillActivation->effect);
+            const std::optional<SkillActivation> skillActivation = skillCommandSystem.TryActivate(commandQueue);
+            if (skillActivation.has_value())
+            {
+                player.ActivateCommandSkill(skillActivation->effect);
+            }
         }
 
         player.Update(inDeltaSeconds, gameplayInput, gameplayMap);
         SendMovementInput(gameplayInput, inDeltaSeconds);
         UpdateRemotePlayers(inDeltaSeconds);
-        while (const std::optional<PlayerProjectileRequest> request = player.ConsumeProjectileRequest())
+        while (const std::optional<CharacterProjectileRequest> request = player.ConsumeProjectileRequest())
         {
-            const std::string_view definitionId = request->type == PlayerProjectileType::AirStraight
+            const std::string_view definitionId = request->type == CharacterProjectileType::AirStraight
                 ? "PlayerAirBullet"
-                : request->type == PlayerProjectileType::Straight ? "PlayerBullet" : "PlayerRock";
+                : request->type == CharacterProjectileType::Straight ? "PlayerBullet" : "PlayerRock";
             projectileSystem.Spawn(
                 definitionId,
                 request->throwerPosition,
@@ -364,6 +372,31 @@ namespace ActionRPG
         }
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
+    }
+
+    void GameWorld::QueuePlayerHit(const CharacterHitType inType)
+    {
+        std::scoped_lock lock(playerHitMutex);
+        pendingPlayerHits.push_back(inType);
+    }
+
+    void GameWorld::ProcessPlayerHits()
+    {
+        std::vector<CharacterHitType> hits;
+        {
+            std::scoped_lock lock(playerHitMutex);
+            hits.swap(pendingPlayerHits);
+        }
+        for (const CharacterHitType type : hits)
+        {
+            player.ApplyHit(type);
+        }
+        if (!hits.empty())
+        {
+            commandQueue.Clear();
+            // Send a stop immediately instead of waiting for the next movement heartbeat.
+            SendMovementInput(InputState{}, 0.0f);
+        }
     }
 
     void GameWorld::Render(D2DRenderer& inRenderer) const
@@ -1086,6 +1119,12 @@ namespace ActionRPG
         transitionZones = inMap.transitionZones;
         player.ConfigureMovementSpeeds(inMap.walkSpeed, inMap.runSpeed);
         player.SetGroundPosition(inPosition);
+        player.ResetActionState();
+        commandQueue.Clear();
+        {
+            std::scoped_lock lock(playerHitMutex);
+            pendingPlayerHits.clear();
+        }
         movementSendAccumulator = 0.0f;
         lastSentDirectionX = 0;
         lastSentDirectionY = 0;
@@ -1612,9 +1651,11 @@ namespace ActionRPG
         }
 
         const std::int8_t directionX = static_cast<std::int8_t>(
-            static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
+            player.IsHitReacting() ? 0
+                : static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
         const std::int8_t directionY = static_cast<std::int8_t>(
-            static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
+            player.IsHitReacting() ? 0
+                : static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
         const bool isMoving = directionX != 0 || directionY != 0;
         const bool stateChanged = !hasSentMovementInput
             || directionX != lastSentDirectionX

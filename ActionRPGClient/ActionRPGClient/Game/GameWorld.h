@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -39,6 +40,8 @@ namespace ActionRPG
         void Update(float inDeltaSeconds, const InputState& inInput);
         void Render(D2DRenderer& inRenderer) const;
         void Resize(float inViewportWidth, float inViewportHeight);
+        // Collision/network producers may enqueue hits; Update applies them on the game thread.
+        void QueuePlayerHit(CharacterHitType inType);
         [[nodiscard]] std::wstring_view GetDungeonStatusText() const;
         [[nodiscard]] bool ConsumeExitRequested() noexcept;
         [[nodiscard]] bool IsUiOverlayVisible() const noexcept;
@@ -96,6 +99,7 @@ namespace ActionRPG
 
         void ProcessNetworkEvents(const InputState& inInput);
         void ProcessDungeonEvents();
+        void ProcessPlayerHits();
         void UpdateDungeonSelection(const InputState& inInput);
         void UpdateSystemInterface(const InputState& inInput);
         void UpdatePartyInterface(const InputState& inInput);
@@ -121,6 +125,8 @@ namespace ActionRPG
         IniDocument characterDefinitions;
         IniDocument systemMenuDefinitions;
         Player player;
+        std::mutex playerHitMutex;
+        std::vector<CharacterHitType> pendingPlayerHits;
         ProjectileSystem projectileSystem;
         InputCommandQueue commandQueue;
         SkillCommandSystem skillCommandSystem;

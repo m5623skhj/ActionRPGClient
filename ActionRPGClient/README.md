@@ -8,6 +8,7 @@ Win32 게임 루프 위에 D3D11/DXGI 장치와 Direct2D 렌더링을 구성했�
 - [클라이언트 개발 가이드](DEVELOPMENT.md): 구조, 실행 흐름, 기능과 에셋을 추가할 위치
 - [마을 패킷 개발 가이드](TOWN_NETWORK.md): TownServer와 주고받는 패킷 추가 절차
 - [마을 맵 에디터 설명서](TOWN_MAP_EDITOR.md): 이미지 배치, 이동 영역, 저장과 적용
+- [몬스터 AI 편집기](MonsterEditor/README.md): 순환 상태 그래프, 스킬·동작 정의, JSON 저장과 정적 승인
 - [에셋 디렉터리 설명](Assets/README.md): INI와 이미지·오디오 경로 규칙
 
 ## 현재 기능
@@ -54,6 +55,7 @@ Assets/
   Images/              이미지와 스프라이트 시트
   Audio/               음악과 효과음 배치 위치
 TownMapEditor/          마을 맵 JSON을 작성하는 별도 프로젝트
+MonsterEditor/          몬스터 AI 그래프 편집기와 Windows 실행 프로젝트
 ```
 
 `TownMapEditor/`는 마을 배경 이미지, 이동 영역, 시작 위치를 배치하는 도구입니다.
@@ -138,3 +140,30 @@ X=0에 있을 때 `Add Right`로 추가한 다음 이미지는 X=100에 배치�
 맵을 수정한 후 TownServer를 다시 빌드·실행하면 서버가 새 영역을 로드합니다.
 이미지를 새로 추가했다면 ActionRPGClient도 다시 빌드하여 해당 이미지를 실행 폴더의
 `Assets`로 복사해야 합니다.
+
+## Monster AI Editor
+
+`MonsterEditor/index.html`을 브라우저에서 열거나, `MonsterEditor` 프로젝트를 빌드한 뒤
+`artifacts/bin/x64/Debug/MonsterEditor.exe`를 실행합니다. 로컬 파일로 동작하며
+외부 서버나 npm 설치가 필요하지 않습니다.
+
+상태와 전환을 그래프로 편집하고, 스킬·동작 정의를 추가해 노드에서 선택할 수 있습니다.
+JSON 불러오기·저장과 문서 전체의 정적 검사, **AI 승인 · 저장**을 제공합니다.
+정상적인 순환은 허용하고 시간 소모 없이 즉시 반복될 수 있는 순환은 승인 오류로 처리합니다.
+승인 후 내용이 바뀌거나 파일을 다시 불러오면 재승인이 필요합니다.
+
+전체 사용법과 JSON 실행 규칙은 [MonsterEditor/README.md](MonsterEditor/README.md)를 참고합니다.
+현재 도구는 정의 편집과 정적 검사까지 담당하며, 서버의 몬스터 AI 실행·전투·드랍 연동은
+아직 구현하지 않았습니다.
+
+## Dungeon Map Editor
+
+`DungeonEditor/index.html`을 Edge 또는 Chrome에서 열거나, `DungeonEditor` 프로젝트를
+빌드한 뒤 `artifacts/bin/x64/Debug/DungeonEditor.exe`를 실행합니다.
+빈 던전에서 여러 방을 추가하고 배경 이미지, 이동 가능·불가 영역, 파티 입장 위치와 워프존을 편집합니다.
+방 배치·연결에 따라 자동 미니맵을 표시하며, 작업 JSON 저장·불러오기와 출력 전 정적 검사를 지원합니다.
+
+**던전 · 미니맵 출력**은 방별 version 3 맵 JSON, 배경 이미지, `Dungeon.json`,
+투명 미니맵 PNG·SVG를 ZIP으로 묶습니다.
+서버 던전 맵 로딩·방 전환과 게임 미니맵 HUD 연동은 아직 구현하지 않았습니다.
+사용법과 출력 형식은 [DungeonEditor/README.md](DungeonEditor/README.md)를 참고합니다.

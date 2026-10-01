@@ -21,6 +21,7 @@
     <ClCompile Include="Game\GameWorld.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\InputCommandQueue.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\MapBackground.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\Character.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\Player.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\Projectile.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\ProjectileSystem.cpp"><Filter>Game</Filter></ClCompile>
@@ -46,6 +47,7 @@
     <ClInclude Include="Game\GameWorld.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\InputCommandQueue.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\MapBackground.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\Character.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\Player.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\Projectile.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\ProjectileSystem.h"><Filter>Game</Filter></ClInclude>
@@ -87,6 +89,12 @@
     <None Include="..\Assets\Images\Characters\player_air_shoot_start.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_air_shoot_fire.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_air_shoot_end.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_hit.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_air_hit.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_air_hit_start.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_air_hit_fall.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_knockdown.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_get_up.png"><Filter>Assets</Filter></None>
     <None Include="ClientOptionFile\CoreOption.txt"><Filter>Options</Filter></None>
   </ItemGroup>
 </Project>

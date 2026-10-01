@@ -104,6 +104,7 @@
     <ClCompile Include="Game\GameWorld.cpp" />
     <ClCompile Include="Game\InputCommandQueue.cpp" />
     <ClCompile Include="Game\MapBackground.cpp" />
+    <ClCompile Include="Game\Character.cpp" />
     <ClCompile Include="Game\Player.cpp" />
     <ClCompile Include="Game\Projectile.cpp" />
     <ClCompile Include="Game\ProjectileSystem.cpp" />
@@ -129,6 +130,7 @@
     <ClInclude Include="Game\GameWorld.h" />
     <ClInclude Include="Game\InputCommandQueue.h" />
     <ClInclude Include="Game\MapBackground.h" />
+    <ClInclude Include="Game\Character.h" />
     <ClInclude Include="Game\Player.h" />
     <ClInclude Include="Game\Projectile.h" />
     <ClInclude Include="Game\ProjectileSystem.h" />
@@ -172,6 +174,12 @@
     <None Include="..\Assets\Images\Characters\player_air_shoot_start.png" />
     <None Include="..\Assets\Images\Characters\player_air_shoot_fire.png" />
     <None Include="..\Assets\Images\Characters\player_air_shoot_end.png" />
+    <None Include="..\Assets\Images\Characters\player_hit.png" />
+    <None Include="..\Assets\Images\Characters\player_air_hit.png" />
+    <None Include="..\Assets\Images\Characters\player_air_hit_start.png" />
+    <None Include="..\Assets\Images\Characters\player_air_hit_fall.png" />
+    <None Include="..\Assets\Images\Characters\player_knockdown.png" />
+    <None Include="..\Assets\Images\Characters\player_get_up.png" />
     <None Include="..\Assets\Images\UI\system_menu_party.png" />
     <None Include="..\Assets\Images\UI\system_menu_exit.png" />
   </ItemGroup>

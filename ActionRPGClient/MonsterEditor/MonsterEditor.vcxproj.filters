@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files"><UniqueIdentifier>{de9487ae-9132-46ae-8de6-8a4202d299ec}</UniqueIdentifier></Filter>
+    <Filter Include="Editor Files"><UniqueIdentifier>{5624f4cb-1c43-4034-b4d1-a8f19afc3a9e}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Main.cpp"><Filter>Source Files</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="index.html"><Filter>Editor Files</Filter></None>
+    <None Include="editor.css"><Filter>Editor Files</Filter></None>
+    <None Include="editor.js"><Filter>Editor Files</Filter></None>
+    <None Include="model.js"><Filter>Editor Files</Filter></None>
+    <None Include="Example.ai.json"><Filter>Editor Files</Filter></None>
+    <None Include="README.md"><Filter>Editor Files</Filter></None>
+  </ItemGroup>
+</Project>

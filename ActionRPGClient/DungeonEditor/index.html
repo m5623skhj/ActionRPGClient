@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dungeon Map Editor</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<header class="toolbar">
+  <div class="brand"><b class="logo">D</b><div><strong>Dungeon Map Editor</strong><small>방 · 지형 · 워프 · 미니맵</small></div></div>
+  <div class="buttons">
+    <button id="new">새 던전</button><button id="open">불러오기</button><button id="save">작업 저장</button>
+    <button id="validate">정적 검사</button><button id="export" class="primary">던전 · 미니맵 출력</button>
+  </div>
+</header>
+<main id="workspace">
+  <aside class="sidebar">
+    <div class="heading"><h2>던전의 방</h2><button id="add-room" class="compact" title="방 추가">＋</button></div>
+    <div id="rooms" class="item-list"></div>
+    <div class="buttons small"><button id="duplicate-room">복제</button><button id="delete-room" class="danger">삭제</button></div>
+    <h3>자동 미니맵</h3>
+    <canvas id="minimap" width="260" height="195" aria-label="전체 던전 미니맵"></canvas>
+    <p class="help">초록: 입장 방 · 금색: 보스 방<br>연결과 방 배치는 출력되는 미니맵에도 동일하게 반영됩니다.</p>
+    <h3>방의 요소</h3><div id="layers" class="item-list layer-list"></div>
+  </aside>
+  <section class="canvas-area">
+    <div class="canvas-heading"><div><h1 id="title">빈 던전</h1><span id="summary"></span></div><div class="buttons"><button id="overview-tab" class="active">방 구성</button><button id="room-tab">방 내부</button><button id="fit">전체 보기</button></div></div>
+    <div id="overview-tools" class="tools"><button id="connect">방 연결</button><span>방을 드래그해 미니맵에 표시할 위치를 정하세요. 더블 클릭하면 방 내부를 엽니다.</span></div>
+    <div id="room-tools" class="tools" hidden>
+      <button data-mode="select" class="active">선택</button><button id="add-image">이미지 추가</button>
+      <button data-mode="walkable">이동 가능 W</button><button data-mode="blocked">진입 불가 B</button>
+      <button data-mode="spawn">입장 위치 P</button><button data-mode="entry">워프 도착점 E</button><button data-mode="warp">워프존 Z</button>
+      <button id="finish-polygon">영역 완성</button><button id="cancel-polygon">취소</button>
+    </div>
+    <div id="hint" class="hint">왼쪽 ＋ 버튼으로 방을 추가하세요.</div>
+    <canvas id="canvas" tabindex="0" aria-label="던전 방 배치와 지형 편집 화면"></canvas>
+    <div class="canvas-footer"><span id="cursor">방 배치</span><span id="zoom">100%</span></div>
+  </section>
+  <aside class="inspector"><div class="heading"><h2 id="inspector-title">던전 속성</h2></div><div id="properties"></div></aside>
+  <section class="validation">
+    <div class="validation-heading"><b id="validation-summary">아직 검사하지 않았습니다.</b><span id="file-status">새 던전</span></div>
+    <div id="results" aria-live="polite"></div>
+  </section>
+</main>
+<input id="project-file" type="file" accept=".json,application/json" hidden>
+<input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp,.bmp" multiple hidden>
+<script src="model.js"></script><script src="archive.js"></script><script src="editor.js"></script>
+</body>
+</html>

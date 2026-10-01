@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monster AI Editor</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand"><span class="brand-icon">M</span><div><strong>Monster AI Editor</strong><small>상태와 행동으로 만드는 몬스터 AI</small></div></div>
+    <div class="toolbar-actions">
+      <button id="new-document">새 문서</button>
+      <button id="open-document">불러오기</button>
+      <button id="save-document">JSON 저장</button>
+      <button id="validate-document">정적 검사</button>
+      <button id="approve-document" class="primary">AI 승인 · 저장</button>
+    </div>
+    <span id="approval-status" class="badge draft">편집 중</span>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="section-heading"><h2>몬스터</h2><button id="add-monster" class="compact" title="몬스터 추가">＋</button></div>
+      <div id="monster-list" class="item-list"></div>
+      <div class="side-actions"><button id="duplicate-monster">복제</button><button id="delete-monster" class="danger">삭제</button></div>
+      <div class="section-heading"><h2>정의 목록</h2></div>
+      <button id="skills-tab" class="catalog-button">스킬 <span id="skill-count"></span></button>
+      <button id="motions-tab" class="catalog-button">동작 <span id="motion-count"></span></button>
+      <div class="sidebar-help"><strong>그래프 조작</strong><p>노드 드래그: 위치 변경<br>노드 오른쪽 포트: 연결 시작<br>대상 노드 클릭: 연결 완료<br>빈 공간 드래그: 화면 이동<br>휠: 확대·축소<br>Delete: 선택 항목 삭제</p><p>Ctrl+S 저장 · Ctrl+O 불러오기</p></div>
+    </aside>
+    <section class="canvas-area">
+      <div class="canvas-heading"><div><h1 id="graph-title"></h1><span id="graph-summary"></span></div><div class="canvas-actions"><button id="add-node">＋ 상태</button><button id="connect-nodes">연결</button><button id="fit-graph">전체 보기</button></div></div>
+      <div id="graph-hint" class="graph-hint">상태를 선택해 행동을 편집하세요.</div>
+      <svg id="graph" role="img" aria-label="몬스터 AI 상태 그래프" tabindex="0">
+        <defs>
+          <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#d6dbe5"/></pattern>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 Z" fill="context-stroke"/></marker>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+        <g id="graph-world"></g>
+      </svg>
+      <div class="canvas-footer"><span>HP ≤ 0의 사망 처리는 AI 그래프 밖에서 처리합니다.</span><span id="zoom-label">100%</span></div>
+    </section>
+    <aside class="inspector"><div class="section-heading"><h2 id="inspector-title">속성</h2></div><div id="inspector-content"></div></aside>
+    <section class="validation-panel">
+      <div class="validation-heading"><strong id="validation-summary">아직 검사하지 않았습니다.</strong><span id="file-status">새 문서</span></div>
+      <div id="validation-results" aria-live="polite"><p class="muted">순환 연결은 허용됩니다. 승인 시 문서 전체를 검사하며, 오류가 있으면 승인하지 않습니다.</p></div>
+    </section>
+  </main>
+  <input id="file-input" type="file" accept=".json,application/json" hidden>
+  <dialog id="catalog-dialog">
+    <div class="dialog-heading"><h2 id="catalog-title"></h2><button id="close-catalog" aria-label="닫기">닫기</button></div>
+    <p class="muted">정의를 추가하면 그래프의 스킬 사용·동작 재생 목록에서 선택할 수 있습니다. 실제 실행 효과와 애니메이션은 게임의 동일 ID에 연결해야 합니다.</p>
+    <div class="catalog-layout"><div><div id="catalog-list" class="item-list"></div><button id="add-catalog-entry">＋ 정의 추가</button></div><div id="catalog-fields"></div></div>
+  </dialog>
+  <script src="model.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>
