@@ -5,24 +5,26 @@ window.DungeonModel = (() => {
   const ASSET = /^Images\/Dungeons\/[A-Za-z0-9_-]+\.(png|jpg|webp|bmp)$/;
   const DATA = /^data:(image\/(?:png|jpeg|webp|bmp));base64,([A-Za-z0-9+/]*={0,2})$/;
   const EPS = 1e-6;
+  const SIDES = ["north", "east", "south", "west"];
+  const OPPOSITE = { north: "south", east: "west", south: "north", west: "east" };
   const clone = value => JSON.parse(JSON.stringify(value));
   const unique = (prefix, values) => {
-    const ids = new Set(values.map(value => typeof value === "string" ? value : value.id));
+    const ids = new Set(values.map(value => (typeof value === "string" ? value : value.id).toLowerCase()));
     let i = 1;
-    while (ids.has(prefix + i)) ++i;
+    while (ids.has((prefix + i).toLowerCase())) ++i;
     return prefix + i;
   };
   function createDocument() {
-    return { schemaVersion: 1, dungeonId: "Dungeon", name: "새 던전", maxPlayers: 4,
+    return { schemaVersion: 2, dungeonId: "Dungeon", name: "새 던전", maxPlayers: 4,
       entryRoomId: "", rooms: [], connections: [], assets: [] };
   }
   function createRoom(document) {
     let x = 0;
     while (document.rooms.some(room => room.layout.x === x && room.layout.y === 0)) ++x;
     return { id: unique("Room", document.rooms), name: "새 방", kind: "normal", layout: { x, y: 0 },
-      world: { left: 0, top: 0, right: 1280, bottom: 720 }, walkSpeed: 280, runSpeed: 480,
+      world: { left: 0, top: 0, right: 1280, bottom: 720 },
       sectorWidth: 480, sectorHeight: 480, images: [], walkablePolygons: [], blockedPolygons: [],
-      playerSpawns: [], entryPoints: [], defaultEntryPointId: "", warpZones: [] };
+      playerSpawns: [], entryPoints: [], defaultEntryPointId: "", warpZones: [], objects: [] };
   }
   // Reject malformed containers before UI access; semantic errors stay editable.
   function parse(text) {
@@ -35,14 +37,29 @@ window.DungeonModel = (() => {
     const point = value => obj(value) && num(value.x) && num(value.y);
     const polygon = value => list(value, 64) && value.every(point);
     const location = value => obj(value) && str(value.id) && point(value.position);
-    if (!obj(document) || document.schemaVersion !== 1 || !str(document.dungeonId) ||
+    const rectangle = value => obj(value) && ["x", "y", "width", "height"].every(key => num(value[key]));
+    const migrated = obj(document) && document.schemaVersion === 1;
+    // Old geometry is preserved. Infer a side only from its physical boundary, never the graph.
+    if (obj(document) && document.schemaVersion === 1 && list(document.rooms, 256)) {
+      for (const room of document.rooms) {
+        if (!obj(room) || !obj(room.world) || !list(room.warpZones, 256)) fail();
+        delete room.walkSpeed; delete room.runSpeed; room.objects = [];
+        for (const zone of room.warpZones) {
+          if (!obj(zone) || !polygon(zone.polygon)) fail();
+          zone.direction = inferSide(room, zone.polygon);
+          zone.visual = createVisual(zone.polygon);
+        }
+      }
+      document.schemaVersion = 2;
+    }
+    if (!obj(document) || document.schemaVersion !== 2 || !str(document.dungeonId) ||
         !str(document.name) || !str(document.entryRoomId) || !num(document.maxPlayers) ||
         !list(document.rooms, 256) || !list(document.connections, 1024) || !list(document.assets, 512)) fail();
     for (const room of document.rooms) {
       if (!obj(room) || !str(room.id) || !str(room.name) || !["normal", "boss"].includes(room.kind) ||
           !point(room.layout) || !obj(room.world) ||
           !["left", "top", "right", "bottom"].every(key => num(room.world[key])) ||
-          !["walkSpeed", "runSpeed", "sectorWidth", "sectorHeight"].every(key => num(room[key])) ||
+          !["sectorWidth", "sectorHeight"].every(key => num(room[key])) ||
           !list(room.images, 64) || !room.images.every(image => obj(image) && str(image.asset) &&
             ["x", "y", "width", "height"].every(key => num(image[key]))) ||
           !list(room.walkablePolygons, 256) || !room.walkablePolygons.every(polygon) ||
@@ -50,7 +67,11 @@ window.DungeonModel = (() => {
           !list(room.playerSpawns, 32) || !room.playerSpawns.every(location) ||
           !list(room.entryPoints, 256) || !room.entryPoints.every(location) || !str(room.defaultEntryPointId) ||
           !list(room.warpZones, 256) || !room.warpZones.every(zone => obj(zone) && str(zone.id) &&
-            polygon(zone.polygon) && ["connectionId", "targetRoomId", "targetEntryPointId"].every(key => str(zone[key])))) fail();
+            polygon(zone.polygon) && ["connectionId", "targetRoomId", "targetEntryPointId"].every(key => str(zone[key])) &&
+            ["", ...SIDES].includes(zone.direction) && rectangle(zone.visual) && ["gate", "pad"].includes(zone.visual.kind) && str(zone.visual.asset)) ||
+          !list(room.objects, 256) || !room.objects.every(item => rectangle(item) && ["id", "name", "type", "asset"].every(key => str(item[key])) &&
+            obj(item.properties) && JSON.stringify(item.properties).length <= 20000)) fail();
+      delete room.walkSpeed; delete room.runSpeed;
     }
     if (!document.connections.every(connection => obj(connection) &&
         ["id", "fromRoomId", "toRoomId"].every(key => str(connection[key])) && typeof connection.bidirectional === "boolean")) fail();
@@ -65,6 +86,7 @@ window.DungeonModel = (() => {
       totalBytes += asset.dataUrl.length;
     }
     if (totalBytes > 100000000) throw new Error("이미지를 포함한 작업 파일은 100MB 이하여야 합니다.");
+    Object.defineProperty(document, "wasMigrated", { value: migrated, enumerable: false });
     return document;
   }
   const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
@@ -104,6 +126,41 @@ window.DungeonModel = (() => {
     return Math.abs(area) < EPS ? "영역의 넓이가 0입니다." : "";
   }
   const inWorld = (p, world) => p.x >= world.left && p.x <= world.right && p.y >= world.top && p.y <= world.bottom;
+  function polygonBounds(polygon) {
+    if (!polygon.length) return { x: 0, y: 0, width: 0, height: 0 };
+    const x = Math.min(...polygon.map(p => p.x)), y = Math.min(...polygon.map(p => p.y));
+    return { x, y, width: Math.max(...polygon.map(p => p.x)) - x, height: Math.max(...polygon.map(p => p.y)) - y };
+  }
+  function createVisual(polygon) {
+    const box = polygonBounds(polygon);
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const point = contains(center, polygon) ? center : polygon[0] || center;
+    const width = Math.max(24, Math.min(96, box.width)), height = Math.max(24, Math.min(64, box.height));
+    return { kind: "pad", asset: "", x: point.x - width / 2, y: point.y - height / 2, width, height };
+  }
+  // Boundary bands allow a reachable foot position inside the room, rather than on the outer line.
+  function nearSide(room, point, side) {
+    const w = room.world, dx = Math.min(128, (w.right - w.left) * 0.2), dy = Math.min(128, (w.bottom - w.top) * 0.2);
+    return inWorld(point, w) && ({ north: point.y <= w.top + dy, south: point.y >= w.bottom - dy,
+      west: point.x <= w.left + dx, east: point.x >= w.right - dx })[side] === true;
+  }
+  function inferSide(room, polygon) {
+    const matches = SIDES.filter(side => polygon.length && polygon.every(p => nearSide(room, p, side)));
+    return matches.length === 1 ? matches[0] : "";
+  }
+  function connectionSide(from, to) {
+    if (!from || !to) return "";
+    const dx = to.layout.x - from.layout.x, dy = to.layout.y - from.layout.y;
+    if (dx === 1 && dy === 0) return "east";
+    if (dx === -1 && dy === 0) return "west";
+    if (dx === 0 && dy === 1) return "south";
+    if (dx === 0 && dy === -1) return "north";
+    return "";
+  }
+  function usedAssets(document) {
+    return new Set(document.rooms.flatMap(room => [...room.images.map(image => image.asset),
+      ...room.warpZones.map(zone => zone.visual.asset), ...room.objects.map(item => item.asset)]).filter(Boolean));
+  }
   // Transform the foot ellipse (32 x 18) to a unit circle and measure each edge.
   function edgeDistance(p, polygon) {
     let distance = Infinity;
@@ -173,12 +230,12 @@ window.DungeonModel = (() => {
       layouts.add(grid);
       const w = room.world;
       if (w.right <= w.left || w.bottom <= w.top || w.right - w.left > 100000 || w.bottom - w.top > 100000) error("월드 영역 크기가 올바르지 않습니다.");
-      if (room.walkSpeed <= 0 || room.runSpeed < room.walkSpeed || room.sectorWidth <= 0 || room.sectorHeight <= 0) error("속도와 섹터 크기가 올바르지 않습니다.");
+      if (room.sectorWidth <= 0 || room.sectorHeight <= 0) error("섹터 크기가 올바르지 않습니다.");
       if (Math.ceil((w.right - w.left) / room.sectorWidth) * Math.ceil((w.bottom - w.top) / room.sectorHeight) > 65536)
         error("섹터 수가 65536개를 초과합니다. 섹터 크기를 늘리세요.");
       if (!room.images.length) error("배경 이미지를 추가하세요.");
       if (room.images.length > 64 || room.walkablePolygons.length > 256 || room.blockedPolygons.length > 256 ||
-          room.entryPoints.length > 256 || room.warpZones.length > 256 || room.playerSpawns.length > 32) error("방의 요소 수 제한을 초과했습니다.");
+          room.entryPoints.length > 256 || room.warpZones.length > 256 || room.playerSpawns.length > 32 || room.objects.length > 256) error("방의 요소 수 제한을 초과했습니다.");
       for (const image of room.images) {
         if (!assets.has(image.asset)) error("배경 이미지 파일을 찾을 수 없습니다: " + image.asset);
         if (image.width <= 0 || image.height <= 0 || image.width > 100000 || image.height > 100000) error("이미지 표시 크기가 올바르지 않습니다.");
@@ -198,6 +255,17 @@ window.DungeonModel = (() => {
       if (vertices > 32768) error("방의 전체 꼭짓점 수가 맵 형식 제한(32768개)을 초과했습니다.");
       checkIds(room.playerSpawns, label + "입장 위치", room.id);
       checkIds(room.warpZones, label + "워프존", room.id);
+      checkIds(room.objects, label + "특수 오브젝트", room.id);
+      const checkVisual = (visual, name) => {
+        if (visual.width <= 0 || visual.height <= 0 || visual.width > 100000 || visual.height > 100000 ||
+            !inWorld(visual, w) || !inWorld({ x: visual.x + visual.width, y: visual.y + visual.height }, w))
+          error(name + ": 표시 이미지의 크기 또는 월드 내 배치가 올바르지 않습니다.");
+        if (visual.asset && !assets.has(visual.asset)) error(name + ": 표시 이미지 파일을 찾을 수 없습니다.");
+      };
+      for (const item of room.objects) {
+        checkVisual(item, item.id);
+        if (!ID.test(item.type) || !item.name.trim()) error(item.id + ": 오브젝트 종류와 이름을 입력하세요.");
+      }
       if (!room.entryPoints.some(entry => entry.id === room.defaultEntryPointId)) error("기본 워프 도착점을 지정하세요.");
       for (const point of [...room.entryPoints, ...room.playerSpawns])
         if (valid && !movable(room, point.position)) error(point.id + ": 발 영역(가로 반경 32, 세로 반경 18)이 이동 가능한 지형 안에 있어야 합니다.");
@@ -211,7 +279,17 @@ window.DungeonModel = (() => {
         if (!connection || !((connection.fromRoomId === room.id && connection.toRoomId === zone.targetRoomId) ||
             (connection.bidirectional && connection.toRoomId === room.id && connection.fromRoomId === zone.targetRoomId))) error(zone.id + ": 연결 방향과 워프 목적지가 일치하지 않습니다.");
         const target = rooms.get(zone.targetRoomId);
-        if (!target || !target.entryPoints.some(entry => entry.id === zone.targetEntryPointId)) error(zone.id + ": 목적지 방 또는 도착점이 없습니다.");
+        const entry = target?.entryPoints.find(entry => entry.id === zone.targetEntryPointId);
+        if (!target || !entry) error(zone.id + ": 목적지 방 또는 도착점이 없습니다.");
+        const expected = connectionSide(room, target);
+        if (!expected || zone.direction !== expected) error(zone.id + ": 게이트 방향이 미니맵의 목적지 방향과 다릅니다. 목적지 방을 상하좌우 한 칸에 배치하고 출구 방향을 맞추세요.");
+        if (!SIDES.includes(zone.direction) || !zone.polygon.every(p => nearSide(room, p, zone.direction)))
+          error(zone.id + ": 워프 영역을 지정한 출구 방향의 경계 구간 안에 배치하세요.");
+        if (entry && expected && !nearSide(target, entry.position, OPPOSITE[expected]))
+          error(zone.id + ": 목적지 도착점은 반대편 입구 경계에 있어야 합니다.");
+        checkVisual(zone.visual, zone.id);
+        if (!contains({ x: zone.visual.x + zone.visual.width / 2, y: zone.visual.y + zone.visual.height / 2 }, zone.polygon))
+          error(zone.id + ": 게이트·발판 이미지의 중심이 워프 영역 밖에 있습니다.");
         if (valid && !warpCandidates(zone.polygon).some(p => contains(p, zone.polygon) && movable(room, p)))
           error(zone.id + ": 이동 가능한 워프 접촉 지점을 찾지 못했습니다. 영역을 넓히거나 지형 안으로 옮기세요.");
       }
@@ -224,6 +302,7 @@ window.DungeonModel = (() => {
       const pair = [connection.fromRoomId, connection.toRoomId].sort().join("|");
       if (!from || !to || from === to || pairs.has(pair)) { add(connection.id + ": 없는 방, 자기 자신 또는 중복 연결입니다."); continue; }
       pairs.add(pair);
+      if (!connectionSide(from, to)) add(connection.id + ": 연결된 방은 미니맵에서 상하좌우 한 칸씩 인접해야 합니다.", from.id);
       const outbound = (a, b) => a.warpZones.some(zone => zone.connectionId === connection.id && zone.targetRoomId === b.id);
       if (!outbound(from, to)) add(connection.id + ": " + from.id + " → " + to.id + " 워프존이 필요합니다.", from.id);
       if (connection.bidirectional && !outbound(to, from)) add(connection.id + ": " + to.id + " → " + from.id + " 워프존이 필요합니다.", to.id);
@@ -241,27 +320,85 @@ window.DungeonModel = (() => {
     if (minimap(document).scale < 0.25) add("미니맵 배치 간격이 너무 넓습니다. 방을 가까이 배치하세요.", "", "warning");
     return issues;
   }
+  // The same primitives render editor icons, exported PNGs and SVGs.
+  function iconShapes(kind) {
+    const rect = (x, y, width, height, fill, stroke = "", lineWidth = 4) => ({ type: "rect", x, y, width, height, fill, stroke, lineWidth });
+    const ellipse = (x, y, rx, ry, fill, stroke = "", lineWidth = 4) => ({ type: "ellipse", x, y, rx, ry, fill, stroke, lineWidth });
+    const polygon = (points, fill, stroke = "", lineWidth = 4) => ({ type: "polygon", points, fill, stroke, lineWidth });
+    if (kind === "boss") return [
+      rect(6, 6, 88, 88, "#49351c", "#ffd36d", 6),
+      ellipse(50, 43, 27, 25, "#ffd36d"), rect(34, 55, 32, 23, "#ffd36d"),
+      ellipse(39, 44, 6, 8, "#49351c"), ellipse(61, 44, 6, 8, "#49351c"),
+      polygon([[50, 51], [45, 60], [55, 60]], "#49351c"),
+      rect(41, 68, 4, 10, "#49351c"), rect(55, 68, 4, 10, "#49351c") ];
+    if (kind === "gate") return [
+      rect(12, 6, 76, 88, "#133342", "#7bdde8", 5), rect(25, 20, 50, 65, "#285a6e"),
+      polygon([[50, 28], [72, 50], [50, 72], [28, 50]], "#ffe3a4"),
+      rect(5, 90, 90, 8, "#7bdde8") ];
+    if (kind === "pad") return [
+      ellipse(50, 65, 44, 22, "#254d6c", "#96d8ef", 5),
+      ellipse(50, 52, 40, 19, "#6caaad", "#d8f4ec", 4),
+      polygon([[50, 38], [69, 53], [50, 68], [31, 53]], "#ffe3a4") ];
+    if (kind === "object") return [
+      polygon([[50, 8], [92, 32], [92, 76], [50, 98], [8, 76], [8, 32]], "#394659", "#c6d1e2", 4),
+      polygon([[50, 24], [73, 50], [50, 76], [27, 50]], "#bd9b60"),
+      ellipse(50, 50, 8, 8, "#fff0c4") ];
+    return [rect(6, 6, 88, 88, "#243e53", "#bbd4e3", 6), rect(24, 24, 52, 52, "#162b3b")];
+  }
+  function paintIcon(context, kind, x, y, width, height) {
+    context.save(); context.translate(x, y); context.scale(width / 100, height / 100);
+    for (const shape of iconShapes(kind)) {
+      context.beginPath();
+      if (shape.type === "rect") context.rect(shape.x, shape.y, shape.width, shape.height);
+      else if (shape.type === "ellipse") context.ellipse(shape.x, shape.y, shape.rx, shape.ry, 0, 0, Math.PI * 2);
+      else { shape.points.forEach((point, index) => index ? context.lineTo(...point) : context.moveTo(...point)); context.closePath(); }
+      if (shape.fill) { context.fillStyle = shape.fill; context.fill(); }
+      if (shape.stroke) { context.strokeStyle = shape.stroke; context.lineWidth = shape.lineWidth; context.stroke(); }
+    }
+    context.restore();
+  }
+  function iconMarkup(kind) {
+    return iconShapes(kind).map(shape => {
+      const style = ' fill="' + (shape.fill || "none") + '" stroke="' + (shape.stroke || "none") + '" stroke-width="' + shape.lineWidth + '"';
+      if (shape.type === "rect") return '<rect x="' + shape.x + '" y="' + shape.y + '" width="' + shape.width + '" height="' + shape.height + '"' + style + '/>';
+      if (shape.type === "ellipse") return '<ellipse cx="' + shape.x + '" cy="' + shape.y + '" rx="' + shape.rx + '" ry="' + shape.ry + '"' + style + '/>';
+      return '<polygon points="' + shape.points.map(point => point.join(",")).join(" ") + '"' + style + '/>';
+    }).join("");
+  }
+  const iconSvg = kind => '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 100 100">' + iconMarkup(kind) + '</svg>';
+  function withPorts(map, document) {
+    const nodes = new Map(map.rooms.map(room => [room.id, room]));
+    const rooms = new Map(document.rooms.map(room => [room.id, room]));
+    const port = (node, side) => ({ x: side === "west" ? node.x : side === "east" ? node.x + node.width : node.center.x,
+      y: side === "north" ? node.y : side === "south" ? node.y + node.height : node.center.y });
+    map.connections = map.connections.filter(c => nodes.has(c.fromRoomId) && nodes.has(c.toRoomId)).map(c => {
+      const side = connectionSide(rooms.get(c.fromRoomId), rooms.get(c.toRoomId));
+      const style = id => rooms.get(id)?.warpZones.find(zone => zone.connectionId === c.id)?.visual.kind || "pad";
+      return { ...c, fromSide: side, toSide: OPPOSITE[side] || "", validLayout: !!side,
+        fromPort: port(nodes.get(c.fromRoomId), side), toPort: port(nodes.get(c.toRoomId), OPPOSITE[side]),
+        fromStyle: style(c.fromRoomId), toStyle: style(c.toRoomId) };
+    });
+    return map;
+  }
   function minimap(document) {
-    if (!document.rooms.length) return { width: 320, height: 180, scale: 1, rooms: [], connections: [] };
-    const xs = document.rooms.map(room => room.layout.x * 140), ys = document.rooms.map(room => room.layout.y * 105);
-    const left = Math.min(...xs) - 30, top = Math.min(...ys) - 30;
-    const width = Math.max(...xs) - left + 130, height = Math.max(...ys) - top + 95;
+    if (!document.rooms.length) return { width: 240, height: 150, scale: 1, rooms: [], connections: [] };
+    const xs = document.rooms.map(room => room.layout.x * 72), ys = document.rooms.map(room => room.layout.y * 72);
+    const left = Math.min(...xs) - 20, top = Math.min(...ys) - 20;
+    const width = Math.max(...xs) - left + 56, height = Math.max(...ys) - top + 56;
     const scale = Math.min(1, 4096 / Math.max(width, height));
     const rooms = document.rooms.map(room => ({ id: room.id, name: room.name, kind: room.kind,
-      isEntry: room.id === document.entryRoomId, x: (room.layout.x * 140 - left) * scale,
-      y: (room.layout.y * 105 - top) * scale, width: 100 * scale, height: 65 * scale,
-      center: { x: (room.layout.x * 140 - left + 50) * scale, y: (room.layout.y * 105 - top + 32.5) * scale } }));
-    return { width: Math.ceil(width * scale), height: Math.ceil(height * scale), scale, rooms,
-      connections: document.connections.filter(c => rooms.some(r => r.id === c.fromRoomId) && rooms.some(r => r.id === c.toRoomId)).map(c => clone(c)) };
+      isEntry: room.id === document.entryRoomId, x: (room.layout.x * 72 - left) * scale,
+      y: (room.layout.y * 72 - top) * scale, width: 36 * scale, height: 36 * scale,
+      icon: room.kind === "boss" ? "boss" : "normal",
+      center: { x: (room.layout.x * 72 - left + 18) * scale, y: (room.layout.y * 72 - top + 18) * scale } }));
+    return withPorts({ width: Math.ceil(width * scale), height: Math.ceil(height * scale), scale, rooms,
+      connections: document.connections }, document);
   }
-  const color = room => room.kind === "boss" ? "#a46d20" : room.isEntry ? "#247454" : "#274862";
-  const xml = value => String(value).replace(/[<>&"']/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[c]);
   function svg(map) {
     const s = map.scale;
     const out = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + map.width + '" height="' + map.height + '" viewBox="0 0 ' + map.width + ' ' + map.height + '">'];
-    const byId = new Map(map.rooms.map(room => [room.id, room]));
     for (const connection of map.connections) {
-      const a = byId.get(connection.fromRoomId).center, b = byId.get(connection.toRoomId).center;
+      const a = connection.fromPort, b = connection.toPort;
       out.push('<path d="M' + a.x + ',' + a.y + ' L' + b.x + ',' + b.y + '" fill="none" stroke="#8ba4b8" stroke-width="' + 3 * s + '"/>');
       if (!connection.bidirectional) {
         const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
@@ -271,29 +408,46 @@ window.DungeonModel = (() => {
         }
       }
     }
-    for (const room of map.rooms) out.push('<rect x="' + room.x + '" y="' + room.y + '" width="' + room.width + '" height="' + room.height + '" fill="' + color(room) + '" stroke="#adc6d9" stroke-width="' + 2 * s + '"/><text x="' + room.center.x + '" y="' + room.center.y + '" fill="white" font-family="sans-serif" font-size="' + 13 * s + '" text-anchor="middle" dominant-baseline="middle" textLength="' + Math.min(room.id.slice(0, 12).length * 7 * s, room.width - 8 * s) + '" lengthAdjust="spacingAndGlyphs">' + xml(room.id.slice(0, 12)) + '</text>');
+    for (const room of map.rooms) {
+      out.push('<g transform="translate(' + room.x + ' ' + room.y + ') scale(' + room.width / 100 + ' ' + room.height / 100 + ')">' + iconMarkup(room.kind === "boss" ? "boss" : "normal") + '</g>');
+      if (room.isEntry) out.push('<circle cx="' + room.center.x + '" cy="' + (room.y + room.height - 3 * s) + '" r="' + 3 * s + '" fill="#56e3a0"/>');
+    }
+    for (const connection of map.connections) for (const end of ["from", "to"]) {
+      const point = connection[end + "Port"], fill = connection[end + "Style"] === "gate" ? "#ffe3a4" : "#96d8ef";
+      out.push('<circle cx="' + point.x + '" cy="' + point.y + '" r="' + 2 * s + '" fill="' + fill + '"/>');
+    }
     return out.join("") + "</svg>";
   }
+  const builtinAssetPath = (document, kind) => "Images/Dungeons/" + document.dungeonId + "_Editor_" + kind + ".png";
   function runtimeFiles(document, map) {
     const mapId = roomId => document.dungeonId + "_" + roomId;
     const assetPath = path => "Images/Dungeons/" + document.dungeonId + "_" + path.split("/").pop();
-    const manifest = { version: 1, dungeonId: document.dungeonId, name: document.name, maxPlayers: document.maxPlayers,
+    const visual = (value, kind) => ({ ...value, asset: value.asset ? assetPath(value.asset) : builtinAssetPath(document, kind) });
+    const manifest = { version: 2, dungeonId: document.dungeonId, name: document.name, maxPlayers: document.maxPlayers,
       entryRoomId: document.entryRoomId, entryMapId: mapId(document.entryRoomId),
       rooms: document.rooms.map(room => ({ id: room.id, name: room.name, kind: room.kind, mapId: mapId(room.id),
         mapPath: "Maps/" + mapId(room.id) + ".json", layout: clone(room.layout), playerSpawns: clone(room.playerSpawns) })),
-      connections: clone(document.connections), minimap: { svg: "Minimap.svg", png: "Minimap.png", ...map } };
-    const files = [{ name: "Dungeon.json", data: JSON.stringify(manifest, null, 2) + "\n" }, { name: "Minimap.svg", data: svg(map) }];
+      connections: map.connections.map(connection => ({ ...connection, gates: document.rooms.flatMap(room => room.warpZones
+        .filter(zone => zone.connectionId === connection.id).map(zone => ({ roomId: room.id, warpId: zone.id, direction: zone.direction, style: zone.visual.kind }))) })),
+      minimap: { svg: "Minimap.svg", png: "Minimap.png", icons: { normal: "Icons/normal.png", boss: "Icons/boss.png" }, ...map } };
+    const files = [{ name: "Dungeon.json", data: JSON.stringify(manifest, null, 2) + "\n" }, { name: "Minimap.svg", data: svg(map) },
+      { name: "Icons/normal.svg", data: iconSvg("normal") }, { name: "Icons/boss.svg", data: iconSvg("boss") }];
     for (const room of document.rooms) {
       const entry = room.entryPoints.find(point => point.id === room.defaultEntryPointId);
-      files.push({ name: "Maps/" + mapId(room.id) + ".json", data: JSON.stringify({ version: 3, mapId: mapId(room.id),
-        world: room.world, sectorWidth: room.sectorWidth, sectorHeight: room.sectorHeight, walkSpeed: room.walkSpeed, runSpeed: room.runSpeed,
+      const gates = room.warpZones.map(zone => ({ ...zone, visual: visual(zone.visual, zone.visual.kind) }));
+      const objects = room.objects.map(item => visual(item, "object"));
+      const decorations = [...objects, ...gates.map(zone => zone.visual)].map(item => ({
+        asset: item.asset, x: item.x, y: item.y, width: item.width, height: item.height }));
+      files.push({ name: "Maps/" + mapId(room.id) + ".json", data: JSON.stringify({ version: 4, format: "DungeonRoom", mapId: mapId(room.id),
+        world: room.world, sectorWidth: room.sectorWidth, sectorHeight: room.sectorHeight,
         spawn: room.id === document.entryRoomId ? room.playerSpawns[0].position : entry.position,
-        images: room.images.map(image => ({ ...image, asset: assetPath(image.asset) })),
+        images: [...room.images.map(image => ({ ...image, asset: assetPath(image.asset) })), ...decorations],
         walkablePolygons: room.walkablePolygons, blockedPolygons: room.blockedPolygons, entryPoints: room.entryPoints,
-        transitionZones: room.warpZones.map(zone => ({ id: zone.id, polygon: zone.polygon,
+        objects, transitionZones: gates.map(zone => ({ id: zone.id, polygon: zone.polygon, connectionId: zone.connectionId,
+          direction: zone.direction, visual: zone.visual,
           action: { type: "MapTransfer", targetMapId: mapId(zone.targetRoomId), targetEntryPointId: zone.targetEntryPointId } })) }, null, 2) + "\n" });
     }
-    const used = new Set(document.rooms.flatMap(room => room.images.map(image => image.asset)));
+    const used = usedAssets(document);
     for (const asset of document.assets.filter(asset => used.has(asset.asset))) {
       const raw = atob(asset.dataUrl.substring(asset.dataUrl.indexOf(",") + 1));
       const bytes = new Uint8Array(raw.length);
@@ -302,5 +456,6 @@ window.DungeonModel = (() => {
     }
     return files;
   }
-  return { createDocument, createRoom, clone, unique, parse, contains, polygonProblem, movable, validate, minimap, svg, color, runtimeFiles };
+  return { createDocument, createRoom, clone, unique, parse, contains, polygonProblem, movable, validate, minimap, svg, runtimeFiles,
+    createVisual, inferSide, connectionSide, nearSide, polygonBounds, usedAssets, withPorts, paintIcon, iconSvg, builtinAssetPath, OPPOSITE };
 })();

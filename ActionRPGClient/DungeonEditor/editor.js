@@ -3,12 +3,13 @@
   const M = window.DungeonModel, $ = id => document.getElementById(id);
   const canvas = $("canvas"), ctx = canvas.getContext("2d"), mini = $("minimap");
   const kinds = { images: "이미지", walkablePolygons: "이동 가능", blockedPolygons: "진입 불가",
-    playerSpawns: "입장 위치", entryPoints: "워프 도착점", warpZones: "워프존" };
-  const modeKinds = { walkable: "walkablePolygons", blocked: "blockedPolygons", spawn: "playerSpawns", entry: "entryPoints", warp: "warpZones" };
+    playerSpawns: "입장 위치", entryPoints: "워프 도착점", warpZones: "게이트·발판", objects: "특수 오브젝트" };
+  const modeKinds = { walkable: "walkablePolygons", blocked: "blockedPolygons", spawn: "playerSpawns", entry: "entryPoints", warp: "warpZones", object: "objects" };
+  const sideNames = { north: "위쪽", east: "오른쪽", south: "아래쪽", west: "왼쪽" };
   let project = M.createDocument(), roomIndex = -1, selection = null, view = "overview", mode = "select";
   let pending = [], connectionSource = null, projectHandle = null, filename = "새 던전", dirty = false, busy = false;
   let camera = { x: 0, y: 0, scale: 1 }, graphCamera = null, roomCamera = null;
-  let drag = null, space = false, refreshSelects = [], miniTransform = null, imageCache = new Map();
+  let drag = null, space = false, refreshSelects = [], miniTransform = null, imageCache = new Map(), imageTarget = null;
   const room = () => project.rooms[roomIndex] || null;
   const element = (tag, text, className) => {
     const item = document.createElement(tag);
@@ -83,7 +84,10 @@
       pending.length ? "좌클릭: 꼭짓점 추가 · Enter: 완성 · Backspace: 마지막 점 취소 · Esc: 취소" :
       mode === "select" ? "요소나 꼭짓점을 드래그하세요. 겹친 요소는 왼쪽 목록에서 선택하세요. 휠: 확대·축소" :
       mode === "spawn" ? "클릭한 발 위치에 파티원 입장 슬롯을 추가합니다. 최대 인원만큼 배치하세요." :
-      mode === "entry" ? "워프로 이동했을 때 도착할 발 위치를 클릭하세요." : "좌클릭으로 영역을 그리고 Enter로 완성하세요.";
+      mode === "entry" ? "목적지 입구 경계 안쪽에 도착할 발 위치를 클릭하세요." :
+      mode === "object" ? "클릭한 위치에 특수 오브젝트를 추가합니다. 이미지·종류·추가 속성을 설정하세요." :
+      mode === "warp" ? "방 경계 안쪽에 이동 영역을 그리고 Enter로 완성하세요. 출구 방향과 목적지는 미니맵 배치에 맞춰야 합니다." :
+      "좌클릭으로 영역을 그리고 Enter로 완성하세요.";
   }
   function renderLists() {
     $("rooms").replaceChildren();
@@ -176,7 +180,10 @@
       });
       textInfo(connection.fromRoomId + " → " + connection.toRoomId);
       checked("양방향 이동", () => connection.bidirectional, value => { connection.bidirectional = value; });
-      textInfo("각 방향의 출발 방에 워프존을 그리고 연결 ID와 목적지 도착점을 지정하세요.");
+      const from = project.rooms.find(r => r.id === connection.fromRoomId), to = project.rooms.find(r => r.id === connection.toRoomId);
+      const side = M.connectionSide(from, to);
+      textInfo(side ? "출발: " + sideNames[side] + " 경계 → 도착: " + sideNames[M.OPPOSITE[side]] + " 경계" : "연결된 방을 상하좌우로 한 칸씩 붙여 배치하세요.");
+      textInfo("각 출발 방의 경계에 게이트·발판을 그리고 연결과 목적지 도착점을 지정하세요.");
       button("연결 삭제", deleteSelection, true); return;
     }
     if (!current) { textInfo("방을 추가해 던전을 구성하세요. 작업 저장은 미완성 상태에서도 가능합니다."); return; }
@@ -206,7 +213,7 @@
         right: Math.max(...current.images.map(i => i.x + i.width)), bottom: Math.max(...current.images.map(i => i.y + i.height)) };
       touch(); renderInspector(); fit();
     });
-    for (const [key, label] of [["walkSpeed", "걷기 속도"], ["runSpeed", "달리기 속도"], ["sectorWidth", "섹터 너비"], ["sectorHeight", "섹터 높이"]])
+    for (const [key, label] of [["sectorWidth", "섹터 너비"], ["sectorHeight", "섹터 높이"]])
       field(label, current[key], value => { current[key] = value; }, true);
     dropdown("기본 워프 도착점", () => current.defaultEntryPointId,
       () => current.entryPoints.map(point => ({ value: point.id, label: point.id })), value => { current.defaultEntryPointId = value; });
@@ -220,6 +227,27 @@
       button("이 이미지 복제", () => {
         if (current.images.length >= 64) return notify("방당 이미지는 64개까지 가능합니다.", "error");
         current.images.push(M.clone(value)); selection.index = current.images.length - 1; touch(); renderInspector();
+      });
+    } else if (selection.kind === "objects") {
+      field("오브젝트 ID", value.id, next => { if (!validId(next, current.objects, value.id)) return false; value.id = next; });
+      field("이름", value.name, next => { value.name = next; });
+      field("종류 ID", value.type, next => { value.type = next; });
+      visualFields(value);
+      const wrapper = element("label", undefined, "field"), input = element("textarea");
+      input.rows = 6; input.maxLength = 20000; input.style.width = "100%";
+      input.value = JSON.stringify(value.properties, null, 2);
+      wrapper.append(element("span", "추가 속성 JSON (동작은 실행하지 않음)"), input); $("properties").append(wrapper);
+      input.onchange = () => {
+        try {
+          const properties = JSON.parse(input.value);
+          if (!properties || typeof properties !== "object" || Array.isArray(properties)) throw new Error("JSON 객체를 입력하세요.");
+          value.properties = properties; touch();
+        } catch (error) { input.value = JSON.stringify(value.properties, null, 2); notify(error.message, "error"); }
+      };
+      button("오브젝트 복제", () => {
+        if (current.objects.length >= 256) return notify("특수 오브젝트는 256개까지 가능합니다.", "error");
+        const copy = M.clone(value); copy.id = M.unique("Object", current.objects); copy.x += 16; copy.y += 16;
+        current.objects.push(copy); selection.index = current.objects.length - 1; touch(); renderInspector();
       });
     } else if (selection.kind === "playerSpawns" || selection.kind === "entryPoints") {
       field("ID", value.id, next => {
@@ -245,10 +273,21 @@
             value.targetRoomId = connection ? connection.fromRoomId === current.id ? connection.toRoomId : connection.fromRoomId : "";
             value.targetEntryPointId = "";
           });
-        textInfo("목적지 방은 선택한 연결의 반대편 방으로 설정됩니다.");
+        dropdown("실제 출구 방향", () => value.direction,
+          () => Object.entries(sideNames).map(([side, name]) => ({ value: side, label: name })), next => { value.direction = next; });
+        textInfo("게이트는 이 방향의 경계 안쪽에 배치하세요. 목적지 도착점은 반대편 경계 안쪽이어야 합니다.");
         dropdown("목적지 도착점", () => value.targetEntryPointId,
           () => (project.rooms.find(target => target.id === value.targetRoomId)?.entryPoints || []).map(point => ({ value: point.id, label: point.id })),
           next => { value.targetEntryPointId = next; });
+        dropdown("표시 형태", () => value.visual.kind, () => [{ value: "gate", label: "이동 게이트" }, { value: "pad", label: "이동 발판" }],
+          next => { if (next) value.visual.kind = next; });
+        visualFields(value.visual);
+        button("표시 이미지를 워프 영역 중심에 맞춤", () => {
+          const fresh = M.createVisual(value.polygon);
+          value.visual.x = fresh.x + (fresh.width - value.visual.width) / 2;
+          value.visual.y = fresh.y + (fresh.height - value.visual.height) / 2;
+          touch(); renderInspector();
+        });
       }
       textInfo("꼭짓점을 드래그하거나 아래 좌표로 수정하세요.");
       polygon.forEach((point, index) => {
@@ -257,6 +296,17 @@
       });
     }
     button("선택 요소 삭제", deleteSelection, true);
+  }
+  function visualFields(value) {
+    dropdown("표시 이미지", () => value.asset, () => project.assets.map(asset => ({ value: asset.asset, label: asset.name })),
+      next => { value.asset = next; pruneAssets(); });
+    textInfo("이미지를 선택하지 않으면 기본 표시 이미지를 사용합니다.");
+    button("표시 이미지 불러오기", () => {
+      if (unfinished()) return;
+      imageTarget = value; $("image-file").multiple = false; $("image-file").click();
+    });
+    for (const [key, label] of [["x", "표시 X"], ["y", "표시 Y"], ["width", "표시 너비"], ["height", "표시 높이"]])
+      field(label, value[key], next => { value[key] = next; }, true);
   }
   function renderAll() { renderLists(); updateHeading(); renderInspector(); draw(); updateStatus(); }
   function switchView(next) {
@@ -303,29 +353,49 @@
     context.beginPath(); context.moveTo(x - ux - uy / 2, y - uy + ux / 2); context.lineTo(x + ux, y + uy);
     context.lineTo(x - ux + uy / 2, y - uy - ux / 2); context.stroke();
   }
-  function drawMap(context, map, highlight = "", selectedConnection = null) {
-    const byId = new Map(map.rooms.map(r => [r.id, r])), s = map.scale;
-    for (const [index, connection] of map.connections.entries()) {
-      const a = byId.get(connection.fromRoomId), b = byId.get(connection.toRoomId);
-      if (!a || !b) continue;
-      context.strokeStyle = selectedConnection === index ? "#ffcd6c" : "#8ba4b8"; context.lineWidth = 3 * s;
-      context.beginPath(); context.moveTo(a.center.x, a.center.y); context.lineTo(b.center.x, b.center.y); context.stroke();
-      if (!connection.bidirectional) { context.strokeStyle = "#d8e5ee"; context.lineWidth = 2 * s; arrow(context, a.center, b.center, s); }
+  function drawMap(context, map, highlight = "", selectedConnection = null, labels = false) {
+    const s = map.scale;
+    for (const connection of map.connections) {
+      const a = connection.fromPort, b = connection.toPort;
+      context.strokeStyle = !connection.validLayout ? "#ec6b74" : selectedConnection === connection.id ? "#ffcd6c" : "#8ba4b8";
+      context.lineWidth = 3 * s;
+      context.setLineDash(connection.validLayout ? [] : [5 * s, 4 * s]);
+      context.beginPath(); context.moveTo(a.x, a.y);
+      if (!connection.validLayout) context.lineTo(b.x, a.y);
+      context.lineTo(b.x, b.y); context.stroke(); context.setLineDash([]);
+      if (!connection.bidirectional && connection.validLayout) { context.strokeStyle = "#d8e5ee"; context.lineWidth = 2 * s; arrow(context, a, b, s); }
     }
     for (const value of map.rooms) {
-      context.fillStyle = M.color(value); context.fillRect(value.x, value.y, value.width, value.height);
-      context.lineWidth = (value.id === highlight ? 3 : 2) * s;
-      context.strokeStyle = value.id === highlight ? "#fff" : "#adc6d9";
-      context.strokeRect(value.x, value.y, value.width, value.height);
-      context.fillStyle = "#fff"; context.font = 13 * s + "px sans-serif"; context.textAlign = "center"; context.textBaseline = "middle";
-      context.fillText(value.id.slice(0, 12), value.center.x, value.center.y, value.width - 8 * s);
+      if (labels) {
+        context.fillStyle = "#172c3e"; context.fillRect(value.x, value.y, value.width, value.height);
+        context.strokeStyle = "#668699"; context.lineWidth = s; context.strokeRect(value.x, value.y, value.width, value.height);
+      }
+      const size = labels ? 46 : value.width, x = value.center.x - size / 2, y = value.y;
+      M.paintIcon(context, value.kind === "boss" ? "boss" : "normal", x, y, size, labels ? 46 : value.height);
+      if (value.isEntry) {
+        context.fillStyle = "#56e3a0"; context.beginPath();
+        context.arc(value.center.x, y + (labels ? 43 : value.height - 3 * s), 3 * s, 0, Math.PI * 2); context.fill();
+      }
+      if (value.id === highlight) {
+        context.strokeStyle = "#fff"; context.lineWidth = 1.5 * s;
+        context.strokeRect(value.x - 2 * s, value.y - 2 * s, value.width + 4 * s, value.height + 4 * s);
+      }
+      if (labels) {
+        context.fillStyle = "#bfd3df"; context.font = 12 * s + "px sans-serif"; context.textAlign = "center"; context.textBaseline = "bottom";
+        context.fillText(value.id.slice(0, 12), value.center.x, value.y + value.height, value.width);
+      }
+    }
+    for (const connection of map.connections) for (const end of ["from", "to"]) {
+      const point = connection[end + "Port"];
+      context.fillStyle = connection[end + "Style"] === "gate" ? "#ffe3a4" : "#96d8ef";
+      context.beginPath(); context.arc(point.x, point.y, 2 * s, 0, Math.PI * 2); context.fill();
     }
   }
   function graphMap() {
-    return { scale: 1, connections: project.connections, rooms: project.rooms.map(r => ({
+    return M.withPorts({ scale: 1, connections: project.connections, rooms: project.rooms.map(r => ({
       id: r.id, name: r.name, kind: r.kind, isEntry: r.id === project.entryRoomId,
       x: r.layout.x * 140, y: r.layout.y * 105, width: 100, height: 65,
-      center: { x: r.layout.x * 140 + 50, y: r.layout.y * 105 + 32.5 } })) };
+      center: { x: r.layout.x * 140 + 50, y: r.layout.y * 105 + 32.5 } })) }, project);
   }
   function drawMini() {
     const context = mini.getContext("2d"), map = M.minimap(project);
@@ -357,6 +427,15 @@
     image.onerror = () => { cache.failed = true; if (imageCache.get(assetPath) === cache) draw(); };
     image.src = asset.dataUrl; return cache;
   }
+  function drawVisual(value, kind, active) {
+    const cache = value.asset ? imageFor(value.asset) : null;
+    if (cache?.ready) ctx.drawImage(cache.image, value.x, value.y, Math.max(1, value.width), Math.max(1, value.height));
+    else {
+      M.paintIcon(ctx, kind, value.x, value.y, Math.max(1, value.width), Math.max(1, value.height));
+      if (value.asset) { ctx.strokeStyle = cache?.failed ? "#ec6b74" : "#ffe3a4"; ctx.lineWidth = 2 / camera.scale; ctx.strokeRect(value.x, value.y, value.width, value.height); }
+    }
+    if (active) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / camera.scale; ctx.strokeRect(value.x, value.y, value.width, value.height); }
+  }
   function drawRoom() {
     const current = room(); if (!current) return;
     const w = current.world;
@@ -376,6 +455,19 @@
     });
     for (const [kind, color] of [["walkablePolygons", "rgba(44,192,123,0.22)"], ["blockedPolygons", "rgba(238,83,91,0.3)"], ["warpZones", "rgba(138,104,246,0.35)"]])
       current[kind].forEach((value, index) => drawPolygon(Array.isArray(value) ? value : value.polygon, color, selection?.kind === kind && selection.index === index));
+    current.objects.forEach((value, index) => drawVisual(value, "object", selection?.kind === "objects" && selection.index === index));
+    current.warpZones.forEach((zone, index) => {
+      drawVisual(zone.visual, zone.visual.kind, selection?.kind === "warpZones" && selection.index === index);
+      const p = { x: zone.visual.x + zone.visual.width / 2, y: zone.visual.y + zone.visual.height / 2 };
+      const delta = { north: [0, -60], east: [60, 0], south: [0, 60], west: [-60, 0] }[zone.direction];
+      if (delta) {
+        const end = { x: p.x + delta[0], y: p.y + delta[1] };
+        ctx.strokeStyle = "#ffe3a4"; ctx.lineWidth = 2 / camera.scale; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+        arrow(ctx, p, end, 1 / camera.scale);
+      }
+      ctx.fillStyle = "#e2edf6"; ctx.font = 11 / camera.scale + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      ctx.fillText(zone.id + " → " + (zone.targetRoomId || "?"), p.x, zone.visual.y - 6 / camera.scale);
+    });
     for (const [kind, color, prefix] of [["playerSpawns", "#8dffc5", "P"], ["entryPoints", "#ffd789", "E"]]) current[kind].forEach((value, index) => {
       const p = value.position; ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 1 / camera.scale;
       ctx.beginPath(); ctx.ellipse(p.x, p.y, 32, 18, 0, 0, Math.PI * 2); ctx.stroke();
@@ -396,7 +488,7 @@
     const ratio = window.devicePixelRatio || 1;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
     ctx.save(); ctx.translate(camera.x, camera.y); ctx.scale(camera.scale, camera.scale);
-    if (view === "overview") drawMap(ctx, graphMap(), room()?.id, selection?.kind === "connections" ? selection.index : null);
+    if (view === "overview") drawMap(ctx, graphMap(), room()?.id, selection?.kind === "connections" ? project.connections[selection.index]?.id : null, true);
     else drawRoom();
     ctx.restore(); $("zoom").textContent = Math.round(camera.scale * 100) + "%"; drawMini();
   }
@@ -423,11 +515,13 @@
     const polygon = active && (Array.isArray(active) ? active : active.polygon);
     if (polygon) for (let i = 0; i < polygon.length; ++i)
       if (Math.hypot(p.x - polygon[i].x, p.y - polygon[i].y) < 9 / camera.scale) return { ...selection, vertex: i };
-    for (const kind of ["entryPoints", "playerSpawns", "warpZones", "blockedPolygons", "walkablePolygons", "images"])
+    for (const kind of ["entryPoints", "playerSpawns", "warpZones", "objects", "blockedPolygons", "walkablePolygons", "images"])
       for (let i = current[kind].length - 1; i >= 0; --i) {
         const value = current[kind][i];
         const hit = value.position ? Math.hypot((p.x - value.position.x) / 32, (p.y - value.position.y) / 18) <= 1 :
-          kind === "images" ? p.x >= value.x && p.x <= value.x + value.width && p.y >= value.y && p.y <= value.y + value.height :
+          kind === "images" || kind === "objects" ? p.x >= value.x && p.x <= value.x + value.width && p.y >= value.y && p.y <= value.y + value.height :
+          (kind === "warpZones" && p.x >= value.visual.x && p.x <= value.visual.x + value.visual.width &&
+            p.y >= value.visual.y && p.y <= value.visual.y + value.visual.height) ||
           M.contains(p, Array.isArray(value) ? value : value.polygon);
         if (hit) return { kind, index: i };
       }
@@ -445,7 +539,12 @@
   function addPoint(p) {
     const current = room(); if (!current) return;
     const kind = modeKinds[mode];
-    if (mode === "spawn" || mode === "entry") {
+    if (mode === "object") {
+      if (current.objects.length >= 256) return notify("특수 오브젝트는 256개까지 가능합니다.", "error");
+      current.objects.push({ id: M.unique("Object", current.objects), name: "특수 오브젝트", type: "generic",
+        asset: "", x: round(p.x - 24), y: round(p.y - 24), width: 48, height: 48, properties: {} });
+      selection = { kind, index: current.objects.length - 1 }; touch(); renderInspector();
+    } else if (mode === "spawn" || mode === "entry") {
       if (current[kind].length >= (mode === "spawn" ? 32 : 256)) return notify("위치 개수 제한을 초과했습니다.", "error");
       const point = { id: M.unique(mode === "spawn" ? "Player" : "Entry", current[kind]), position: { x: round(p.x), y: round(p.y) } };
       current[kind].push(point);
@@ -458,12 +557,13 @@
   }
   function finishPolygon() {
     const current = room(), kind = modeKinds[mode];
-    if (!current || !kind || ["spawn", "entry"].includes(mode)) return;
+    if (!current || !kind || ["spawn", "entry", "object"].includes(mode)) return;
     const problem = M.polygonProblem(pending);
     if (problem) return notify(problem, "error");
     if (current[kind].length >= 256) return notify("영역은 종류별로 256개까지 가능합니다.", "error");
     current[kind].push(mode === "warp" ? { id: M.unique("Warp", current.warpZones), polygon: pending,
-      connectionId: "", targetRoomId: "", targetEntryPointId: "" } : pending);
+      connectionId: "", targetRoomId: "", targetEntryPointId: "", direction: M.inferSide(current, pending),
+      visual: M.createVisual(pending) } : pending);
     selection = { kind, index: current[kind].length - 1 }; pending = []; mode = "select"; touch(); renderInspector();
   }
   function deleteSelection() {
@@ -474,12 +574,12 @@
     } else if (room()) {
       room()[selection.kind].splice(selection.index, 1);
       // Unreferenced images are removed from portable projects to keep them bounded.
-      if (selection.kind === "images") pruneAssets();
+      if (["images", "objects", "warpZones"].includes(selection.kind)) pruneAssets();
     }
     selection = null; touch(); renderInspector();
   }
   function pruneAssets() {
-    const used = new Set(project.rooms.flatMap(r => r.images.map(image => image.asset)));
+    const used = M.usedAssets(project);
     project.assets = project.assets.filter(asset => used.has(asset.asset)); imageCache.clear();
   }
   canvas.addEventListener("pointerdown", event => {
@@ -517,11 +617,14 @@
       if (!value || (dx === 0 && dy === 0 && !drag.moved)) return;
       const translate = point => ({ x: Math.max(-1000000, Math.min(1000000, round(point.x + dx))), y: Math.max(-1000000, Math.min(1000000, round(point.y + dy))) });
       if (value.position) value.position = translate(original.position);
-      else if (selection.kind === "images") { const next = translate(original); value.x = next.x; value.y = next.y; }
+      else if (selection.kind === "images" || selection.kind === "objects") { const next = translate(original); value.x = next.x; value.y = next.y; }
       else {
         const polygon = Array.isArray(value) ? value : value.polygon, old = Array.isArray(original) ? original : original.polygon;
         if (drag.hit.vertex !== undefined) polygon[drag.hit.vertex] = translate(old[drag.hit.vertex]);
-        else for (let i = 0; i < polygon.length; ++i) polygon[i] = translate(old[i]);
+        else {
+          for (let i = 0; i < polygon.length; ++i) polygon[i] = translate(old[i]);
+          if (value.visual) { const next = translate(original.visual); value.visual.x = next.x; value.visual.y = next.y; }
+        }
       }
       drag.moved = true; touch();
     }
@@ -558,7 +661,7 @@
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key.toLowerCase() === "f") fit();
     if (view === "room") {
-      const shortcuts = { v: "select", w: "walkable", b: "blocked", p: "spawn", e: "entry", z: "warp" };
+      const shortcuts = { v: "select", w: "walkable", b: "blocked", p: "spawn", e: "entry", z: "warp", o: "object" };
       if (shortcuts[event.key.toLowerCase()]) setMode(shortcuts[event.key.toLowerCase()]);
     }
   });
@@ -607,12 +710,16 @@
       image.src = dataUrl;
     });
   }
-  $("add-image").onclick = () => { if (!unfinished() && room()) $("image-file").click(); };
+  $("add-image").onclick = () => {
+    if (!unfinished() && room()) { imageTarget = null; $("image-file").multiple = true; $("image-file").click(); }
+  };
   $("image-file").onchange = () => {
-    const files = [...$("image-file").files], current = room(); $("image-file").value = "";
+    const files = [...$("image-file").files], current = room(), target = imageTarget;
+    imageTarget = null; $("image-file").value = "";
     if (!files.length || !current) return;
     operation(async () => {
-      if (current.images.length + files.length > 64) throw new Error("방당 이미지는 64개까지 가능합니다.");
+      if (target && files.length !== 1) throw new Error("표시 이미지 하나를 선택하세요.");
+      if (!target && current.images.length + files.length > 64) throw new Error("방당 이미지는 64개까지 가능합니다.");
       const additions = [], assets = [...project.assets];
       let total = assets.reduce((sum, asset) => sum + asset.dataUrl.length, 0);
       for (const file of files) {
@@ -630,8 +737,11 @@
           width: image.naturalWidth, height: image.naturalHeight };
         assets.push(asset); additions.push({ asset: asset.asset, x: 0, y: 0, width: asset.width, height: asset.height });
       }
-      project.assets = assets; current.images.push(...additions); selection = { kind: "images", index: current.images.length - 1 };
-      touch(); renderInspector(); notify("이미지를 추가했습니다. 필요하면 ‘이미지에 월드 영역 맞춤’을 누르세요.");
+      project.assets = assets;
+      if (target) { target.asset = additions[0].asset; pruneAssets(); }
+      else { current.images.push(...additions); selection = { kind: "images", index: current.images.length - 1 }; }
+      touch(); renderInspector();
+      notify(target ? "게이트·오브젝트 표시 이미지를 추가했습니다." : "이미지를 추가했습니다. 필요하면 ‘이미지에 월드 영역 맞춤’을 누르세요.");
     });
   };
   function check() {
@@ -675,13 +785,14 @@
   }
   function replaceDocument(value, name, handle) {
     project = value; projectHandle = handle; filename = name; dirty = false; roomIndex = project.rooms.length ? 0 : -1;
-    selection = null; pending = []; connectionSource = null; mode = "select"; view = "overview"; graphCamera = roomCamera = null;
+    selection = null; pending = []; connectionSource = null; imageTarget = null; mode = "select"; view = "overview"; graphCamera = roomCamera = null;
     imageCache.clear(); $("results").replaceChildren(); $("validation-summary").textContent = "불러옴 · 출력 전에 검사하세요."; renderAll(); fit();
   }
   async function loadFile(file, handle) {
     if (file.size > 105 * 1024 * 1024) throw new Error("작업 파일은 105MB 이하여야 합니다.");
     const value = M.parse(await file.text()); replaceDocument(value, file.name, handle);
-    notify("작업 파일을 불러왔습니다. 이미지 해석 여부는 미리보기와 출력 과정에서 확인합니다.");
+    if (value.wasMigrated) { dirty = true; updateStatus(); notify("이전 작업 파일을 새 형식으로 변환했습니다. 속도를 제거했으며 게이트 방향을 확인한 뒤 작업 저장하세요.", "warning"); }
+    else notify("작업 파일을 불러왔습니다. 이미지 해석 여부는 미리보기와 출력 과정에서 확인합니다.");
   }
   $("open").onclick = () => {
     if (busy || (dirty || pending.length) && !confirm("저장하지 않은 작업을 버리고 불러올까요?")) return;
@@ -706,7 +817,7 @@
       const handle = window.showSaveFilePicker ? await window.showSaveFilePicker({ suggestedName: project.dungeonId + ".zip",
         types: [{ description: "던전과 미니맵 묶음", accept: { "application/zip": [".zip"] } }] }) : null;
       // Lock authoring during async asset decoding and writes; export is a coherent snapshot.
-      const used = new Set(project.rooms.flatMap(r => r.images.map(image => image.asset)));
+      const used = M.usedAssets(project);
       for (const asset of project.assets.filter(asset => used.has(asset.asset))) {
         const image = await decode(asset.dataUrl);
         if (image.naturalWidth !== asset.width || image.naturalHeight !== asset.height) throw new Error(asset.name + ": 저장된 이미지 크기와 실제 크기가 다릅니다.");
@@ -715,11 +826,21 @@
       drawMap(output.getContext("2d"), map);
       const png = await new Promise((resolve, reject) => output.toBlob(blob => blob ? resolve(blob) : reject(new Error("미니맵 PNG 생성에 실패했습니다.")), "image/png"));
       const files = M.runtimeFiles(project, map); files.push({ name: "Minimap.png", data: new Uint8Array(await png.arrayBuffer()) });
+      for (const kind of ["normal", "boss"]) files.push({ name: "Icons/" + kind + ".png", data: await iconPng(kind) });
+      const builtinKinds = new Set(project.rooms.flatMap(r => [...r.warpZones.filter(zone => !zone.visual.asset).map(zone => zone.visual.kind),
+        ...r.objects.filter(item => !item.asset).map(() => "object")]));
+      for (const kind of builtinKinds) files.push({ name: "Assets/" + M.builtinAssetPath(project, kind), data: await iconPng(kind) });
       const blob = window.DungeonArchive.create(files);
       if (handle) { await writeFile(handle, blob); notify("던전 맵 · 이미지 · 미니맵을 출력했습니다: " + handle.name); }
       else { download(blob, project.dungeonId + ".zip"); notify("던전 ZIP 다운로드를 요청했습니다. 브라우저의 다운로드 완료를 확인하세요."); }
     });
   };
+  async function iconPng(kind) {
+    const output = document.createElement("canvas"); output.width = output.height = 128;
+    M.paintIcon(output.getContext("2d"), kind, 0, 0, 128, 128);
+    const blob = await new Promise((resolve, reject) => output.toBlob(value => value ? resolve(value) : reject(new Error("기본 아이콘 생성에 실패했습니다.")), "image/png"));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
   window.addEventListener("beforeunload", event => { if (dirty || pending.length || busy) { event.preventDefault(); event.returnValue = ""; } });
   new ResizeObserver(resize).observe(canvas);
   renderAll(); resize(); fit();
