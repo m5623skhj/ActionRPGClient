@@ -31,12 +31,13 @@ namespace ActionRPG
         if (definition.motionType == ProjectileMotionType::Arc)
         {
             verticalVelocity -= definition.gravity * inDeltaSeconds;
-            height += verticalVelocity * inDeltaSeconds;
-            if (height <= 0.0f && verticalVelocity < 0.0f)
-            {
-                height = 0.0f;
-                isAlive = false;
-            }
+        }
+        // Straight air shots also change height; zero-gravity equal x/z speeds give a 45-degree shot.
+        height += verticalVelocity * inDeltaSeconds;
+        if (height <= 0.0f && verticalVelocity < 0.0f)
+        {
+            height = 0.0f;
+            isAlive = false;
         }
 
         if (remainingSeconds <= 0.0f)

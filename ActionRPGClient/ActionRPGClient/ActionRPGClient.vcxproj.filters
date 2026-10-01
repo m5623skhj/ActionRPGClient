@@ -76,6 +76,17 @@
     <None Include="..\Assets\Images\Characters\player_idle.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_run.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\Characters\player_shoot.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_shoot_start.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_shoot_fire.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_shoot_end.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_jump.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_jump_start.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_jump_hold.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_jump_land.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_air_shoot.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_air_shoot_start.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_air_shoot_fire.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\Characters\player_air_shoot_end.png"><Filter>Assets</Filter></None>
     <None Include="ClientOptionFile\CoreOption.txt"><Filter>Options</Filter></None>
   </ItemGroup>
 </Project>

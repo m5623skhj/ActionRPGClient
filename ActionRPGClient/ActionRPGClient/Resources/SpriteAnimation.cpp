@@ -166,6 +166,12 @@ namespace ActionRPG
 
     void SpriteAnimation::Update(const float inDeltaSeconds, const bool inLoop)
     {
+        if (!inLoop)
+        {
+            (void)AdvanceOnce(inDeltaSeconds);
+            return;
+        }
+
         if (frameCount <= 1 || isFinished)
         {
             return;
@@ -179,15 +185,9 @@ namespace ActionRPG
             {
                 ++currentFrame;
             }
-            else if (inLoop)
-            {
-                currentFrame = 0;
-            }
             else
             {
-                isFinished = true;
-                elapsedSeconds = 0.0f;
-                break;
+                currentFrame = 0;
             }
         }
     }
@@ -197,6 +197,32 @@ namespace ActionRPG
         currentFrame = 0;
         elapsedSeconds = 0.0f;
         isFinished = false;
+    }
+
+    float SpriteAnimation::AdvanceOnce(const float inDeltaSeconds)
+    {
+        if (isFinished)
+        {
+            return inDeltaSeconds;
+        }
+
+        float remainingSeconds = inDeltaSeconds;
+        while (remainingSeconds >= frameSeconds - elapsedSeconds)
+        {
+            remainingSeconds -= frameSeconds - elapsedSeconds;
+            elapsedSeconds = 0.0f;
+            if (currentFrame + 1 < frameCount)
+            {
+                ++currentFrame;
+            }
+            else
+            {
+                isFinished = true;
+                return remainingSeconds;
+            }
+        }
+        elapsedSeconds += remainingSeconds;
+        return 0.0f;
     }
 
     void SpriteAnimation::Draw(D2DRenderer& inRenderer, const float inCenterX, const float inBottomY,

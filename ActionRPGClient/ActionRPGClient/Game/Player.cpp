@@ -40,12 +40,25 @@ namespace ActionRPG
         , idleAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerIdle")
         , walkAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerWalk")
         , runAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerRun")
-        , attackAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerShoot")
+        , attackStartAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerShootStart")
+        , attackFireAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerShootFire")
+        , attackEndAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerShootEnd")
+        , jumpStartAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerJumpStart")
+        , jumpHoldAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerJumpHold")
+        , jumpLandAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerJumpLand")
+        , airAttackStartAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerAirShootStart")
+        , airAttackFireAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerAirShootFire")
+        , airAttackEndAnimation(inRenderer, inAssetCatalog, animationDefinitions, "PlayerAirShootEnd")
     {
-        attackEventFrame = ParseOneBasedFrame(animationDefinitions, "PlayerShoot", "event_frame");
-        if (attackEventFrame >= attackAnimation.GetFrameCount())
+        attackEventFrame = ParseOneBasedFrame(animationDefinitions, "PlayerShootFire", "event_frame");
+        if (attackEventFrame >= attackFireAnimation.GetFrameCount())
         {
-            throw std::runtime_error("PlayerShoot event_frame exceeds frame_count.");
+            throw std::runtime_error("PlayerShootFire event_frame exceeds frame_count.");
+        }
+        airAttackEventFrame = ParseOneBasedFrame(animationDefinitions, "PlayerAirShootFire", "event_frame");
+        if (airAttackEventFrame >= airAttackFireAnimation.GetFrameCount())
+        {
+            throw std::runtime_error("PlayerAirShootFire event_frame exceeds frame_count.");
         }
     }
 
@@ -67,11 +80,31 @@ namespace ActionRPG
             static_cast<float>(inInput.moveDown) - static_cast<float>(inInput.moveUp)
         };
 
-        if (inInput.WasPressed(InputKey::ActionX) && !isAttacking)
+        if (inInput.WasPressed(InputKey::ActionC) && jumpPhase == JumpPhase::Grounded)
         {
-            isAttacking = true;
-            attackProjectileQueued = false;
-            attackAnimation.Reset();
+            BeginJump();
+        }
+
+        // Jump preparation also accepts X presses, to begin aiming immediately after takeoff.
+        for (const InputKey key : inInput.pressedKeys)
+        {
+            if (key != InputKey::ActionX || jumpPhase == JumpPhase::Landing)
+            {
+                continue;
+            }
+
+            if (!IsAttacking())
+            {
+                const bool wantsAirAttack = jumpPhase != JumpPhase::Grounded;
+                if (!wantsAirAttack || airShotCount < MAX_ATTACK_SHOTS)
+                {
+                    BeginAttack(wantsAirAttack);
+                }
+            }
+            else if ((airAttack ? airShotCount : attackShotCount) + pendingAttackShots < MAX_ATTACK_SHOTS)
+            {
+                ++pendingAttackShots;
+            }
         }
 
         const float lengthSquared = direction.x * direction.x + direction.y * direction.y;
@@ -86,7 +119,8 @@ namespace ActionRPG
             direction.x *= inverseLength;
             direction.y *= inverseLength;
 
-            if (!isAttacking)
+            if (!IsAttacking()
+                && (jumpPhase == JumpPhase::Grounded || jumpPhase == JumpPhase::Airborne))
             {
                 const float movementSpeed = IsRunning() ? runSpeed : walkSpeed;
                 groundPosition.x += direction.x * movementSpeed * inDeltaSeconds;
@@ -94,7 +128,7 @@ namespace ActionRPG
             }
         }
 
-        isMoving = !isAttacking && lengthSquared > 0.0f;
+        isMoving = jumpPhase == JumpPhase::Grounded && !IsAttacking() && lengthSquared > 0.0f;
         if (isMoving && IsRunning())
         {
             runAnimation.Update(inDeltaSeconds);
@@ -113,49 +147,191 @@ namespace ActionRPG
 
         groundPosition = inGameplayMap.ConstrainGroundMovement(
             previousGroundPosition, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
-
-        if (inInput.WasPressed(InputKey::ActionC) && height == 0.0f)
-        {
-            verticalVelocity = JUMP_SPEED;
-        }
-
-        if (height > 0.0f || verticalVelocity > 0.0f)
-        {
-            verticalVelocity -= GRAVITY * inDeltaSeconds;
-            height += verticalVelocity * inDeltaSeconds;
-
-            if (height <= 0.0f)
-            {
-                height = 0.0f;
-                verticalVelocity = 0.0f;
-            }
-        }
+        const Vector2 beforeAttackPosition = groundPosition;
+        const float airborneSeconds = UpdateJump(inDeltaSeconds);
 
         if (inInput.WasPressed(InputKey::ActionV))
         {
             QueueProjectileRequest(PlayerProjectileType::Arc);
         }
 
-        if (isAttacking)
+        if (IsAttacking() && (!airAttack || jumpPhase == JumpPhase::Airborne))
         {
-            attackAnimation.Update(inDeltaSeconds, false);
-            if (!attackProjectileQueued && attackAnimation.GetCurrentFrame() >= attackEventFrame)
-            {
-                QueueProjectileRequest(PlayerProjectileType::Straight);
-                attackProjectileQueued = true;
-            }
-
-            if (attackAnimation.IsFinished())
-            {
-                isAttacking = false;
-                attackAnimation.Reset();
-            }
+            UpdateAttack(airAttack ? airborneSeconds : inDeltaSeconds);
+        }
+        // Recoil needs a second collision check only when a shot displaced the player.
+        if (groundPosition.x != beforeAttackPosition.x || groundPosition.y != beforeAttackPosition.y)
+        {
+            groundPosition = inGameplayMap.ConstrainGroundMovement(
+                beforeAttackPosition, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
         }
 
         skillEffectRemainingSeconds = std::max(0.0f, skillEffectRemainingSeconds - inDeltaSeconds);
         if (skillEffectRemainingSeconds == 0.0f)
         {
             activeSkillEffect.reset();
+        }
+    }
+
+    void Player::BeginJump()
+    {
+        CancelAttack();
+        airShotCount = 0;
+        jumpPhase = JumpPhase::Preparing;
+        jumpStartAnimation.Reset();
+    }
+
+    /**
+     * Advance preparation/landing once and integrate height with a fixed airborne sprite.
+     * @return Time spent airborne this update, excluding time consumed by preparation.
+     */
+    float Player::UpdateJump(const float inDeltaSeconds)
+    {
+        float remainingSeconds = inDeltaSeconds;
+        if (jumpPhase == JumpPhase::Preparing)
+        {
+            remainingSeconds = jumpStartAnimation.AdvanceOnce(remainingSeconds);
+            if (!jumpStartAnimation.IsFinished())
+            {
+                return 0.0f;
+            }
+            jumpPhase = JumpPhase::Airborne;
+            verticalVelocity = JUMP_SPEED;
+        }
+
+        if (jumpPhase == JumpPhase::Airborne)
+        {
+            verticalVelocity -= GRAVITY * remainingSeconds;
+            height += verticalVelocity * remainingSeconds;
+            if (height <= 0.0f && verticalVelocity <= 0.0f)
+            {
+                height = 0.0f;
+                verticalVelocity = 0.0f;
+                CancelAttack();
+                jumpPhase = JumpPhase::Landing;
+                jumpLandAnimation.Reset();
+                return 0.0f;
+            }
+            return remainingSeconds;
+        }
+
+        if (jumpPhase == JumpPhase::Landing)
+        {
+            (void)jumpLandAnimation.AdvanceOnce(remainingSeconds);
+            if (jumpLandAnimation.IsFinished())
+            {
+                jumpPhase = JumpPhase::Grounded;
+            }
+        }
+        return 0.0f;
+    }
+
+    void Player::BeginAttack(const bool inAirAttack)
+    {
+        airAttack = inAirAttack;
+        attackPhase = AttackPhase::Start;
+        attackShotCount = 0;
+        pendingAttackShots = 1;
+        GetAttackAnimation().Reset();
+    }
+
+    void Player::CancelAttack()
+    {
+        // airShotCount belongs to the whole jump and is cleared only by BeginJump.
+        attackPhase = AttackPhase::None;
+        pendingAttackShots = 0;
+        attackShotCount = 0;
+        attackProjectileQueued = false;
+        airAttack = false;
+    }
+
+    SpriteAnimation& Player::GetAttackAnimation()
+    {
+        if (airAttack)
+        {
+            return attackPhase == AttackPhase::Start ? airAttackStartAnimation
+                : attackPhase == AttackPhase::Fire ? airAttackFireAnimation : airAttackEndAnimation;
+        }
+        return attackPhase == AttackPhase::Start ? attackStartAnimation
+            : attackPhase == AttackPhase::Fire ? attackFireAnimation : attackEndAnimation;
+    }
+
+    const SpriteAnimation& Player::GetAttackAnimation() const
+    {
+        if (airAttack)
+        {
+            return attackPhase == AttackPhase::Start ? airAttackStartAnimation
+                : attackPhase == AttackPhase::Fire ? airAttackFireAnimation : airAttackEndAnimation;
+        }
+        return attackPhase == AttackPhase::Start ? attackStartAnimation
+            : attackPhase == AttackPhase::Fire ? attackFireAnimation : attackEndAnimation;
+    }
+
+    void Player::ApplyAirShotRecoil()
+    {
+        height += AIR_SHOT_RECOIL_LIFT;
+        verticalVelocity += AIR_SHOT_RECOIL_SPEED;
+        groundPosition.x += facingLeft ? AIR_SHOT_RECOIL_BACKWARD : -AIR_SHOT_RECOIL_BACKWARD;
+    }
+
+    /**
+     * Carry unused update time across preparation, shot cycles and recovery.
+     * Each accepted press reserves one shot; a shot cycle emits exactly one projectile.
+     */
+    void Player::UpdateAttack(const float inDeltaSeconds)
+    {
+        float remainingSeconds = inDeltaSeconds;
+        while (IsAttacking())
+        {
+            SpriteAnimation& animation = GetAttackAnimation();
+
+            const auto emitShot = [this]()
+            {
+                if (attackPhase == AttackPhase::Fire && !attackProjectileQueued
+                    && GetAttackAnimation().GetCurrentFrame() >= (airAttack ? airAttackEventFrame : attackEventFrame))
+                {
+                    QueueProjectileRequest(airAttack ? PlayerProjectileType::AirStraight : PlayerProjectileType::Straight);
+                    attackProjectileQueued = true;
+                    --pendingAttackShots;
+                    ++attackShotCount;
+                    if (airAttack)
+                    {
+                        ++airShotCount;
+                        ApplyAirShotRecoil();
+                    }
+                }
+            };
+
+            emitShot();
+            remainingSeconds = animation.AdvanceOnce(remainingSeconds);
+            emitShot();
+            if (!animation.IsFinished())
+            {
+                break;
+            }
+
+            if (attackPhase == AttackPhase::Start
+                || (attackPhase == AttackPhase::Fire && pendingAttackShots > 0))
+            {
+                attackPhase = AttackPhase::Fire;
+                attackProjectileQueued = false;
+                GetAttackAnimation().Reset();
+            }
+            else if (attackPhase == AttackPhase::Fire)
+            {
+                attackPhase = AttackPhase::End;
+                GetAttackAnimation().Reset();
+            }
+            else if (pendingAttackShots > 0)
+            {
+                // A late press during lowering starts with preparation, within the same five-shot limit.
+                attackPhase = AttackPhase::Start;
+                GetAttackAnimation().Reset();
+            }
+            else
+            {
+                CancelAttack();
+            }
         }
     }
 
@@ -242,9 +418,21 @@ namespace ActionRPG
             12.0f,
             D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.45f));
 
-        if (isAttacking)
+        if (jumpPhase == JumpPhase::Preparing)
         {
-            attackAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+            jumpStartAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+        }
+        else if (jumpPhase == JumpPhase::Landing)
+        {
+            jumpLandAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+        }
+        else if (IsAttacking())
+        {
+            GetAttackAnimation().Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+        }
+        else if (jumpPhase == JumpPhase::Airborne)
+        {
+            jumpHoldAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
         }
         else if (isMoving && IsRunning())
         {

@@ -353,9 +353,9 @@ namespace ActionRPG
         UpdateRemotePlayers(inDeltaSeconds);
         while (const std::optional<PlayerProjectileRequest> request = player.ConsumeProjectileRequest())
         {
-            const std::string_view definitionId = request->type == PlayerProjectileType::Straight
-                ? "PlayerBullet"
-                : "PlayerRock";
+            const std::string_view definitionId = request->type == PlayerProjectileType::AirStraight
+                ? "PlayerAirBullet"
+                : request->type == PlayerProjectileType::Straight ? "PlayerBullet" : "PlayerRock";
             projectileSystem.Spawn(
                 definitionId,
                 request->throwerPosition,

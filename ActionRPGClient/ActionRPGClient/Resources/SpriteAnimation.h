@@ -21,6 +21,8 @@ namespace ActionRPG
             const IniDocument& inDefinitions, std::string_view inSection);
 
         void Update(float inDeltaSeconds, bool inLoop = true);
+        // Advance one playthrough and return update time left after the last frame's duration.
+        [[nodiscard]] float AdvanceOnce(float inDeltaSeconds);
         void Reset();
         void Draw(D2DRenderer& inRenderer, float inCenterX, float inBottomY,
             bool inFlipHorizontal) const;

@@ -21,6 +21,7 @@ namespace ActionRPG
     enum class PlayerProjectileType
     {
         Straight,
+        AirStraight,
         Arc
     };
 
@@ -58,6 +59,31 @@ namespace ActionRPG
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
 
     private:
+        enum class JumpPhase
+        {
+            Grounded,
+            Preparing,
+            Airborne,
+            Landing
+        };
+
+        enum class AttackPhase
+        {
+            None,
+            Start,
+            Fire,
+            End
+        };
+
+        [[nodiscard]] bool IsAttacking() const { return attackPhase != AttackPhase::None; }
+        void BeginJump();
+        float UpdateJump(float inDeltaSeconds);
+        void BeginAttack(bool inAirAttack);
+        void CancelAttack();
+        [[nodiscard]] SpriteAnimation& GetAttackAnimation();
+        [[nodiscard]] const SpriteAnimation& GetAttackAnimation() const;
+        void UpdateAttack(float inDeltaSeconds);
+        void ApplyAirShotRecoil();
         void QueueProjectileRequest(PlayerProjectileType inType);
 
     private:
@@ -67,6 +93,10 @@ namespace ActionRPG
         static constexpr float DEPTH_RADIUS = 18.0f;
         static constexpr float JUMP_SPEED = 700.0f;
         static constexpr float GRAVITY = 1800.0f;
+        static constexpr std::uint32_t MAX_ATTACK_SHOTS = 5;
+        static constexpr float AIR_SHOT_RECOIL_LIFT = 3.0f;
+        static constexpr float AIR_SHOT_RECOIL_SPEED = 35.0f;
+        static constexpr float AIR_SHOT_RECOIL_BACKWARD = 4.0f;
 
         Vector2 groundPosition{};
         float height{};
@@ -76,10 +106,16 @@ namespace ActionRPG
         double movementTimeSeconds{};
         bool facingLeft{};
         bool isMoving{};
-        bool isAttacking{};
+        AttackPhase attackPhase{ AttackPhase::None };
+        JumpPhase jumpPhase{ JumpPhase::Grounded };
+        bool airAttack{};
         bool attackProjectileQueued{};
         bool runningEnabled = true;
         std::uint32_t attackEventFrame{};
+        std::uint32_t airAttackEventFrame{};
+        std::uint32_t airShotCount{};
+        std::uint32_t attackShotCount{};
+        std::uint32_t pendingAttackShots{};
         float walkSpeed = 280.0f;
         float runSpeed = 480.0f;
         RunState runState;
@@ -87,7 +123,15 @@ namespace ActionRPG
         SpriteAnimation idleAnimation;
         SpriteAnimation walkAnimation;
         SpriteAnimation runAnimation;
-        SpriteAnimation attackAnimation;
+        SpriteAnimation attackStartAnimation;
+        SpriteAnimation attackFireAnimation;
+        SpriteAnimation attackEndAnimation;
+        SpriteAnimation jumpStartAnimation;
+        SpriteAnimation jumpHoldAnimation;
+        SpriteAnimation jumpLandAnimation;
+        SpriteAnimation airAttackStartAnimation;
+        SpriteAnimation airAttackFireAnimation;
+        SpriteAnimation airAttackEndAnimation;
         std::deque<PlayerProjectileRequest> pendingProjectileRequests;
     };
 }
