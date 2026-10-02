@@ -2,6 +2,7 @@
 
 #include "Core/IniDocument.h"
 #include "Game/Vector2.h"
+#include "Game/DungeonCombat.h"
 #include "Resources/SpriteAnimation.h"
 
 #include <cstdint>
@@ -85,7 +86,10 @@ namespace ActionRPG
 
         [[nodiscard]] Vector2 GetGroundPosition() const { return groundPosition; }
         [[nodiscard]] float GetHeight() const { return height; }
-        [[nodiscard]] bool IsHitReacting() const { return hitPhase != HitPhase::None; }
+        [[nodiscard]] virtual bool IsHitReacting() const
+        {
+            return combatState ? combatState->reaction != CombatReaction::None : hitPhase != HitPhase::None;
+        }
         [[nodiscard]] bool IsRunning() const { return !IsHitReacting() && runningEnabled && runningRequested; }
         [[nodiscard]] bool IsRunningEnabled() const { return runningEnabled; }
         void SetGroundPosition(Vector2 inPosition) { groundPosition = inPosition; }
@@ -99,12 +103,22 @@ namespace ActionRPG
         }
         void ResetMovementSpeeds() { walkSpeed = DEFAULT_WALK_SPEED; runSpeed = DEFAULT_RUN_SPEED; }
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
+        void ApplyCombatState(const CombatPlayerState& inState, const CombatRules& inRules,
+            bool inSetPosition = false);
+        void UpdateCombatPresentation(float inDeltaSeconds, const GameplayMap& inMap,
+            const Vector2* inLocalDirection = nullptr, bool inRun = false);
+        [[nodiscard]] bool HasCombatState() const { return combatState.has_value(); }
+        [[nodiscard]] bool GetFacingLeft() const { return facingLeft; }
+        [[nodiscard]] bool IsCombatDead() const { return combatState && combatState->hp == 0; }
 
     protected:
+        // Server-driven monster presentation needs a pose without the player action controller.
+        explicit Character(Vector2 inInitialPosition) : groundPosition(inInitialPosition) {}
         Character(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,
             D2DRenderer& inRenderer, const CharacterAnimationSet& inAnimations);
 
         void SetFacingLeft(bool inFacingLeft) { facingLeft = inFacingLeft; }
+        void SetPresentationHeight(float inHeight) { height = inHeight; }
 
         static constexpr float DEFAULT_WALK_SPEED = 280.0f;
         static constexpr float DEFAULT_RUN_SPEED = 480.0f;
@@ -149,6 +163,8 @@ namespace ActionRPG
         void ApplyAirShotRecoil();
         void QueueProjectileRequest(CharacterProjectileType inType);
         void UpdateHit(float inDeltaSeconds);
+        [[nodiscard]] SpriteAnimation& GetCombatAnimation();
+        [[nodiscard]] const SpriteAnimation& GetCombatAnimation() const;
 
     private:
         static constexpr float HORIZONTAL_RADIUS = WIDTH * 0.5f;
@@ -183,7 +199,7 @@ namespace ActionRPG
         float walkSpeed = DEFAULT_WALK_SPEED;
         float runSpeed = DEFAULT_RUN_SPEED;
         bool runningRequested{};
-        IniDocument animationDefinitions;
+        std::optional<IniDocument> animationDefinitions;
         SpriteAnimation idleAnimation;
         SpriteAnimation walkAnimation;
         SpriteAnimation runAnimation;
@@ -201,6 +217,9 @@ namespace ActionRPG
         SpriteAnimation airHitFallAnimation;
         SpriteAnimation knockdownAnimation;
         SpriteAnimation getUpAnimation;
+        std::optional<CombatPlayerState> combatState;
+        CombatRules combatRules;
+        float combatPresentationSeconds{}, deathPresentationSeconds{};
         std::deque<CharacterProjectileRequest> pendingProjectileRequests;
     };
 }

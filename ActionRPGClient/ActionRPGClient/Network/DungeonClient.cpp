@@ -211,6 +211,9 @@ namespace ActionRPG
     {
         impl->StopClient();
         worldJson.clear(); worldBytes = 0; receivingWorld = false;
+        combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
+        lastCompletedCombatId = 0;
+        combatPolling = combatRequestPending = false;
     }
 
     void DungeonClient::RequestWorld()
@@ -223,7 +226,43 @@ namespace ActionRPG
     DungeonConnectionState DungeonClient::GetConnectionState() const
     {
         if (receivingWorld && std::chrono::steady_clock::now() > worldDeadline) return DungeonConnectionState::Failed;
+        if (combatPolling && std::chrono::steady_clock::now() > combatProgressDeadline) return DungeonConnectionState::Failed;
         return impl->GetConnectionState();
+    }
+
+    void DungeonClient::StartCombatPolling()
+    {
+        combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
+        lastCompletedCombatId = 0;
+        combatPolling = true; combatRequestPending = false;
+        combatNextRequest = std::chrono::steady_clock::now();
+        combatProgressDeadline = combatNextRequest + std::chrono::seconds(30);
+    }
+
+    void DungeonClient::SendAction(const std::uint32_t inSequence, const std::uint8_t inAction, const bool inFacingLeft)
+    {
+        if (!combatPolling || receivingWorld || inSequence == 0 || (inAction != 1 && inAction != 2)) return;
+        DungeonProtocol::DungeonActionInput request;
+        request.sequence = inSequence; request.action = inAction; request.facingLeft = inFacingLeft ? 1 : 0;
+        SendReliable(request);
+    }
+
+    // Called only by ConsumeEvents on the game thread. Exactly one chunk request is outstanding.
+    void DungeonClient::UpdateCombatPolling()
+    {
+        if (!combatPolling || GetConnectionState() != DungeonConnectionState::Connected) return;
+        const auto now = std::chrono::steady_clock::now();
+        if (combatRequestPending)
+        {
+            if (now < combatResponseDeadline) return;
+            combatRequestPending = false;
+        }
+        if (now < combatNextRequest) return;
+        DungeonProtocol::DungeonCombatStateRequest request;
+        request.snapshotId = combatSnapshotId; request.offset = combatOffset;
+        SendReliable(request);
+        combatRequestPending = true;
+        combatResponseDeadline = now + std::chrono::seconds(5);
     }
 
     void DungeonClient::SendReliable(IPacket& inPacket)
@@ -322,6 +361,58 @@ namespace ActionRPG
                 else events.emplace_back(DungeonPlayerStateEvent{packet.sequence, std::move(packet.mapId), packet.x, packet.y});
                 break;
             }
+            case DungeonProtocol::PacketType::DUNGEON_ACTION_RESULT:
+            {
+                DungeonProtocol::DungeonActionResult packet; packet.BufferToPacket(*buffer);
+                if (!combatPolling || packet.sequence == 0 || packet.accepted > 1) invalidPacket = true;
+                else events.emplace_back(DungeonActionResultEvent{packet.sequence, packet.accepted != 0, packet.serverTick});
+                break;
+            }
+            case DungeonProtocol::PacketType::DUNGEON_COMBAT_STATE_CHUNK:
+            {
+                DungeonProtocol::DungeonCombatStateChunk packet; packet.BufferToPacket(*buffer);
+                if (!combatPolling || packet.status > 3 || packet.totalBytes > 512 * 1024
+                    || packet.payload.size() > 768 || packet.retryAfterMs > 60000
+                    || buffer->GetBufferError() != 0 || buffer->GetUseSize() != 0)
+                { invalidPacket = true; break; }
+                const auto now = std::chrono::steady_clock::now();
+                if (packet.snapshotId != 0 && packet.snapshotId == lastCompletedCombatId) break;
+                if (packet.status == 2 || packet.status == 3)
+                {
+                    combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
+                    combatRequestPending = false; combatNextRequest = now + std::chrono::milliseconds(200);
+                    break;
+                }
+                // A delayed retransmission for an older completed stream cannot replace the active one.
+                if (combatSnapshotId != 0 && packet.snapshotId != combatSnapshotId) break;
+                if (packet.status == 1)
+                {
+                    if (!packet.payload.empty() || packet.offset != combatOffset) break;
+                    if (packet.snapshotId != 0) combatSnapshotId = packet.snapshotId;
+                    combatRequestPending = false;
+                    combatNextRequest = now + std::chrono::milliseconds(std::max(1U, packet.retryAfterMs));
+                    combatProgressDeadline = combatNextRequest + std::chrono::seconds(30);
+                    break;
+                }
+                if (packet.offset < combatOffset) break;
+                if (!combatRequestPending || packet.snapshotId == 0 || packet.totalBytes == 0
+                    || packet.offset != combatOffset || packet.payload.empty()
+                    || packet.offset > packet.totalBytes || packet.payload.size() > packet.totalBytes - packet.offset
+                    || (combatBytes != 0 && combatBytes != packet.totalBytes))
+                { invalidPacket = true; break; }
+                combatSnapshotId = packet.snapshotId; combatBytes = packet.totalBytes;
+                combatJson += packet.payload; combatOffset = static_cast<std::uint32_t>(combatJson.size());
+                combatRequestPending = false; combatNextRequest = now;
+                combatProgressDeadline = now + std::chrono::seconds(30);
+                if (combatOffset == combatBytes)
+                {
+                    lastCompletedCombatId = combatSnapshotId;
+                    events.emplace_back(DungeonCombatEvent{std::move(combatJson)});
+                    combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
+                    combatNextRequest = now + std::chrono::milliseconds(200);
+                }
+                break;
+            }
             default:
                 invalidPacket = true;
                 break;
@@ -349,6 +440,7 @@ namespace ActionRPG
             Stop();
             events.clear();
         }
+        else UpdateCombatPolling();
         return events;
     }
 }

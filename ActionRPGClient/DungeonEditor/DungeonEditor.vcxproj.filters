@@ -13,6 +13,10 @@
     <None Include="editor.js"><Filter>Editor Files</Filter></None>
     <None Include="model.js"><Filter>Editor Files</Filter></None>
     <None Include="archive.js"><Filter>Editor Files</Filter></None>
+    <None Include="package.js"><Filter>Editor Files</Filter></None>
+    <None Include="AUTOMATION.md"><Filter>Editor Files</Filter></None>
+    <None Include="tools\dungeon-package.cjs"><Filter>Editor Files</Filter></None>
+    <None Include="tools\install.cjs"><Filter>Editor Files</Filter></None>
     <None Include="README.md"><Filter>Editor Files</Filter></None>
   </ItemGroup>
 </Project>

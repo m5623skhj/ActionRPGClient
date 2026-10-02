@@ -9,6 +9,12 @@
 
 namespace ActionRPG
 {
+    struct SpriteFrame
+    {
+        D2D1_RECT_F sourceRect{};
+        D2D1_POINT_2F pivot{};
+    };
+
     class AssetCatalog;
     class D2DRenderer;
     class IniDocument;
@@ -17,18 +23,24 @@ namespace ActionRPG
     class SpriteAnimation final
     {
     public:
+        SpriteAnimation() = default;
         SpriteAnimation(D2DRenderer& inRenderer, const AssetCatalog& inAssetCatalog,
             const IniDocument& inDefinitions, std::string_view inSection);
+        SpriteAnimation(Microsoft::WRL::ComPtr<ID2D1Bitmap1> inBitmap,
+            std::vector<SpriteFrame> inFrames, float inFrameSeconds, float inScale);
 
         void Update(float inDeltaSeconds, bool inLoop = true);
         // Advance one playthrough and return update time left after the last frame's duration.
         [[nodiscard]] float AdvanceOnce(float inDeltaSeconds);
         void Reset();
+        // Select a frame directly from authoritative elapsed time without advancing gameplay.
+        void Seek(float inSeconds, bool inLoop = false);
         void Draw(D2DRenderer& inRenderer, float inCenterX, float inBottomY,
             bool inFlipHorizontal) const;
 
         [[nodiscard]] std::uint32_t GetCurrentFrame() const { return currentFrame; }
         [[nodiscard]] std::uint32_t GetFrameCount() const { return frameCount; }
+        [[nodiscard]] float GetDuration() const { return frameSeconds * static_cast<float>(frameCount); }
         [[nodiscard]] bool IsFinished() const { return isFinished; }
 
     private:
@@ -46,5 +58,7 @@ namespace ActionRPG
         float renderWidth{};
         float renderHeight{};
         std::vector<float> frameAnchorXs;
+        std::vector<SpriteFrame> frames;
+        float scale{ 1.0f };
     };
 }

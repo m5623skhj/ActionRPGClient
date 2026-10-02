@@ -4,6 +4,11 @@ window.DungeonModel = (() => {
   const ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
   const ASSET = /^Images\/Dungeons\/[A-Za-z0-9_-]+\.(png|jpg|webp|bmp)$/;
   const DATA = /^data:(image\/(?:png|jpeg|webp|bmp));base64,([A-Za-z0-9+/]*={0,2})$/;
+  const MONSTERS = [
+    { dataId: 1, name: "Dummy", image: "" },
+    { dataId: 2, name: "녹슨 갑옷병", image: "rusted_armor_soldier_idle.png" },
+    { dataId: 3, name: "몰락한 성채 수호자", image: "fallen_citadel_warden_idle.png" }
+  ];
   const EPS = 1e-6;
   const SIDES = ["north", "east", "south", "west"];
   const OPPOSITE = { north: "south", east: "west", south: "north", west: "east" };
@@ -280,7 +285,7 @@ window.DungeonModel = (() => {
       }
       if (!room.entryPoints.some(entry => entry.id === room.defaultEntryPointId)) error("기본 워프 도착점을 지정하세요.");
       for (const monster of room.monsters) {
-        if (monster.dataId !== 1) error(monster.id + ": 지원하지 않는 몬스터 Data ID입니다.");
+        if (!MONSTERS.some(type => type.dataId === monster.dataId)) error(monster.id + ": 지원하지 않는 몬스터 Data ID입니다.");
         if (valid && !movable(room, monster.position)) error(monster.id + ": 몬스터의 발 영역이 이동 가능 지역 안에 있어야 합니다.");
         if (room.warpZones.some(zone => contains(monster.position, zone.polygon)))
           error(monster.id + ": 워프존 안에는 몬스터를 배치할 수 없습니다.");
@@ -487,6 +492,6 @@ window.DungeonModel = (() => {
     }
     return files;
   }
-  return { createDocument, createRoom, clone, unique, parse, contains, polygonProblem, movable, validate, minimap, svg, runtimeFiles,
+  return { MONSTERS, createDocument, createRoom, clone, unique, parse, contains, polygonProblem, movable, validate, minimap, svg, runtimeFiles,
     createVisual, inferSide, connectionSide, nearSide, polygonBounds, usedAssets, withPorts, paintIcon, iconSvg, builtinAssetPath, OPPOSITE };
 })();

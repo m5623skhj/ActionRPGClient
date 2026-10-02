@@ -102,6 +102,11 @@ namespace ActionRPG
 
         void ProcessNetworkEvents(const InputState& inInput);
         void ProcessDungeonEvents();
+        void ApplyCombatSnapshot(std::string_view inJson);
+        void SendCombatActions(const InputState& inInput);
+        void UpdateDungeonCombat(float inDeltaSeconds);
+        void RenderCombatProjectiles(D2DRenderer& inRenderer) const;
+        void RenderCombatHud(D2DRenderer& inRenderer) const;
         void ProcessPlayerHits();
         void UpdateDungeonSelection(const InputState& inInput);
         void UpdateSystemInterface(const InputState& inInput);
@@ -138,6 +143,14 @@ namespace ActionRPG
         D2DRenderer& renderer;
         TownClient& townClient;
         DungeonClient& dungeonClient;
+        MonsterCatalog monsterCatalog;
+        std::optional<DungeonCombatSnapshot> combatSnapshot;
+        std::unordered_map<std::uint64_t, std::unique_ptr<Player>> combatPlayers;
+        std::uint64_t lastCombatTick{};
+        bool hasCombatTick{}, dungeonCleared{};
+        std::uint32_t combatActionSequence{}, lastCombatActionResult{}, combatInputsThisSecond{};
+        float combatInputWindowSeconds{}, combatSnapshotAge{}, rejectedActionSeconds{};
+        std::wstring combatStatus;
         std::unordered_map<std::uint64_t, RemotePlayerState> remotePlayers;
         std::vector<TownProtocol::TransitionZone> transitionZones;
         std::uint64_t localPlayerId{};
@@ -157,7 +170,7 @@ namespace ActionRPG
         std::optional<DungeonWorld> dungeonWorld;
         std::unordered_map<std::string, std::vector<std::unique_ptr<Monster>>> dungeonMonsters;
         std::string dungeonMapId;
-        std::unique_ptr<Monster> dummyTemplate;
+        std::unordered_map<std::uint32_t, std::unique_ptr<Monster>> monsterTemplates;
         std::optional<TownProtocol::MapInfo> lastTownMap;
         Vector2 lastTownPosition{};
         bool lastDungeonRun{};

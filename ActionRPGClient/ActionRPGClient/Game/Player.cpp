@@ -29,6 +29,17 @@ namespace ActionRPG
     void Player::Update(const float inDeltaSeconds, const InputState& inInput, const GameplayMap& inGameplayMap)
     {
         movementTimeSeconds += inDeltaSeconds;
+        if (HasCombatState())
+        {
+            activeSkillEffect.reset(); skillEffectRemainingSeconds = 0.0f;
+            if (IsRunningEnabled() && !IsHitReacting()) runState.Update(inInput, movementTimeSeconds);
+            else runState.Reset();
+            const Vector2 direction{
+                static_cast<float>(inInput.moveRight) - static_cast<float>(inInput.moveLeft),
+                static_cast<float>(inInput.moveDown) - static_cast<float>(inInput.moveUp)};
+            UpdateCombatPresentation(inDeltaSeconds, inGameplayMap, &direction, runState.IsRunning());
+            return;
+        }
         skillEffectRemainingSeconds = std::max(0.0f, skillEffectRemainingSeconds - inDeltaSeconds);
         if (skillEffectRemainingSeconds == 0.0f)
         {

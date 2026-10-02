@@ -9,6 +9,7 @@ Win32 게임 루프 위에 D3D11/DXGI 장치와 Direct2D 렌더링을 구성했�
 - [마을 패킷 개발 가이드](TOWN_NETWORK.md): TownServer와 주고받는 패킷 추가 절차
 - [마을 맵 에디터 설명서](TOWN_MAP_EDITOR.md): 이미지 배치, 이동 영역, 저장과 적용
 - [몬스터 AI 편집기](MonsterEditor/README.md): 순환 상태 그래프, 스킬·동작 정의, JSON 저장과 정적 승인
+- [캐릭터 피격 영역 편집기](CharacterEditor/README.md): animations.json 불러오기, 플레이어 INI 변환, 프레임별 사각형 편집과 공용 JSON 출력
 - [에셋 디렉터리 설명](Assets/README.md): INI와 이미지·오디오 경로 규칙
 
 ## 현재 기능

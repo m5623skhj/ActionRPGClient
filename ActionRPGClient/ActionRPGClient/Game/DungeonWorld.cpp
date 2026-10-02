@@ -32,13 +32,14 @@ namespace ActionRPG
         }
     }
     DungeonWorld DungeonWorld::Parse(const std::string_view inJson, const std::uint64_t inRoomId,
-        const std::uint64_t inPlayerId)
+        const std::uint64_t inPlayerId, const MonsterCatalog& inMonsters)
     {
         const auto world = nlohmann::json::parse(inJson);
         if (world.at("version") != 1 || world.at("roomId") != inRoomId
             || !world.at("maps").is_object() || world.at("maps").empty() || world.at("maps").size() > 256)
             throw std::runtime_error("Invalid dungeon world.");
         DungeonWorld result;
+        result.combatRules = CombatRules::Parse(world.at("combatRules").dump());
         result.entryMapId = world.at("entryMapId").get<std::string>();
         result.spawn = Position(world.at("players").at(std::to_string(inPlayerId)));
         std::unordered_set<std::uint64_t> monsterIds;
@@ -84,7 +85,7 @@ namespace ActionRPG
                 spawn.position = Position(monster.at("position"));
                 spawn.facingLeft = monster.at("facingLeft").get<bool>();
                 spawn.hp = monster.at("hp").get<std::uint32_t>(); spawn.maxHp = monster.at("maxHp").get<std::uint32_t>();
-                if (spawn.dataId != 1 || spawn.instanceId == 0 || !monsterIds.insert(spawn.instanceId).second
+                if (!inMonsters.Contains(spawn.dataId) || spawn.instanceId == 0 || !monsterIds.insert(spawn.instanceId).second
                     || spawn.maxHp == 0 || spawn.hp > spawn.maxHp) throw std::runtime_error("Invalid monster instance.");
                 room.monsters.push_back(spawn);
             }

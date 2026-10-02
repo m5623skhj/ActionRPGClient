@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Character Editor · 피격 영역</title>
+  <link rel="stylesheet" href="editor.css">
+  <script src="model.js" defer></script>
+  <script src="editor.js" defer></script>
+</head>
+<body>
+  <header>
+    <div><strong>Character Editor</strong><span>프레임별 피격 사각형</span><b id="dirty"></b></div>
+    <nav aria-label="파일 작업">
+      <button id="new">새 문서</button>
+      <button id="animationsOpen">애니메이션 JSON</button>
+      <button id="imagesOpen">이미지 폴더</button>
+      <button id="playerOpen">플레이어 INI 변환</button>
+      <button id="projectOpen">작업 불러오기</button>
+      <button id="save">작업 저장</button>
+      <button id="hurtOpen">피격 JSON 불러오기</button>
+      <button id="check">정적 검사</button>
+      <button id="export" class="primary">게임용 JSON 출력</button>
+    </nav>
+  </header>
+  <main>
+    <aside>
+      <label>캐릭터<select id="character" aria-label="캐릭터"></select></label>
+      <label>상태 · 모션<select id="motion" aria-label="상태 모션"></select></label>
+      <div id="progress"></div>
+      <div class="frame-heading">프레임 <small>번호는 0부터 시작</small></div>
+      <div id="frames" role="group" aria-label="프레임 선택"></div>
+      <p class="muted">● 영역 지정　○ 미지정</p>
+      <p class="muted">몬스터: animations.json과 이미지 폴더를 선택하세요.<br>플레이어: INI 변환에서 클라이언트 프로젝트 폴더를 선택하세요.</p>
+    </aside>
+    <section class="workspace">
+      <div class="toolbar">
+        <button id="selectTool" class="active">선택 · 이동 V</button>
+        <button id="drawTool">사각형 그리기 R</button>
+        <button id="previous">◀ 이전</button><button id="play">▶ 재생</button><button id="next">다음 ▶</button>
+        <label class="inline"><input type="checkbox" id="flip">좌우 반전 보기</label>
+        <label class="inline">확대<input type="range" id="zoom" min="0.25" max="4" step="0.05" value="1"></label>
+        <button id="fit">전체 보기 F</button>
+      </div>
+      <div id="viewport"><canvas id="canvas" aria-label="캐릭터와 피격 사각형 편집 화면"></canvas>
+        <div id="empty">애니메이션 데이터를 불러오세요.</div></div>
+      <div id="frameInfo">빈 문서</div>
+    </section>
+    <aside class="properties">
+      <h2>피격 사각형</h2>
+      <p class="muted">현재 프레임의 왼쪽 위 기준 · 원본 이미지 픽셀</p>
+      <div class="numbers">
+        <label>X<input id="rectX" type="number" min="0" step="0.1"></label>
+        <label>Y<input id="rectY" type="number" min="0" step="0.1"></label>
+        <label>너비<input id="rectWidth" type="number" min="0.1" step="0.1"></label>
+        <label>높이<input id="rectHeight" type="number" min="0.1" step="0.1"></label>
+      </div>
+      <button id="applyNumbers">좌표 적용</button>
+      <div class="button-row"><button id="copy">복사</button><button id="paste">붙여넣기</button><button id="delete">삭제</button></div>
+      <button id="applyMotion">현재 모션 전체에 복사</button>
+      <div class="button-row"><button id="undo">실행 취소</button><button id="redo">다시 실행</button></div>
+      <button id="animationsSave">변환한 animations.json 저장</button>
+      <h2>검사 결과</h2>
+      <pre id="report">게임용 출력에는 모든 프레임의 피격 영역과 실제 이미지 확인이 필요합니다. 미완성 문서는 작업 저장할 수 있습니다.</pre>
+      <p class="muted">재생은 모션 미리보기입니다. 게임 상태 전환이나 전투 판정은 실행하지 않습니다.</p>
+    </aside>
+  </main>
+  <footer id="status" role="status" aria-live="polite">준비</footer>
+  <input id="animationFile" type="file" accept=".json,application/json" hidden>
+  <input id="projectFile" type="file" accept=".json,application/json" hidden>
+  <input id="hurtFile" type="file" accept=".json,application/json" hidden>
+  <input id="imageFolder" type="file" webkitdirectory multiple hidden>
+  <input id="playerFolder" type="file" webkitdirectory multiple hidden>
+</body>
+</html>

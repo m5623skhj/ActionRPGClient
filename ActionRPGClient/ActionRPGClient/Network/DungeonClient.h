@@ -30,6 +30,8 @@ namespace ActionRPG
     };
 
     struct DungeonWorldEvent { std::string json; };
+    struct DungeonCombatEvent { std::string json; };
+    struct DungeonActionResultEvent { std::uint32_t sequence{}; bool accepted{}; std::uint64_t serverTick{}; };
     struct DungeonPlayerStateEvent
     {
         std::uint32_t sequence{};
@@ -37,7 +39,8 @@ namespace ActionRPG
         float x{};
         float y{};
     };
-    using DungeonEvent = std::variant<DungeonChallengeEvent, DungeonAuthResultEvent, DungeonWorldEvent, DungeonPlayerStateEvent>;
+    using DungeonEvent = std::variant<DungeonChallengeEvent, DungeonAuthResultEvent, DungeonWorldEvent,
+        DungeonPlayerStateEvent, DungeonCombatEvent, DungeonActionResultEvent>;
 
     // Owns the RUDP connection. Start returns immediately while the TLS session
     // broker exchange and RUDP connection are performed on a worker thread.
@@ -53,6 +56,8 @@ namespace ActionRPG
         bool Start(std::string inSessionBrokerAddress, std::uint16_t inSessionBrokerPort);
         void Stop();
         void RequestWorld();
+        void StartCombatPolling();
+        void SendAction(std::uint32_t inSequence, std::uint8_t inAction, bool inFacingLeft);
         [[nodiscard]] DungeonConnectionState GetConnectionState() const;
         void SendReliable(IPacket& inPacket);
         bool SendUnreliable(IPacket& inPacket);
@@ -65,5 +70,10 @@ namespace ActionRPG
         std::uint32_t worldBytes{};
         bool receivingWorld{};
         std::chrono::steady_clock::time_point worldDeadline{};
+        void UpdateCombatPolling();
+        std::string combatJson;
+        std::uint32_t combatSnapshotId{}, combatBytes{}, combatOffset{}, lastCompletedCombatId{};
+        bool combatPolling{}, combatRequestPending{};
+        std::chrono::steady_clock::time_point combatNextRequest{}, combatResponseDeadline{}, combatProgressDeadline{};
     };
 }

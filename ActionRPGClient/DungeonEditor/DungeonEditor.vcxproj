@@ -89,15 +89,25 @@
     <None Include="editor.js" />
     <None Include="model.js" />
     <None Include="archive.js" />
+    <None Include="package.js" />
+    <None Include="AUTOMATION.md" />
+    <None Include="tools\dungeon-package.cjs" />
+    <None Include="tools\install.cjs" />
     <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyEditorFiles" AfterTargets="Build">
     <ItemGroup>
-      <EditorFiles Include="$(ProjectDir)index.html;$(ProjectDir)editor.css;$(ProjectDir)editor.js;$(ProjectDir)model.js;$(ProjectDir)archive.js;$(ProjectDir)README.md" />
+      <EditorFiles Include="$(ProjectDir)index.html;$(ProjectDir)editor.css;$(ProjectDir)editor.js;$(ProjectDir)model.js;$(ProjectDir)archive.js;$(ProjectDir)package.js;$(ProjectDir)AUTOMATION.md;$(ProjectDir)README.md" />
     </ItemGroup>
     <Copy SourceFiles="@(EditorFiles)"
           DestinationFiles="@(EditorFiles-&gt;'$(OutDir)DungeonEditor\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyEditorTools" AfterTargets="Build">
+    <ItemGroup><EditorToolFiles Include="$(ProjectDir)tools\*.cjs" /></ItemGroup>
+    <Copy SourceFiles="@(EditorToolFiles)"
+          DestinationFiles="@(EditorToolFiles-&gt;'$(OutDir)DungeonEditor\tools\%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
   <ImportGroup Label="ExtensionTargets" />

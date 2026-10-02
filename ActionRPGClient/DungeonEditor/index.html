@@ -23,10 +23,7 @@
     <canvas id="minimap" width="260" height="195" aria-label="전체 던전 미니맵"></canvas>
     <p class="help">□: 일반 방 · 해골: 보스 방 · 초록 점: 입장 방<br>연결 지점은 실제 게이트의 방향과 일치해야 합니다.</p>
     <h3>몬스터</h3>
-    <button id="dummy-palette" class="monster-palette" title="이미지를 방 내부로 드래그하거나 클릭 후 배치">
-      <img id="dummy-preview" width="48" height="72" draggable="true" alt="Dummy 배치">
-      <span>Dummy<br><small>Data ID 1</small></span>
-    </button>
+    <div id="monster-palette" class="item-list"></div>
     <p class="help">방 내부에 이미지를 드래그하세요. 놓은 지점은 몬스터의 발 위치입니다.</p>
     <h3>방의 요소</h3><div id="layers" class="item-list layer-list"></div>
   </aside>
@@ -37,7 +34,7 @@
       <button data-mode="select" class="active">선택</button><button id="add-image">이미지 추가</button>
       <button data-mode="walkable">이동 가능 W</button><button data-mode="blocked">진입 불가 B</button>
       <button data-mode="spawn">입장 위치 P</button><button data-mode="entry">워프 도착점 E</button><button data-mode="warp">게이트·발판 Z</button>
-      <button data-mode="monster">Dummy M</button><button data-mode="object">특수 오브젝트 O</button>
+      <button data-mode="monster">몬스터 M</button><button data-mode="object">특수 오브젝트 O</button>
       <button id="finish-polygon">영역 완성</button><button id="cancel-polygon">취소</button>
     </div>
     <div id="hint" class="hint">왼쪽 ＋ 버튼으로 방을 추가하세요.</div>
@@ -52,6 +49,6 @@
 </main>
 <input id="project-file" type="file" accept=".json,application/json" hidden>
 <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp,.bmp" multiple hidden>
-<script src="model.js"></script><script src="archive.js"></script><script src="editor.js"></script>
+<script src="model.js"></script><script src="archive.js"></script><script src="package.js"></script><script src="editor.js"></script>
 </body>
 </html>

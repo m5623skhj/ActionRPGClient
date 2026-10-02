@@ -6,4 +6,5 @@
   <Project Path="TownMapEditor/TownMapEditor.vcxproj" Id="3acfe8d7-7214-44b3-948c-4b35df63dcf4" />
   <Project Path="MonsterEditor/MonsterEditor.vcxproj" Id="9701e964-611c-4c87-9e61-51c64f334a81" />
   <Project Path="DungeonEditor/DungeonEditor.vcxproj" Id="83a2d6b4-d211-4c94-bc32-c90a382647cb" />
+  <Project Path="CharacterEditor/CharacterEditor.vcxproj" Id="b640235e-98c7-4d79-a679-9abc094df39b" />
 </Solution>

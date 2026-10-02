@@ -7,11 +7,13 @@
 #include <d2d1_1helper.h>
 
 #include <cctype>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace
 {
@@ -138,6 +140,31 @@ namespace
 
 namespace ActionRPG
 {
+    SpriteAnimation::SpriteAnimation(Microsoft::WRL::ComPtr<ID2D1Bitmap1> inBitmap,
+        std::vector<SpriteFrame> inFrames, const float inFrameSeconds, const float inScale)
+        : bitmap(std::move(inBitmap)), frameSeconds(inFrameSeconds),
+          frames(std::move(inFrames)), scale(inScale)
+    {
+        if (!bitmap || frames.empty() || frames.size() > 4096
+            || !std::isfinite(frameSeconds) || frameSeconds <= 0.0f
+            || !std::isfinite(scale) || scale <= 0.0f)
+            throw std::runtime_error("Invalid explicit sprite animation.");
+        frameCount = static_cast<std::uint32_t>(frames.size());
+        const auto size = bitmap->GetPixelSize();
+        for (const auto& frame : frames)
+        {
+            const auto& rect = frame.sourceRect;
+            if (!std::isfinite(rect.left) || !std::isfinite(rect.top)
+                || !std::isfinite(rect.right) || !std::isfinite(rect.bottom)
+                || !std::isfinite(frame.pivot.x) || !std::isfinite(frame.pivot.y)
+                || rect.left < 0.0f || rect.top < 0.0f || rect.right <= rect.left
+                || rect.bottom <= rect.top || rect.right > size.width || rect.bottom > size.height
+                || frame.pivot.x < 0.0f || frame.pivot.y < 0.0f
+                || frame.pivot.x > rect.right - rect.left || frame.pivot.y > rect.bottom - rect.top)
+                throw std::runtime_error("Sprite rectangle or pivot is outside the image.");
+        }
+    }
+
     SpriteAnimation::SpriteAnimation(D2DRenderer& inRenderer, const AssetCatalog& inAssetCatalog,
         const IniDocument& inDefinitions, const std::string_view inSection)
         : bitmap(inRenderer.LoadBitmap(
@@ -199,6 +226,17 @@ namespace ActionRPG
         isFinished = false;
     }
 
+    void SpriteAnimation::Seek(const float inSeconds, const bool inLoop)
+    {
+        if (!std::isfinite(inSeconds) || inSeconds < 0.0f)
+            throw std::runtime_error("Invalid animation presentation time.");
+        const double frame = std::floor(static_cast<double>(inSeconds) / frameSeconds);
+        currentFrame = inLoop ? static_cast<std::uint32_t>(std::fmod(frame, frameCount))
+            : static_cast<std::uint32_t>(std::min(frame, static_cast<double>(frameCount - 1)));
+        elapsedSeconds = std::fmod(inSeconds, frameSeconds);
+        isFinished = !inLoop && frame >= frameCount;
+    }
+
     float SpriteAnimation::AdvanceOnce(const float inDeltaSeconds)
     {
         if (isFinished)
@@ -228,6 +266,27 @@ namespace ActionRPG
     void SpriteAnimation::Draw(D2DRenderer& inRenderer, const float inCenterX, const float inBottomY,
         const bool inFlipHorizontal) const
     {
+        if (!bitmap) return;
+        if (!frames.empty())
+        {
+            const auto& frame = frames[currentFrame];
+            const float width = frame.sourceRect.right - frame.sourceRect.left;
+            const float height = frame.sourceRect.bottom - frame.sourceRect.top;
+            // Reflect the local pivot along with the image to keep its ground point fixed.
+            const float pivotX = inFlipHorizontal ? width - frame.pivot.x : frame.pivot.x;
+            const float left = inCenterX - pivotX * scale;
+            const float top = inBottomY - frame.pivot.y * scale;
+            // Metadata uses pixels; Direct2D's source rectangle uses bitmap DIPs.
+            const auto pixelSize = bitmap->GetPixelSize();
+            const auto dipSize = bitmap->GetSize();
+            const float dipX = dipSize.width / static_cast<float>(pixelSize.width);
+            const float dipY = dipSize.height / static_cast<float>(pixelSize.height);
+            const auto source = D2D1::RectF(frame.sourceRect.left * dipX, frame.sourceRect.top * dipY,
+                frame.sourceRect.right * dipX, frame.sourceRect.bottom * dipY);
+            inRenderer.DrawBitmap(bitmap.Get(), source,
+                D2D1::RectF(left, top, left + width * scale, top + height * scale), inFlipHorizontal);
+            return;
+        }
         const D2D1_SIZE_F bitmapSize = bitmap->GetSize();
         const float frameWidth = bitmapSize.width / static_cast<float>(columns);
         const std::uint32_t column = currentFrame % columns;

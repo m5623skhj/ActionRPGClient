@@ -8,6 +8,7 @@
 #include <d2d1_1helper.h>
 
 #include <algorithm>
+#include <utility>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -36,31 +37,31 @@ namespace ActionRPG
     Character::Character(const Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,
         D2DRenderer& inRenderer, const CharacterAnimationSet& inAnimations)
         : groundPosition(inInitialPosition)
-        , animationDefinitions(inAssetCatalog.GetDataPath("Animations"))
-        , idleAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.idle)
-        , walkAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.walk)
-        , runAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.run)
-        , attackStartAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.attackStart)
-        , attackFireAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.attackFire)
-        , attackEndAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.attackEnd)
-        , jumpStartAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.jumpStart)
-        , jumpHoldAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.jumpHold)
-        , jumpLandAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.jumpLand)
-        , airAttackStartAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.airAttackStart)
-        , airAttackFireAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.airAttackFire)
-        , airAttackEndAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.airAttackEnd)
-        , hitAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.hit)
-        , airHitStartAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.airHitStart)
-        , airHitFallAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.airHitFall)
-        , knockdownAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.knockdown)
-        , getUpAnimation(inRenderer, inAssetCatalog, animationDefinitions, inAnimations.getUp)
+        , animationDefinitions(std::in_place, inAssetCatalog.GetDataPath("Animations"))
+        , idleAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.idle)
+        , walkAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.walk)
+        , runAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.run)
+        , attackStartAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.attackStart)
+        , attackFireAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.attackFire)
+        , attackEndAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.attackEnd)
+        , jumpStartAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.jumpStart)
+        , jumpHoldAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.jumpHold)
+        , jumpLandAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.jumpLand)
+        , airAttackStartAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.airAttackStart)
+        , airAttackFireAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.airAttackFire)
+        , airAttackEndAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.airAttackEnd)
+        , hitAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.hit)
+        , airHitStartAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.airHitStart)
+        , airHitFallAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.airHitFall)
+        , knockdownAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.knockdown)
+        , getUpAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.getUp)
     {
-        attackEventFrame = ParseOneBasedFrame(animationDefinitions, inAnimations.attackFire, "event_frame");
+        attackEventFrame = ParseOneBasedFrame(*animationDefinitions, inAnimations.attackFire, "event_frame");
         if (attackEventFrame >= attackFireAnimation.GetFrameCount())
         {
             throw std::runtime_error(std::string(inAnimations.attackFire) + " event_frame exceeds frame_count.");
         }
-        airAttackEventFrame = ParseOneBasedFrame(animationDefinitions, inAnimations.airAttackFire, "event_frame");
+        airAttackEventFrame = ParseOneBasedFrame(*animationDefinitions, inAnimations.airAttackFire, "event_frame");
         if (airAttackEventFrame >= airAttackFireAnimation.GetFrameCount())
         {
             throw std::runtime_error(std::string(inAnimations.airAttackFire) + " event_frame exceeds frame_count.");
@@ -70,6 +71,7 @@ namespace ActionRPG
     void Character::UpdateActions(const float inDeltaSeconds, const CharacterActions& inActions,
         const GameplayMap& inGameplayMap)
     {
+        if (!animationDefinitions) throw std::logic_error("Use the monster presentation controller.");
         const Vector2 previousGroundPosition = groundPosition;
         if (IsHitReacting())
         {
@@ -216,6 +218,7 @@ namespace ActionRPG
 
     void Character::ResetActionState()
     {
+        combatState.reset(); combatPresentationSeconds = deathPresentationSeconds = 0.0f;
         CancelAttack();
         pendingProjectileRequests.clear();
         jumpPhase = JumpPhase::Grounded;
@@ -502,6 +505,109 @@ namespace ActionRPG
         });
     }
 
+    void Character::ApplyCombatState(const CombatPlayerState& inState, const CombatRules& inRules,
+        const bool inSetPosition)
+    {
+        const bool wasDead = combatState && combatState->hp == 0;
+        isMoving = combatState && (std::abs(inState.position.x - combatState->position.x) > 0.5f
+            || std::abs(inState.position.y - combatState->position.y) > 0.5f);
+        if (inSetPosition) groundPosition = inState.position;
+        combatState = inState; combatRules = inRules; combatPresentationSeconds = 0.0f;
+        if (!wasDead && inState.hp == 0) deathPresentationSeconds = 0.0f;
+        height = inState.height; facingLeft = inState.facingLeft;
+        ConfigureMovementSpeeds(inRules.walkSpeed, inRules.runSpeed);
+        pendingProjectileRequests.clear();
+    }
+
+    const SpriteAnimation& Character::GetCombatAnimation() const
+    {
+        const auto& state = *combatState;
+        if (state.hp == 0 || state.reaction == CombatReaction::Dead || state.reaction == CombatReaction::Down)
+            return knockdownAnimation;
+        if (state.reaction == CombatReaction::Hit) return hitAnimation;
+        if (state.reaction == CombatReaction::Falling)
+            return state.verticalSpeed > 0.0f ? airHitStartAnimation : airHitFallAnimation;
+        if (state.reaction == CombatReaction::Rising) return getUpAnimation;
+        if (state.jumpPhase == CombatJumpPhase::Prepare) return jumpStartAnimation;
+        if (state.shotPhase != CombatShotPhase::None)
+        {
+            if (state.airAttack)
+                return state.shotPhase == CombatShotPhase::Prepare ? airAttackStartAnimation
+                    : state.shotPhase == CombatShotPhase::Fire ? airAttackFireAnimation : airAttackEndAnimation;
+            return state.shotPhase == CombatShotPhase::Prepare ? attackStartAnimation
+                : state.shotPhase == CombatShotPhase::Fire ? attackFireAnimation : attackEndAnimation;
+        }
+        if (state.jumpPhase == CombatJumpPhase::Airborne) return jumpHoldAnimation;
+        return isMoving ? (IsRunning() ? runAnimation : walkAnimation) : idleAnimation;
+    }
+
+    SpriteAnimation& Character::GetCombatAnimation()
+    {
+        return const_cast<SpriteAnimation&>(std::as_const(*this).GetCombatAnimation());
+    }
+
+    // Predict only ground movement; server snapshots decide combat phases, height and damage.
+    void Character::UpdateCombatPresentation(const float inDeltaSeconds, const GameplayMap& inMap,
+        const Vector2* inLocalDirection, const bool inRun)
+    {
+        if (!combatState) return;
+        const auto& state = *combatState;
+        combatPresentationSeconds = std::min(0.25f, combatPresentationSeconds + inDeltaSeconds);
+        if (state.hp == 0) deathPresentationSeconds += inDeltaSeconds;
+        if (inLocalDirection)
+        {
+            const auto previous = groundPosition;
+            Vector2 direction = *inLocalDirection;
+            const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+            const bool allowed = state.hp != 0 && state.reaction == CombatReaction::None
+                && state.shotPhase == CombatShotPhase::None && state.jumpPhase == CombatJumpPhase::Grounded;
+            runningRequested = allowed && inRun;
+            isMoving = allowed && length > 0.0f;
+            if (isMoving)
+            {
+                const float speed = IsRunning() ? runSpeed : walkSpeed;
+                groundPosition.x += direction.x / length * speed * inDeltaSeconds;
+                groundPosition.y += direction.y / length * speed * inDeltaSeconds;
+                if (direction.x != 0.0f) facingLeft = direction.x < 0.0f;
+                groundPosition = inMap.ConstrainGroundMovement(previous, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
+            }
+        }
+        else
+        {
+            const float blend = 1.0f - std::exp(-12.0f * inDeltaSeconds);
+            groundPosition.x += (state.position.x - groundPosition.x) * blend;
+            groundPosition.y += (state.position.y - groundPosition.y) * blend;
+        }
+        height = state.height;
+        if (height > 0.0f && state.hp != 0)
+            height = std::max(0.0f, height + state.verticalSpeed * combatPresentationSeconds
+                - 0.5f * combatRules.gravity * combatPresentationSeconds * combatPresentationSeconds);
+        auto& animation = GetCombatAnimation();
+        float elapsed = combatPresentationSeconds;
+        float duration = animation.GetDuration();
+        bool loop = false;
+        if (state.hp == 0) elapsed = deathPresentationSeconds;
+        else if (state.reaction == CombatReaction::Hit)
+        { elapsed += combatRules.hitStunSeconds - state.reactionSeconds; duration = combatRules.hitStunSeconds; }
+        else if (state.reaction == CombatReaction::Down)
+        { elapsed += combatRules.downSeconds - state.reactionSeconds; duration = combatRules.downSeconds; }
+        else if (state.reaction == CombatReaction::Rising)
+        { elapsed += combatRules.riseSeconds - state.reactionSeconds; duration = combatRules.riseSeconds; }
+        else if (state.reaction == CombatReaction::Falling)
+        { elapsed = state.verticalSpeed > 0.0f ? combatPresentationSeconds : 0.0f; }
+        else if (state.jumpPhase == CombatJumpPhase::Prepare)
+        { elapsed += state.jumpSeconds; duration = combatRules.jumpPrepareSeconds; }
+        else if (state.shotPhase != CombatShotPhase::None)
+        {
+            elapsed += state.shotSeconds;
+            duration = state.shotPhase == CombatShotPhase::Prepare ? combatRules.shotPrepareSeconds
+                : state.shotPhase == CombatShotPhase::Fire ? combatRules.shotIntervalSeconds : combatRules.shotRecoverSeconds;
+        }
+        else if (state.jumpPhase == CombatJumpPhase::Airborne) elapsed = 0.0f;
+        else { animation.Update(inDeltaSeconds); return; }
+        animation.Seek(std::max(0.0f, elapsed) / duration * animation.GetDuration(), loop);
+    }
+
     void Character::Render(D2DRenderer& inRenderer, const Camera& inCamera) const
     {
         const Vector2 groundScreenPosition = inCamera.WorldToScreen(groundPosition);
@@ -513,7 +619,11 @@ namespace ActionRPG
             12.0f,
             D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.45f));
 
-        if (IsHitReacting())
+        if (combatState)
+        {
+            GetCombatAnimation().Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+        }
+        else if (IsHitReacting())
         {
             const SpriteAnimation& animation = hitPhase == HitPhase::Stagger ? hitAnimation
                 : hitPhase == HitPhase::Launch ? airHitStartAnimation
