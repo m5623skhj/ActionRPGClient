@@ -16,6 +16,7 @@ namespace ActionRPG
         float jumpSpeed{}, gravity{}, jumpPrepareSeconds{}, hitStunSeconds{}, downSeconds{}, riseSeconds{};
         float projectileSpeed{}, muzzleHeight{}, airFireLift{}, airRecoilDistance{};
         std::uint32_t maxHp{}, maxShots{};
+        double tickIntervalSeconds{0.05};
         static CombatRules Parse(std::string_view inJson);
     };
     struct CombatActorState
@@ -29,6 +30,7 @@ namespace ActionRPG
         float presentationSpeed{};
         CombatReaction reaction{ CombatReaction::None };
     };
+    struct CombatBuffState { std::string skillId; float remainingSeconds{}; };
     struct CombatPlayerState : CombatActorState
     {
         std::uint64_t playerId{};
@@ -38,6 +40,11 @@ namespace ActionRPG
         std::uint32_t shotCount{}, airShotCount{}, actionSequence{}, moveSequence{};
         bool airAttack{}, running{};
         std::uint32_t shotSequence{}, jumpSequence{};
+        std::uint32_t characterId{}, skillSequence{};
+        std::string skillId;
+        bool skillActive{}, skillAirborne{};
+        float skillSeconds{}, movementMultiplier{1.0f};
+        std::vector<CombatBuffState> buffs;
     };
     struct CombatMonsterState : CombatActorState
     {
@@ -53,12 +60,15 @@ namespace ActionRPG
         std::uint64_t id{}, ownerId{};
         Vector2 position{};
         float height{}, direction{}, heightDirection{};
+        float directionY{}, speed{}, radius{4.0f}, ageSeconds{};
+        std::string skillId;
     };
     struct DungeonCombatSnapshot
     {
         std::uint64_t roomId{}, serverTick{}, snapshotSequence{}, serverTimeMs{};
         std::uint32_t mapEpoch{1};
-        bool realtime{};
+        bool realtime{}, hasServerTime{};
+        double tickIntervalSeconds{};
         std::string mapId, state;
         bool cleared{};
         std::vector<CombatPlayerState> players;

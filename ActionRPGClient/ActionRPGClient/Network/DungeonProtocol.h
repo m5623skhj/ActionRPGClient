@@ -25,6 +25,7 @@ namespace ActionRPG::DungeonProtocol
         DUNGEON_REALTIME_REQUEST,
         DUNGEON_REALTIME_RESULT,
         DUNGEON_REALTIME_CHUNK,
+        DUNGEON_SKILL_INPUT,
     };
 
     class DungeonChallenge final : public IPacket
@@ -193,6 +194,18 @@ namespace ActionRPG::DungeonProtocol
         std::uint32_t offset{};
         std::uint8_t state{};
         std::string payload{};
+    };
+
+    class DungeonSkillInput final : public IPacket
+    {
+    public:
+        [[nodiscard]] ::PacketId GetPacketId() const override;
+        void BufferToPacket(NetBuffer& inBuffer) override;
+        void PacketToBuffer(NetBuffer& outBuffer) override;
+
+        std::uint32_t sequence{};
+        std::string skillId{};
+        std::uint8_t facingLeft{};
     };
 
     void RegisterPackets();

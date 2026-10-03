@@ -9,6 +9,7 @@
 
 namespace ActionRPG
 {
+    class PlayerSkillPresentation;
     class Player final : public Character
     {
     public:
@@ -19,6 +20,7 @@ namespace ActionRPG
         void ResetActionState() override;
         void SetRunningEnabled(bool inEnabled) override;
         void ActivateCommandSkill(const SkillEffectDefinition& inEffect);
+        void SetSkillPresentation(const PlayerSkillPresentation* inPresentation) { skillPresentation = inPresentation; }
         void ReconcileGroundPosition(Vector2 inAuthoritativePosition);
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const override;
 
@@ -27,5 +29,6 @@ namespace ActionRPG
         std::optional<SkillEffectDefinition> activeSkillEffect;
         double movementTimeSeconds{};
         RunState runState;
+        const PlayerSkillPresentation* skillPresentation{};
     };
 }

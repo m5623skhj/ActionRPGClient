@@ -1,4 +1,5 @@
 #include "Game/Player.h"
+#include "Game/PlayerSkillPresentation.h"
 
 #include "Game/Camera.h"
 #include "Graphics/D2DRenderer.h"
@@ -143,6 +144,8 @@ namespace ActionRPG
 
     void Player::Render(D2DRenderer& inRenderer, const Camera& inCamera) const
     {
+        if (const auto state = GetCombatPlayerState(); state && skillPresentation
+            && skillPresentation->Render(*state, GetGroundPosition(), GetHeight(), GetCombatElapsedSeconds(), inRenderer, inCamera)) return;
         if (activeSkillEffect.has_value())
         {
             const Vector2 groundScreenPosition = inCamera.WorldToScreen(GetGroundPosition());

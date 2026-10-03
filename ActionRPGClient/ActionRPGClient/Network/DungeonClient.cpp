@@ -363,6 +363,14 @@ namespace ActionRPG
         SendReliable(request);
     }
 
+    void DungeonClient::SendSkill(std::uint32_t inSequence, const std::string& inSkillId, bool inFacingLeft)
+    {
+        if (!combatPolling || receivingWorld || inSequence == 0 || inSkillId.empty() || inSkillId.size() > 64) return;
+        DungeonProtocol::DungeonSkillInput request;
+        request.sequence = inSequence; request.skillId = inSkillId; request.facingLeft = inFacingLeft ? 1 : 0;
+        SendReliable(request);
+    }
+
     // Called only by ConsumeEvents on the game thread. Exactly one chunk request is outstanding.
     void DungeonClient::UpdateCombatPolling()
     {
@@ -458,7 +466,9 @@ namespace ActionRPG
                 if (buffer->GetBufferError() != 0 || buffer->GetUseSize() != 0) { invalidPacket = true; break; }
                 if (!realtimeRequested || packet.challenge != realtimeChallenge || packet.roomId != realtimeRoomId) break;
                 if (packet.version != 1 || packet.accepted != 1 || packet.dungeonId == 0
-                    || packet.tickIntervalMs != 50 || packet.snapshotIntervalMs < 50 || packet.snapshotIntervalMs > 100
+                    // v1 reports rounded milliseconds: 20Hz=50ms, 30Hz=33ms (actual dt=1/30s).
+                    || (packet.tickIntervalMs != 50 && packet.tickIntervalMs != 33)
+                    || packet.snapshotIntervalMs < 50 || packet.snapshotIntervalMs > 100
                     || (realtimeDungeonId != 0 && realtimeDungeonId != packet.dungeonId))
                 { realtimeRequested = realtimeSeen = false; realtimeAssemblies.clear(); break; }
                 realtimeDungeonId = packet.dungeonId;

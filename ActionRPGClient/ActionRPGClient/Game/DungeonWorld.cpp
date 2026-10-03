@@ -40,6 +40,7 @@ namespace ActionRPG
             throw std::runtime_error("Invalid dungeon world.");
         DungeonWorld result;
         result.combatRules = CombatRules::Parse(world.at("combatRules").dump());
+        if (world.contains("playerSkills")) result.playerSkills = PlayerSkills::Catalog::Parse(world.at("playerSkills"));
         result.entryMapId = world.at("entryMapId").get<std::string>();
         result.spawn = Position(world.at("players").at(std::to_string(inPlayerId)));
         std::unordered_set<std::uint64_t> monsterIds;

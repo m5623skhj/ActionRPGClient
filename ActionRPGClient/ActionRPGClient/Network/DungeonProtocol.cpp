@@ -276,6 +276,25 @@ namespace ActionRPG::DungeonProtocol
         outBuffer << payload;
     }
 
+    ::PacketId DungeonSkillInput::GetPacketId() const
+    {
+        return static_cast<::PacketId>(PacketType::DUNGEON_SKILL_INPUT);
+    }
+
+    void DungeonSkillInput::BufferToPacket(NetBuffer& inBuffer)
+    {
+        inBuffer >> sequence;
+        inBuffer >> skillId;
+        inBuffer >> facingLeft;
+    }
+
+    void DungeonSkillInput::PacketToBuffer(NetBuffer& outBuffer)
+    {
+        outBuffer << sequence;
+        outBuffer << skillId;
+        outBuffer << facingLeft;
+    }
+
     void RegisterPackets()
     {
         PacketManager::GetInst().RegisterPacket<DungeonChallenge>();
@@ -291,5 +310,6 @@ namespace ActionRPG::DungeonProtocol
         PacketManager::GetInst().RegisterPacket<DungeonRealtimeRequest>();
         PacketManager::GetInst().RegisterPacket<DungeonRealtimeResult>();
         PacketManager::GetInst().RegisterPacket<DungeonRealtimeChunk>();
+        PacketManager::GetInst().RegisterPacket<DungeonSkillInput>();
     }
 }

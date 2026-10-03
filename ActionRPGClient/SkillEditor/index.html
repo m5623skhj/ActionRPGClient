@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>플레이어 스킬 편집기</title><link rel="stylesheet" href="editor.css"></head>
+<body>
+<header><div><strong>플레이어 스킬 편집기</strong><small>직접 공격 · 투사체 공격 · 버프</small></div><span id="dirty"></span></header>
+<nav>
+ <button id="importPlayer">플레이어 데이터 폴더</button><button id="importAnimations">animations.json</button>
+ <button id="importImages">이미지 폴더</button><button id="importHurt">피격 JSON 참조</button>
+ <button id="open">작업 열기</button><button id="save">작업 저장</button><button id="check">검사</button><button id="export">런타임 ZIP 출력</button>
+ <button id="undo">실행 취소</button><button id="redo">다시 실행</button>
+</nav>
+<input id="playerFiles" type="file" webkitdirectory multiple hidden><input id="imageFiles" type="file" webkitdirectory multiple hidden>
+<input id="animationFile" type="file" accept=".json" hidden><input id="hurtFile" type="file" accept=".json" hidden>
+<input id="projectFile" type="file" accept=".json" hidden><input id="effectFile" type="file" accept="image/png" hidden>
+<main>
+ <aside>
+  <h2>스킬 목록</h2><label>플레이어<select id="character"></select></label>
+  <div class="row"><button id="new">새 스킬</button><button id="duplicate">복제</button><button id="delete">삭제</button></div>
+  <select id="skills" size="8" aria-label="스킬 목록"></select>
+  <section id="common">
+   <h2>공통 설정</h2><label>고유 ID<input id="skillId" readonly></label>
+   <label>이름<input data-bind="name" maxlength="80"></label>
+   <label>유형<select id="type"><option value="direct">직접 공격</option><option value="projectile">투사체 공격</option><option value="buff">버프</option></select></label>
+   <label>입력 커맨드<input id="command" placeholder="Right Right Z"></label><small>Left / Right / Up / Down / Z / X / C / V</small>
+   <div class="row"><label>입력 간격 (초)<input type="number" data-bind="input.maxStepSeconds" min="0.01" max="1.5" step="0.01"></label>
+   <label>쿨다운 (초)<input type="number" data-bind="cooldownSeconds" min="0" max="86400" step="0.05"></label></div>
+   <section data-type="direct projectile"><label>피해량<input type="number" data-bind="execution.damage" min="1" max="1000000" step="1"></label></section>
+   <section data-type="direct"><label>지면 Y 판정 반경<input type="number" data-bind="execution.depthRadius" min="0.1" max="500" step="0.1"></label></section>
+   <section data-type="projectile">
+    <label>총속도 (월드 단위/초)<input type="number" data-bind="execution.speed" min="1" max="4000"></label>
+    <div class="row"><label>충돌 반경<input type="number" data-bind="execution.radius" min="0.1" max="100" step="0.1"></label>
+    <label>최대 이동거리<input type="number" data-bind="execution.range" min="1" max="10000"></label></div>
+   </section>
+   <section data-type="buff">
+    <p>자기 대상 · 시간 만료 · 같은 스킬은 시간 갱신</p>
+    <label>능력치<select data-bind="execution.stat"><option value="damageMultiplier">공격 피해 배율</option><option value="movementMultiplier">이동속도 배율</option></select></label>
+    <div class="row"><label>배율<input type="number" data-bind="execution.multiplier" min="0.1" max="10" step="0.05"></label>
+    <label>지속시간 (초)<input type="number" data-bind="execution.durationSeconds" min="0.05" max="3600" step="0.05"></label></div>
+    <small>서로 다른 버프는 능력치별 가장 높은 배율을 적용합니다.</small>
+   </section>
+  </section>
+ </aside>
+ <article>
+  <div class="row previewbar"><label>편집 모드<select id="mode"><option value="ground">지상</option><option value="air">공중</option></select></label>
+   <label><input id="enabled" type="checkbox">이 모드 사용</label><label><input id="flip" type="checkbox">왼쪽 보기</label>
+   <label><input id="hurtVisible" type="checkbox" checked>피격 참조</label><label>배율<input id="zoom" type="number" min="0.25" max="4" step="0.25" value="1"></label>
+   <label>공중 높이<input id="previewHeight" type="number" min="0" max="1000" value="80"></label>
+  </div>
+  <canvas id="canvas" width="960" height="650" aria-label="캐릭터 모션과 스킬 판정 미리보기"></canvas>
+  <div class="row"><button id="previous">◀</button><button id="play">▶ 모션 재생</button><button id="next">▶</button><input id="frame" type="range" min="0" max="0" value="0"><output id="frameText">프레임 0</output></div>
+  <p id="hint">플레이어 데이터 폴더를 불러와 스킬을 만드세요.</p>
+  <pre id="report">실제 게임의 실행·전투 판정을 검증하는 화면은 아닙니다.</pre>
+ </article>
+ <aside id="variantPanel">
+  <h2>모드별 모션·시점</h2><label>모션<select id="motion"></select></label>
+  <div class="row"><label>실행 시작 프레임<input type="number" data-variant="eventFrame" min="0" step="1"></label>
+   <label>직접 공격 종료 프레임<input type="number" data-variant="endFrame" min="0" step="1"></label></div>
+  <small>프레임은 0부터 시작합니다. 모션의 FPS로 서버 시간을 계산합니다.</small>
+  <section data-type="direct">
+   <h2>현재 프레임 공격 영역</h2><p>캔버스에서 드래그하여 그립니다. 영역 안은 이동, 모서리는 크기 조절입니다.</p>
+   <div class="row"><label>X (앞뒤)<input id="rectX" type="number" step="0.1"></label><label>바닥 높이<input id="rectY" type="number" step="0.1"></label></div>
+   <div class="row"><label>너비<input id="rectW" type="number" min="0.1" step="0.1"></label><label>높이<input id="rectH" type="number" min="0.1" step="0.1"></label></div>
+   <div class="row"><button id="applyRect">수치 적용</button><button id="clearRect">영역 삭제</button><button id="copyRange">활성 구간에 복사</button></div>
+  </section>
+  <section data-type="projectile">
+   <h2>발사 위치·방향</h2><p>캔버스를 클릭하거나 드래그하여 X·높이를 설정합니다.</p>
+   <div class="row"><label>X (앞뒤)<input type="number" data-variant="spawn.x" step="0.1"></label><label>지면 Y<input type="number" data-variant="spawn.y" step="0.1"></label><label>높이<input type="number" data-variant="spawn.height" step="0.1"></label></div>
+   <div class="row"><label>지면 방향각 (도)<input type="number" data-variant="yawDegrees" min="-180" max="180"></label>
+    <label>위아래 각도 (도)<input type="number" data-variant="pitchDegrees" min="-90" max="90"></label></div>
+   <small>지면 0°는 전방, +90°는 지면 Y 증가 방향입니다. 위아래 -45°는 아래 발사입니다.</small>
+   <output id="velocity"></output>
+  </section>
+  <h2>투명 PNG 프레임 이펙트</h2><div class="row"><button id="addEffect">PNG 연결</button><button id="clearEffect">연결 해제</button></div>
+  <div id="effectPanel">
+   <p id="effectPath"></p>
+   <div class="row"><label>열<input type="number" data-effect="columns" min="1"></label><label>행<input type="number" data-effect="rows" min="1"></label><label>프레임 수<input type="number" data-effect="frameCount" min="1"></label></div>
+   <div class="row"><label>FPS<input type="number" data-effect="fps" min="1" max="240"></label><label>월드 배율<input type="number" data-effect="scale" min="0.01" max="20" step="0.01"></label></div>
+   <div class="row"><label>기준점 X (0~1)<input type="number" data-effect="pivotX" min="0" max="1" step="0.01"></label><label>기준점 Y (0~1)<input type="number" data-effect="pivotY" min="0" max="1" step="0.01"></label></div>
+   <label>이펙트 시작 프레임<input type="number" data-effect="eventFrame" min="0"></label>
+   <div class="row"><label>X<input type="number" data-effect="offset.x"></label><label>지면 Y<input type="number" data-effect="offset.y"></label><label>높이<input type="number" data-effect="offset.height"></label></div>
+   <label><input type="checkbox" data-effect="loop">모션 동안 반복</label>
+  </div>
+ </aside>
+</main><footer id="status">준비</footer>
+<script src="../CharacterEditor/model.js"></script><script src="../DungeonEditor/archive.js"></script>
+<script src="model.js"></script><script src="editor.js"></script></body></html>

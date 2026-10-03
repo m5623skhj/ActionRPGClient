@@ -113,6 +113,8 @@ namespace ActionRPG
         [[nodiscard]] bool IsCombatDead() const { return combatState && combatState->hp == 0; }
 
     protected:
+        [[nodiscard]] const CombatPlayerState* GetCombatPlayerState() const { return combatState ? &*combatState : nullptr; }
+        [[nodiscard]] float GetCombatElapsedSeconds() const { return combatPresentationSeconds; }
         // Server-driven monster presentation needs a pose without the player action controller.
         explicit Character(Vector2 inInitialPosition) : groundPosition(inInitialPosition) {}
         Character(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,

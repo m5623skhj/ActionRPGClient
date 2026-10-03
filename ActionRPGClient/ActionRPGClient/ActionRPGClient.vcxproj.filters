@@ -103,4 +103,11 @@
     <None Include="..\Assets\Images\Characters\player_get_up.png"><Filter>Assets</Filter></None>
     <None Include="ClientOptionFile\CoreOption.txt"><Filter>Options</Filter></None>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Game\PlayerSkillPresentation.cpp"><Filter>Game</Filter></ClCompile>
+    <ClInclude Include="Game\PlayerSkillCatalog.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\PlayerSkillPresentation.h"><Filter>Game</Filter></ClInclude>
+    <None Include="..\Assets\Data\PlayerSkills.json"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Data\PlayerSkillVisuals.json"><Filter>Assets</Filter></None>
+  </ItemGroup>
 </Project>

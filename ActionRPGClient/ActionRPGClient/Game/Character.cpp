@@ -522,7 +522,7 @@ namespace ActionRPG
         combatState = inState; combatRules = inRules; combatPresentationSeconds = 0.0f;
         if (!wasDead && inState.hp == 0) deathPresentationSeconds = 0.0f;
         height = inState.height; facingLeft = inState.facingLeft;
-        ConfigureMovementSpeeds(inRules.walkSpeed, inRules.runSpeed);
+        ConfigureMovementSpeeds(inRules.walkSpeed * inState.movementMultiplier, inRules.runSpeed * inState.movementMultiplier);
         pendingProjectileRequests.clear();
     }
 
@@ -577,7 +577,7 @@ namespace ActionRPG
             Vector2 direction = *inLocalDirection;
             const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
             const bool allowed = state.hp != 0 && state.reaction == CombatReaction::None
-                && state.shotPhase == CombatShotPhase::None && state.jumpPhase == CombatJumpPhase::Grounded;
+                && !state.skillActive && state.shotPhase == CombatShotPhase::None && state.jumpPhase == CombatJumpPhase::Grounded;
             runningRequested = allowed && inRun;
             isMoving = allowed && length > 0.0f;
             if (isMoving)

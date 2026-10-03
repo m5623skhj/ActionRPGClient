@@ -114,6 +114,7 @@
     <ClCompile Include="Game\ProjectileSystem.cpp" />
     <ClCompile Include="Game\RunState.cpp" />
     <ClCompile Include="Game\SkillCommandSystem.cpp" />
+    <ClCompile Include="Game\PlayerSkillPresentation.cpp" />
     <ClCompile Include="Graphics\D2DRenderer.cpp" />
     <ClCompile Include="Graphics\GraphicsDevice.cpp" />
     <ClCompile Include="Main.cpp" />
@@ -145,6 +146,8 @@
     <ClInclude Include="Game\RunState.h" />
     <ClInclude Include="Game\SkillDefinition.h" />
     <ClInclude Include="Game\SkillCommandSystem.h" />
+    <ClInclude Include="Game\PlayerSkillCatalog.h" />
+    <ClInclude Include="Game\PlayerSkillPresentation.h" />
     <ClInclude Include="Game\Vector2.h" />
     <ClInclude Include="Graphics\D2DRenderer.h" />
     <ClInclude Include="Graphics\GraphicsDevice.h" />
@@ -165,6 +168,8 @@
     <None Include="..\Assets\Data\effects.ini" />
     <None Include="..\Assets\Data\projectiles.ini" />
     <None Include="..\Assets\Data\skills.ini" />
+    <None Include="..\Assets\Data\PlayerSkills.json" />
+    <None Include="..\Assets\Data\PlayerSkillVisuals.json" />
     <None Include="..\Assets\Data\system_menu.ini" />
     <None Include="ClientOptionFile\CoreOption.txt" />
     <None Include="..\Assets\README.md" />

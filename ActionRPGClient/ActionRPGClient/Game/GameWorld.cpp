@@ -306,12 +306,14 @@ namespace ActionRPG
         , player(Vector2{ 640.0f, 640.0f }, inAssetCatalog, inRenderer)
         , projectileSystem(inAssetCatalog)
         , skillCommandSystem(inAssetCatalog)
+        , playerSkillPresentation(inAssetCatalog, inRenderer)
         , assetCatalog(inAssetCatalog)
         , renderer(inRenderer)
         , townClient(inTownClient)
         , dungeonClient(inDungeonClient)
         , monsterCatalog(inAssetCatalog)
     {
+        player.SetSkillPresentation(&playerSkillPresentation);
         for (const std::string& section : systemMenuDefinitions.GetSectionNames())
         {
             const std::string actionName = systemMenuDefinitions.GetValue(section, "Action");
@@ -793,6 +795,7 @@ namespace ActionRPG
                     try
                     {
                         dungeonWorld = DungeonWorld::Parse(inEvent.json, dungeonRoomId, localPlayerId, monsterCatalog);
+                        playerSkillPresentation.ValidateServer(dungeonWorld->GetPlayerSkills());
                         dungeonMovementSequence = lastDungeonStateSequence = 0;
                         lastTownPosition = player.GetGroundPosition();
                         ApplyDungeonMap(dungeonWorld->GetEntryMapId(), dungeonWorld->GetSpawn());
@@ -925,7 +928,17 @@ namespace ActionRPG
             isDungeonSelectionOpen = false;
             SetSystemUiPage(SystemUiPage::Closed);
         }
-        if (!snapshot.realtime) snapshot.serverTimeMs = snapshot.serverTick * 50;
+        // Prefer the captured server clock. Older JSON falls back to the exact tick duration,
+        // never the rounded millisecond interval from the subscription response.
+        if (!snapshot.realtime && !snapshot.hasServerTime)
+        {
+            const double tickSeconds = snapshot.tickIntervalSeconds > 0.0
+                ? snapshot.tickIntervalSeconds : rules.tickIntervalSeconds;
+            const long double timeMs = std::round(static_cast<long double>(snapshot.serverTick) * tickSeconds * 1000.0L);
+            if (timeMs >= static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+                throw std::runtime_error("Combat tick time exceeds the supported range.");
+            snapshot.serverTimeMs = static_cast<std::uint64_t>(timeMs);
+        }
         if (snapshot.cleared) combatBuffer.Clear();
         combatBuffer.Push(snapshot);
         lastCombatTick = snapshot.serverTick; hasCombatTick = true; dungeonCleared = snapshot.cleared;
@@ -935,6 +948,20 @@ namespace ActionRPG
     void GameWorld::SendCombatActions(const InputState& inInput)
     {
         if (!combatSnapshot || combatSnapshot->state != "Running" || player.IsCombatDead()) return;
+        const auto actor = std::find_if(combatSnapshot->players.begin(), combatSnapshot->players.end(),
+            [this](const auto& value) { return value.playerId == localPlayerId; });
+        if (actor != combatSnapshot->players.end() && !actor->skillActive && actor->reaction == CombatReaction::None
+            && actor->shotPhase == CombatShotPhase::None && actor->jumpPhase != CombatJumpPhase::Prepare && combatInputsThisSecond < 20)
+        {
+            const auto id = playerSkillPresentation.TryCommand(commandQueue, actor->characterId, actor->height > 0);
+            if (!id.empty())
+            {
+                if (combatActionSequence == std::numeric_limits<std::uint32_t>::max()) { ResetDungeonEntry(); return; }
+                ++combatInputsThisSecond;
+                dungeonClient.SendSkill(++combatActionSequence, id, player.GetFacingLeft());
+                return; // A command ending in X/C does not also trigger the basic action.
+            }
+        }
         for (const auto key : inInput.pressedKeys)
         {
             const std::uint8_t action = key == InputKey::ActionX ? 1 : key == InputKey::ActionC ? 2 : 0;
@@ -972,14 +999,15 @@ namespace ActionRPG
     void GameWorld::RenderCombatProjectiles(D2DRenderer& inRenderer) const
     {
         if (!combatSnapshot || !dungeonWorld) return;
-        const float distance = presentationSnapshot ? 0.0f : dungeonWorld->GetCombatRules().projectileSpeed * combatSnapshotAge;
+        const float age = presentationSnapshot ? 0.0f : combatSnapshotAge;
         const auto& projectiles = presentationSnapshot ? presentationSnapshot->projectiles : combatSnapshot->projectiles;
         for (const auto& projectile : projectiles)
         {
+            const float distance = (projectile.speed > 0 ? projectile.speed : dungeonWorld->GetCombatRules().projectileSpeed) * age;
             const float height = projectile.height + projectile.heightDirection * distance;
             if (height < 0.0f) continue;
-            const auto position = camera.WorldToScreen({projectile.position.x + projectile.direction * distance, projectile.position.y});
-            inRenderer.FillEllipse(position.x, position.y - height, 4.0f, 4.0f, D2D1::ColorF(1.0f, 0.85f, 0.25f));
+            const auto position = camera.WorldToScreen({projectile.position.x + projectile.direction * distance, projectile.position.y + projectile.directionY * distance});
+            inRenderer.FillEllipse(position.x, position.y - height, projectile.radius, projectile.radius, D2D1::ColorF(1.0f, 0.85f, 0.25f));
         }
     }
 

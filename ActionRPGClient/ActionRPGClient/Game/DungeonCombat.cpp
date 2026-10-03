@@ -1,4 +1,6 @@
 #include "Game/DungeonCombat.h"
+#include "Game/PlayerSkillCatalog.h"
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <bit>
 #include <cmath>
@@ -17,6 +19,16 @@ namespace
         if (!std::isfinite(value) || std::abs(value) > 1000000.0f || (!inSigned && value < 0.0f))
             throw std::runtime_error("Invalid combat number.");
         return value;
+    }
+    double TickInterval(const Json& inValue, const double inFallback)
+    {
+        if (!inValue.contains("tickIntervalSeconds")) return inFallback;
+        const auto& interval = inValue.at("tickIntervalSeconds");
+        if (!interval.is_number()) throw std::runtime_error("Invalid combat tick interval.");
+        const double seconds = interval.get<double>();
+        if (!std::isfinite(seconds) || seconds <= 0.0 || seconds > 1.0)
+            throw std::runtime_error("Invalid combat tick interval.");
+        return seconds;
     }
     std::uint64_t Id(const Json& inValue, const bool inAllowZero = false)
     {
@@ -72,6 +84,7 @@ namespace ActionRPG
         const auto value = Json::parse(inJson);
         if (value.at("version") != 1) throw std::runtime_error("Unsupported combat rules.");
         CombatRules rules;
+        rules.tickIntervalSeconds = TickInterval(value, rules.tickIntervalSeconds);
         rules.maxHp = Integer(value.at("maxHp")); rules.maxShots = Integer(value.at("maxShots"));
         if (rules.maxHp == 0 || rules.maxShots != 5) throw std::runtime_error("Unsupported combat limits.");
         const auto positive = [&value](const char* inName) {
@@ -97,6 +110,9 @@ namespace ActionRPG
         if (value.at("version") != 1) throw std::runtime_error("Unsupported combat snapshot.");
         DungeonCombatSnapshot result;
         result.roomId = Id(value.at("roomId")); result.serverTick = Id(value.at("serverTick"), true);
+        result.hasServerTime = value.contains("serverTimeMs");
+        if (result.hasServerTime) result.serverTimeMs = Id(value.at("serverTimeMs"), true);
+        result.tickIntervalSeconds = TickInterval(value, 0.0);
         result.mapId = Text(value.at("mapId")); result.state = Text(value.at("state"));
         result.mapEpoch = Integer(value.value("mapEpoch", Json(1)));
         if (result.mapEpoch == 0) throw std::runtime_error("Zero combat map epoch.");
@@ -130,6 +146,23 @@ namespace ActionRPG
             else if (jump == "Prepare") player.jumpPhase = CombatJumpPhase::Prepare;
             else if (jump == "Airborne") player.jumpPhase = CombatJumpPhase::Airborne;
             else throw std::runtime_error("Unknown jump phase.");
+            if (source.contains("skillId"))
+            {
+                player.characterId = Integer(source.at("characterId")); player.skillSequence = Integer(source.at("skillSequence"));
+                player.skillId = Text(source.at("skillId"), true); player.skillActive = source.at("skillActive").get<bool>(); player.skillAirborne = source.at("skillAirborne").get<bool>();
+                player.skillSeconds = Number(source.at("skillSeconds")); player.movementMultiplier = Number(source.at("movementMultiplier"));
+                if ((!player.skillId.empty() && !PlayerSkills::Catalog::IsId(player.skillId)) || player.skillSeconds > 600
+                    || player.movementMultiplier < 0.1f || player.movementMultiplier > 10) throw std::runtime_error("Invalid skill state.");
+                List(source.at("buffs"), 16);
+                std::unordered_set<std::string> buffIds;
+                for (const auto& buff : source.at("buffs"))
+                {
+                    CombatBuffState state{ Text(buff.at("skillId")), Number(buff.at("remainingSeconds")) };
+                    if (!PlayerSkills::Catalog::IsId(state.skillId) || !buffIds.insert(state.skillId).second || state.remainingSeconds > 3600)
+                        throw std::runtime_error("Invalid buff state.");
+                    player.buffs.push_back(std::move(state));
+                }
+            }
             result.players.push_back(std::move(player));
         }
         ids.clear();
@@ -163,6 +196,16 @@ namespace ActionRPG
             projectile.heightDirection = Number(source.at("heightDirection"), true);
             if (std::abs(projectile.direction) > 1.0f || std::abs(projectile.heightDirection) > 1.0f)
                 throw std::runtime_error("Invalid projectile direction.");
+            if (source.contains("skillId"))
+            {
+                projectile.skillId = Text(source.at("skillId"), true);
+                projectile.directionY = Number(source.at("directionY"), true); projectile.speed = Number(source.at("speed"));
+                projectile.radius = Number(source.at("radius")); projectile.ageSeconds = Number(source.at("ageSeconds"));
+                if ((!projectile.skillId.empty() && !PlayerSkills::Catalog::IsId(projectile.skillId))
+                    || std::abs(projectile.directionY) > 1 || projectile.speed < 1 || projectile.speed > 5000
+                    || (!projectile.skillId.empty() && projectile.speed > 4000)
+                    || projectile.radius < 0.1f || projectile.radius > 100) throw std::runtime_error("Invalid skill projectile.");
+            }
             result.projectiles.push_back(projectile);
         }
         return result;
@@ -275,11 +318,54 @@ namespace ActionRPG
             projectile.position = {reader.Float(true), reader.Float(true)};
             projectile.height = reader.Float(); projectile.direction = reader.Float(true); projectile.heightDirection = reader.Float(true);
             if (projectile.id == 0 || projectile.ownerId == 0 || !ids.insert(projectile.id).second
-                || std::abs(projectile.direction) != 1.0f || std::abs(projectile.heightDirection) > 1.0f)
+                || std::abs(projectile.direction) > 1.0f || std::abs(projectile.heightDirection) > 1.0f)
                 throw std::runtime_error("Invalid realtime projectile.");
             result.projectiles.push_back(projectile);
         }
+        if (!reader.Finished())
+        {
+            if (reader.UInt(4) != 0x314c4b53 || reader.UInt(2) != playerCount)
+                throw std::runtime_error("Unsupported skill extension.");
+            std::unordered_set<std::uint64_t> skillPlayers;
+            for (std::uint64_t index = 0; index < playerCount; ++index)
+            {
+                const auto id = reader.UInt(8);
+                const auto found = std::find_if(result.players.begin(), result.players.end(), [id](const auto& actor) { return actor.playerId == id; });
+                if (found == result.players.end() || !skillPlayers.insert(id).second) throw std::runtime_error("Invalid skill player ID.");
+                found->characterId = static_cast<std::uint32_t>(reader.UInt(4));
+                found->skillSequence = static_cast<std::uint32_t>(reader.UInt(4));
+                found->skillId = reader.Text(true); found->skillActive = reader.Bool(); found->skillAirborne = reader.Bool();
+                found->skillSeconds = reader.Float(); found->movementMultiplier = reader.Float();
+                if (found->characterId == 0 || (!found->skillId.empty() && !PlayerSkills::Catalog::IsId(found->skillId))
+                    || found->skillSeconds > 600 || found->movementMultiplier < 0.1f || found->movementMultiplier > 10)
+                    throw std::runtime_error("Invalid realtime skill state.");
+                const auto buffs = reader.UInt(1);
+                if (buffs > 16) throw std::runtime_error("Too many buffs.");
+                std::unordered_set<std::string> buffIds;
+                for (std::uint64_t buff = 0; buff < buffs; ++buff)
+                {
+                    CombatBuffState value{reader.Text(), reader.Float()};
+                    if (!PlayerSkills::Catalog::IsId(value.skillId) || !buffIds.insert(value.skillId).second || value.remainingSeconds > 3600)
+                        throw std::runtime_error("Invalid realtime buff.");
+                    found->buffs.push_back(std::move(value));
+                }
+            }
+            if (reader.UInt(2) != projectileCount) throw std::runtime_error("Skill projectile count mismatch.");
+            std::unordered_set<std::uint64_t> skillProjectiles;
+            for (std::uint64_t index = 0; index < projectileCount; ++index)
+            {
+                const auto id = reader.UInt(8);
+                const auto found = std::find_if(result.projectiles.begin(), result.projectiles.end(), [id](const auto& actor) { return actor.id == id; });
+                if (found == result.projectiles.end() || !skillProjectiles.insert(id).second) throw std::runtime_error("Invalid skill projectile ID.");
+                found->skillId = reader.Text(true); found->directionY = reader.Float(true); found->speed = reader.Float();
+                found->radius = reader.Float(); found->ageSeconds = reader.Float();
+                if ((!found->skillId.empty() && !PlayerSkills::Catalog::IsId(found->skillId)) || std::abs(found->directionY) > 1
+                    || found->speed < 1 || found->speed > 5000 || (!found->skillId.empty() && found->speed > 4000) || found->radius < 0.1f || found->radius > 100)
+                    throw std::runtime_error("Invalid realtime skill projectile.");
+            }
+        }
         if (!reader.Finished()) throw std::runtime_error("Trailing realtime bytes.");
+
         return result;
     }
 

@@ -10,6 +10,7 @@
 #include "Game/Player.h"
 #include "Game/ProjectileSystem.h"
 #include "Game/SkillCommandSystem.h"
+#include "Game/PlayerSkillPresentation.h"
 #include "Input/InputState.h"
 #include "Network/TownClient.h"
 #include "Resources/SpriteAnimation.h"
@@ -144,6 +145,7 @@ namespace ActionRPG
         ProjectileSystem projectileSystem;
         InputCommandQueue commandQueue;
         SkillCommandSystem skillCommandSystem;
+        PlayerSkillPresentation playerSkillPresentation;
         const AssetCatalog& assetCatalog;
         D2DRenderer& renderer;
         TownClient& townClient;

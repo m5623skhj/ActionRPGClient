@@ -110,6 +110,8 @@ namespace ActionRPG
             player = useB ? *pb : *pa;
             Pose(player, *pa, *pb, boundedRatio, static_cast<float>(span / 1000.0));
             Advance(player, age); player.shotSeconds += age; player.jumpSeconds += age;
+            if (!player.skillId.empty()) player.skillSeconds += age;
+            for (auto& buff : player.buffs) buff.remainingSeconds = std::max(0.0f, buff.remainingSeconds - age);
             player.hp = hp; player.maxHp = maxHp;
         }
         for (auto& monster : result.monsters)
