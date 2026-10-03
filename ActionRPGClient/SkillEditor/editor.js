@@ -230,7 +230,12 @@
     const file = event.target.files[0]; event.target.value = ""; if (!file || !variant()) return;
     Task(async () => {
       const image = await ImageFile(file); if (!/\.png$/i.test(file.name)) throw new Error("PNG 이펙트가 필요합니다.");
-      const path = "Images/Skills/" + skill().id + "-" + file.name.replace(/[^A-Za-z0-9_.-]/g, "_");
+      const stem = "Images/Skills/" + skill().id + "-" + mode() + "-" + file.name.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, -4);
+      const occupied = new Set(Object.keys(images).map(path => path.toLowerCase()));
+      let path = stem + ".png", suffix = 1;
+      while (occupied.has(path.toLowerCase())) path = stem + "-" + suffix++ + ".png";
+      if (!C.safePath(path)) throw new Error("이펙트 파일명이 너무 길거나 출력 경로가 올바르지 않습니다.");
+      // Keep prior bytes intact so other variants, duplicate skills and undo retain their image.
       ImageBudget({ ...images, [path]: image }); Remember(); images[path] = image;
       variant().effect = { image: path, columns: 1, rows: 1, frameCount: 1, fps: 12, scale: 1,
         pivotX: 0.5, pivotY: 1, eventFrame: variant().eventFrame, offset: { x: 0, y: 0, height: 0 }, loop: false }; changed();

@@ -11,14 +11,17 @@ window.DungeonArchive = (() => {
     for (const byte of bytes) crc = table[(crc ^ byte) & 255] ^ (crc >>> 8);
     return (crc ^ 0xffffffff) >>> 0;
   }
+  function isSafePath(name) {
+    return typeof name === "string" && /^[A-Za-z0-9_./ -]+$/.test(name) && !name.startsWith("/")
+      && name.split("/").every(part => part && part !== "." && part !== ".." && !/[ .]$/.test(part));
+  }
   // ZIP "store" records, UTF-8 filenames and CRC32. No compression or external library.
   function create(files) {
     if (files.length > 65535) throw new Error("ZIP 파일 수 제한을 초과했습니다.");
     const local = [], central = [], names = new Set();
     let offset = 0, directorySize = 0;
     for (const file of files) {
-      if (!/^[A-Za-z0-9_./-]+$/.test(file.name) || file.name.startsWith("/") ||
-          file.name.split("/").some(part => part === ".." || !part) || names.has(file.name.toLowerCase()))
+      if (!isSafePath(file.name) || names.has(file.name.toLowerCase()))
         throw new Error("안전하지 않거나 중복된 출력 경로입니다: " + file.name);
       names.add(file.name.toLowerCase());
       const name = encoder.encode(file.name), bytes = typeof file.data === "string" ? encoder.encode(file.data) : file.data;
@@ -44,5 +47,5 @@ window.DungeonArchive = (() => {
     ev.setUint32(12, directorySize, true); ev.setUint32(16, offset, true);
     return new Blob([...local, ...central, end], { type: "application/zip" });
   }
-  return { create };
+  return { create, isSafePath };
 })();

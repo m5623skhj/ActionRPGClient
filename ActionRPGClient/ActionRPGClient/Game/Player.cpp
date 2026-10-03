@@ -92,6 +92,7 @@ namespace ActionRPG
 
     void Player::ResetActionState()
     {
+        skillPlayback.reset();
         runState.Reset();
         Character::ResetActionState();
     }
@@ -144,8 +145,18 @@ namespace ActionRPG
 
     void Player::Render(D2DRenderer& inRenderer, const Camera& inCamera) const
     {
-        if (const auto state = GetCombatPlayerState(); state && skillPresentation
-            && skillPresentation->Render(*state, GetGroundPosition(), GetHeight(), GetCombatElapsedSeconds(), inRenderer, inCamera)) return;
+        const auto state = GetCombatPlayerState();
+        if (state && skillPresentation && !state->skillId.empty()
+            && state->hp != 0 && state->reaction == CombatReaction::None)
+        {
+            const float seconds = state->skillSeconds + GetCombatElapsedSeconds();
+            if (!skillPlayback || skillPlayback->sequence != state->skillSequence
+                || skillPlayback->id != state->skillId || skillPlayback->airborne != state->skillAirborne)
+                skillPlayback = SkillPlayback{state->skillSequence, state->skillId, state->skillAirborne, seconds};
+            else skillPlayback->seconds = std::max(skillPlayback->seconds, seconds);
+            if (skillPresentation->Render(*state, GetGroundPosition(), GetHeight(), skillPlayback->seconds, inRenderer, inCamera)) return;
+        }
+        else skillPlayback.reset();
         if (activeSkillEffect.has_value())
         {
             const Vector2 groundScreenPosition = inCamera.WorldToScreen(GetGroundPosition());

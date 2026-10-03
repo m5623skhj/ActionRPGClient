@@ -5,7 +5,9 @@
 #include "Game/SkillDefinition.h"
 #include "Input/InputState.h"
 
+#include <cstdint>
 #include <optional>
+#include <string>
 
 namespace ActionRPG
 {
@@ -30,5 +32,14 @@ namespace ActionRPG
         double movementTimeSeconds{};
         RunState runState;
         const PlayerSkillPresentation* skillPresentation{};
+        struct SkillPlayback
+        {
+            std::uint32_t sequence{};
+            std::string id;
+            bool airborne{};
+            float seconds{};
+        };
+        // Per-actor render cache, accessed only on the game thread and reset with the actor.
+        mutable std::optional<SkillPlayback> skillPlayback;
     };
 }

@@ -24,7 +24,7 @@ namespace ActionRPG
         void ValidateServer(const PlayerSkills::Catalog& inCatalog) const;
         [[nodiscard]] std::string TryCommand(InputCommandQueue& inQueue, std::uint32_t inCharacterId, bool inAirborne) const;
         [[nodiscard]] bool Render(const CombatPlayerState& inState, Vector2 inGround, float inHeight,
-            float inElapsed, D2DRenderer& inRenderer, const Camera& inCamera) const;
+            float inSeconds, D2DRenderer& inRenderer, const Camera& inCamera) const;
     private:
         struct Motion
         {

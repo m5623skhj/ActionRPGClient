@@ -70,6 +70,7 @@
     number(rect.width, 0.1, 2000, label + " 너비"); number(rect.height, 0.1, 2000, label + " 높이 크기");
   }
   function CheckImage(motion, images, paths) {
+    assert(window.DungeonArchive.isSafePath(motion.image), motion.image + ": ZIP 출력 경로 형식 오류");
     const image = images[motion.image];
     assert(image && image.width === motion.width && image.height === motion.height, motion.image + ": 이미지 누락 또는 크기 불일치");
     paths.add(motion.image);

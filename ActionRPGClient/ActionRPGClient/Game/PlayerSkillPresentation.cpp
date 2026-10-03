@@ -153,13 +153,13 @@ namespace ActionRPG
             D2D1::RectF(left, top, left + width, top + height), inFacingLeft);
     }
     bool PlayerSkillPresentation::Render(const CombatPlayerState& inState, Vector2 inGround, float inHeight,
-        float inElapsed, D2DRenderer& inRenderer, const Camera& inCamera) const
+        float inSeconds, D2DRenderer& inRenderer, const Camera& inCamera) const
     {
         const auto found = visuals.find(inState.skillId);
         if (found == visuals.end() || inState.hp == 0 || inState.reaction != CombatReaction::None) return false;
         const auto& variant = inState.skillAirborne ? found->second.air : found->second.ground;
         if (!variant.motion) return false;
-        const float seconds = inState.skillSeconds + inElapsed;
+        const float seconds = inSeconds; // Player supplies the monotonic clock for this cast.
         const auto position = inCamera.WorldToScreen(inGround);
         const auto& motion = variant.motion->definition;
         const bool showMotion = seconds < motion.at("frameCount").get<float>() / motion.at("fps").get<float>();
