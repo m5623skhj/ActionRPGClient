@@ -105,6 +105,7 @@ namespace ActionRPG
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
         void ApplyCombatState(const CombatPlayerState& inState, const CombatRules& inRules,
             bool inSetPosition = false);
+        void ApplyBufferedCombatState(const CombatPlayerState& inState, const CombatRules& inRules);
         void UpdateCombatPresentation(float inDeltaSeconds, const GameplayMap& inMap,
             const Vector2* inLocalDirection = nullptr, bool inRun = false);
         [[nodiscard]] bool HasCombatState() const { return combatState.has_value(); }
@@ -219,6 +220,9 @@ namespace ActionRPG
         SpriteAnimation getUpAnimation;
         std::optional<CombatPlayerState> combatState;
         CombatRules combatRules;
+        bool bufferedPresentation{}, combatAnimationChanged{true};
+        const SpriteAnimation* lastCombatAnimation{};
+        float lastCombatAnimationSeconds{}, movementAnimationScale{1.0f};
         float combatPresentationSeconds{}, deathPresentationSeconds{};
         std::deque<CharacterProjectileRequest> pendingProjectileRequests;
     };

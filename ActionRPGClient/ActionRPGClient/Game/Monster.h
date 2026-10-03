@@ -62,6 +62,7 @@ namespace ActionRPG
         void Update(float inDeltaSeconds);
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const override;
         void ApplyHit(CharacterHitType inType) override;
+        void ClearPresentationHistory();
         void ResetActionState() override;
         [[nodiscard]] bool IsHitReacting() const override;
         [[nodiscard]] MonsterMotion GetMotion() const { return motion; }
@@ -69,7 +70,7 @@ namespace ActionRPG
         // Flight height and phase come from authoritative state, not a timed atlas preview.
         void ApplyPresentationState(MonsterMotion inMotion, Vector2 inPosition,
             bool inFacingLeft, float inHeight);
-        void ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules);
+        void ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules, bool inBuffered = false);
         [[nodiscard]] std::uint32_t GetHp() const { return serverState ? serverState->hp : 0; }
         [[nodiscard]] std::uint32_t GetMaxHp() const { return serverState ? serverState->maxHp : 0; }
         [[nodiscard]] std::uint64_t GetInstanceId() const { return instanceId; }
@@ -88,6 +89,8 @@ namespace ActionRPG
         std::map<MonsterMotion, Clip> clips;
         std::optional<CombatMonsterState> serverState;
         CombatRules serverRules;
+        bool bufferedPresentation{};
+        float animationPresentationSeconds{};
         float serverPresentationSeconds{};
     };
 }

@@ -1,5 +1,6 @@
 #include "Game/DungeonCombat.h"
 #include <nlohmann/json.hpp>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -48,6 +49,7 @@ namespace
         actor.hp = Integer(inActor.at("hp")); actor.maxHp = Integer(inActor.at("maxHp"));
         actor.height = Number(inActor.at("height")); actor.verticalSpeed = Number(inActor.at("verticalSpeed"), true);
         actor.reactionSeconds = Number(inActor.at("reactionSeconds")); actor.facingLeft = inActor.at("facingLeft").get<bool>();
+        actor.reactionSequence = Integer(inActor.value("reactionSequence", Json(0)));
         const auto reaction = Text(inActor.at("reaction"));
         using Reaction = ActionRPG::CombatReaction;
         if (reaction == "None") actor.reaction = Reaction::None;
@@ -96,6 +98,8 @@ namespace ActionRPG
         DungeonCombatSnapshot result;
         result.roomId = Id(value.at("roomId")); result.serverTick = Id(value.at("serverTick"), true);
         result.mapId = Text(value.at("mapId")); result.state = Text(value.at("state"));
+        result.mapEpoch = Integer(value.value("mapEpoch", Json(1)));
+        if (result.mapEpoch == 0) throw std::runtime_error("Zero combat map epoch.");
         result.cleared = value.at("cleared").get<bool>();
         if (result.mapId.size() > 64 || (result.state != "WaitingForPlayers" && result.state != "Running"
             && result.state != "Cleared" && result.state != "Stopped") || (result.state == "Cleared" && !result.cleared))
@@ -109,6 +113,9 @@ namespace ActionRPG
             player.playerId = Id(source.at("playerId"));
             if (!ids.insert(player.playerId).second) throw std::runtime_error("Duplicate combat player.");
             player.actionSequence = Integer(source.at("actionSequence")); player.moveSequence = Integer(source.at("moveSequence"));
+            player.shotSequence = Integer(source.value("shotSequence", Json(0)));
+            player.jumpSequence = Integer(source.value("jumpSequence", Json(0)));
+            player.running = source.value("running", false);
             player.shotSeconds = Number(source.at("shotSeconds")); player.jumpSeconds = Number(source.at("jumpSeconds"));
             player.shotCount = Integer(source.at("shotCount")); player.airShotCount = Integer(source.at("airShotCount"));
             if (player.shotCount > 5 || player.airShotCount > 5) throw std::runtime_error("Invalid shot count.");
@@ -134,10 +141,15 @@ namespace ActionRPG
             if (monster.dataId == 0 || !ids.insert(monster.instanceId).second) throw std::runtime_error("Invalid combat monster ID.");
             monster.aiNodeId = Text(source.at("aiNodeId")); monster.actionType = Text(source.at("actionType"));
             monster.animationId = Text(source.at("animationId"), true);
+            monster.actionSequence = Integer(source.value("actionSequence", Json(0)));
             monster.actionSeconds = Number(source.at("actionSeconds"));
             monster.actionStarted = source.at("actionStarted").get<bool>(); monster.actionComplete = source.at("actionComplete").get<bool>();
             if (monster.actionType != "Wait" && monster.actionType != "MoveToTarget" && monster.actionType != "ReturnToSpawn"
                 && monster.actionType != "UseSkill" && monster.actionType != "PlayMotion") throw std::runtime_error("Unknown monster action.");
+            if ((monster.actionType == "UseSkill" && monster.animationId != "attack")
+                || (monster.actionType == "PlayMotion" && monster.animationId != "idle" && monster.animationId != "move"
+                    && monster.animationId != "attack" && monster.animationId != "hit" && monster.animationId != "airborne"))
+                throw std::runtime_error("Unsupported combat monster animation.");
             result.monsters.push_back(std::move(monster));
         }
         ids.clear();
@@ -155,4 +167,120 @@ namespace ActionRPG
         }
         return result;
     }
+    // Binary payload v1: unaligned little-endian fields, never native struct layout.
+    DungeonCombatSnapshot DungeonCombatSnapshot::ParseRealtime(const std::string_view inBytes)
+    {
+        class Reader
+        {
+        public:
+            explicit Reader(std::string_view inData) : data(inData) {}
+            std::uint64_t UInt(const unsigned inSize)
+            {
+                if (inSize > data.size() - offset) throw std::runtime_error("Truncated realtime frame.");
+                std::uint64_t value{};
+                for (unsigned index = 0; index < inSize; ++index)
+                    value |= static_cast<std::uint64_t>(static_cast<unsigned char>(data[offset++])) << (index * 8);
+                return value;
+            }
+            float Float(const bool inSigned = false)
+            {
+                const float value = std::bit_cast<float>(static_cast<std::uint32_t>(UInt(4)));
+                if (!std::isfinite(value) || std::abs(value) > 1000000.0f || (!inSigned && value < 0))
+                    throw std::runtime_error("Invalid realtime float.");
+                return value;
+            }
+            bool Bool()
+            {
+                const auto value = UInt(1);
+                if (value > 1) throw std::runtime_error("Invalid realtime boolean.");
+                return value != 0;
+            }
+            std::string Text(const bool inAllowEmpty = false)
+            {
+                const auto size = UInt(2);
+                if (size > 128 || (!inAllowEmpty && size == 0) || size > data.size() - offset)
+                    throw std::runtime_error("Invalid realtime text length.");
+                std::string value(data.substr(offset, size)); offset += size;
+                if (value.find('\0') != std::string::npos) throw std::runtime_error("NUL in realtime identifier.");
+                (void)Json(value).dump(); // Existing JSON library validates bounded UTF-8 identifiers.
+                return value;
+            }
+            bool Finished() const { return offset == data.size(); }
+        private:
+            std::string_view data;
+            std::size_t offset{};
+        } reader(inBytes);
+        if (inBytes.size() > 48 * 1024) throw std::runtime_error("Realtime frame too large.");
+        const auto playerCount = reader.UInt(2), monsterCount = reader.UInt(2), projectileCount = reader.UInt(2);
+        if (playerCount == 0 || playerCount > 4 || monsterCount > 256 || projectileCount > 256)
+            throw std::runtime_error("Invalid realtime actor counts.");
+        DungeonCombatSnapshot result;
+        result.realtime = true;
+        const auto actor = [&reader](CombatActorState& outActor, std::uint64_t& outId, std::uint32_t& outDataId)
+        {
+            outId = reader.UInt(8); outDataId = static_cast<std::uint32_t>(reader.UInt(4));
+            outActor.position = {reader.Float(true), reader.Float(true)};
+            outActor.height = reader.Float(); outActor.verticalSpeed = reader.Float(true);
+            outActor.reactionSeconds = reader.Float();
+            outActor.hp = static_cast<std::uint32_t>(reader.UInt(4)); outActor.maxHp = static_cast<std::uint32_t>(reader.UInt(4));
+            outActor.facingLeft = reader.Bool();
+            const auto reaction = reader.UInt(1);
+            if (outId == 0 || reaction > 5 || outActor.maxHp == 0 || outActor.hp > outActor.maxHp
+                || ((outActor.hp == 0) != (reaction == 5))) throw std::runtime_error("Invalid realtime actor.");
+            outActor.reaction = static_cast<CombatReaction>(reaction);
+            outActor.reactionSequence = static_cast<std::uint32_t>(reader.UInt(4));
+        };
+        std::unordered_set<std::uint64_t> ids;
+        for (std::uint64_t index = 0; index < playerCount; ++index)
+        {
+            CombatPlayerState player;
+            std::uint32_t dataId{}; actor(player, player.playerId, dataId);
+            if (dataId != 0 || !ids.insert(player.playerId).second) throw std::runtime_error("Invalid realtime player ID.");
+            player.moveSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            player.actionSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            player.shotSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            player.jumpSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            const auto shot = reader.UInt(1); player.airAttack = reader.Bool();
+            player.shotSeconds = reader.Float();
+            player.shotCount = static_cast<std::uint32_t>(reader.UInt(1));
+            player.airShotCount = static_cast<std::uint32_t>(reader.UInt(1));
+            const auto jump = reader.UInt(1); player.jumpSeconds = reader.Float(); player.running = reader.Bool();
+            if (shot > 3 || jump > 2 || player.shotCount > 5 || player.airShotCount > 5)
+                throw std::runtime_error("Invalid realtime player action.");
+            player.shotPhase = static_cast<CombatShotPhase>(shot); player.jumpPhase = static_cast<CombatJumpPhase>(jump);
+            result.players.push_back(std::move(player));
+        }
+        ids.clear();
+        constexpr const char* ACTION_TYPES[] = {"Wait", "MoveToTarget", "ReturnToSpawn", "UseSkill", "PlayMotion"};
+        for (std::uint64_t index = 0; index < monsterCount; ++index)
+        {
+            CombatMonsterState monster; actor(monster, monster.instanceId, monster.dataId);
+            if (monster.dataId == 0 || !ids.insert(monster.instanceId).second) throw std::runtime_error("Invalid realtime monster ID.");
+            monster.actionSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            const auto type = reader.UInt(1);
+            if (type > 4) throw std::runtime_error("Invalid realtime monster action.");
+            monster.actionType = ACTION_TYPES[type];
+            monster.actionStarted = reader.Bool(); monster.actionComplete = reader.Bool(); monster.actionSeconds = reader.Float();
+            monster.aiNodeId = reader.Text(); monster.animationId = reader.Text(true);
+            if ((type == 3 && monster.animationId != "attack") || (type == 4 && monster.animationId != "idle"
+                && monster.animationId != "move" && monster.animationId != "attack" && monster.animationId != "hit"
+                && monster.animationId != "airborne")) throw std::runtime_error("Unsupported realtime motion.");
+            result.monsters.push_back(std::move(monster));
+        }
+        ids.clear();
+        for (std::uint64_t index = 0; index < projectileCount; ++index)
+        {
+            CombatProjectileState projectile;
+            projectile.id = reader.UInt(8); projectile.ownerId = reader.UInt(8);
+            projectile.position = {reader.Float(true), reader.Float(true)};
+            projectile.height = reader.Float(); projectile.direction = reader.Float(true); projectile.heightDirection = reader.Float(true);
+            if (projectile.id == 0 || projectile.ownerId == 0 || !ids.insert(projectile.id).second
+                || std::abs(projectile.direction) != 1.0f || std::abs(projectile.heightDirection) > 1.0f)
+                throw std::runtime_error("Invalid realtime projectile.");
+            result.projectiles.push_back(projectile);
+        }
+        if (!reader.Finished()) throw std::runtime_error("Trailing realtime bytes.");
+        return result;
+    }
+
 }

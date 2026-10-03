@@ -2,6 +2,7 @@
 
 #include "Core/IniDocument.h"
 #include "Game/Camera.h"
+#include "Game/DungeonCombatBuffer.h"
 #include "Game/DungeonWorld.h"
 #include "Game/GameplayMap.h"
 #include "Game/InputCommandQueue.h"
@@ -102,6 +103,7 @@ namespace ActionRPG
 
         void ProcessNetworkEvents(const InputState& inInput);
         void ProcessDungeonEvents();
+        void ApplyCombatState(DungeonCombatSnapshot inSnapshot);
         void ApplyCombatSnapshot(std::string_view inJson);
         void SendCombatActions(const InputState& inInput);
         void UpdateDungeonCombat(float inDeltaSeconds);
@@ -147,6 +149,9 @@ namespace ActionRPG
         TownClient& townClient;
         DungeonClient& dungeonClient;
         MonsterCatalog monsterCatalog;
+        DungeonCombatBuffer combatBuffer;
+        std::optional<DungeonCombatSnapshot> presentationSnapshot;
+        std::uint32_t appliedMapEpoch{}, pendingMapEpoch{};
         std::optional<DungeonCombatSnapshot> combatSnapshot;
         std::unordered_map<std::uint64_t, std::unique_ptr<Player>> combatPlayers;
         std::uint64_t lastCombatTick{};

@@ -24,6 +24,9 @@ namespace ActionRPG
         std::uint32_t hp{}, maxHp{};
         float height{}, verticalSpeed{}, reactionSeconds{};
         bool facingLeft{};
+        std::uint32_t reactionSequence{};
+        bool presentationMoving{};
+        float presentationSpeed{};
         CombatReaction reaction{ CombatReaction::None };
     };
     struct CombatPlayerState : CombatActorState
@@ -33,7 +36,8 @@ namespace ActionRPG
         CombatJumpPhase jumpPhase{ CombatJumpPhase::Grounded };
         float shotSeconds{}, jumpSeconds{};
         std::uint32_t shotCount{}, airShotCount{}, actionSequence{}, moveSequence{};
-        bool airAttack{};
+        bool airAttack{}, running{};
+        std::uint32_t shotSequence{}, jumpSequence{};
     };
     struct CombatMonsterState : CombatActorState
     {
@@ -41,6 +45,7 @@ namespace ActionRPG
         std::uint32_t dataId{};
         std::string aiNodeId, actionType, animationId;
         bool actionStarted{}, actionComplete{};
+        std::uint32_t actionSequence{};
         float actionSeconds{};
     };
     struct CombatProjectileState
@@ -51,12 +56,15 @@ namespace ActionRPG
     };
     struct DungeonCombatSnapshot
     {
-        std::uint64_t roomId{}, serverTick{};
+        std::uint64_t roomId{}, serverTick{}, snapshotSequence{}, serverTimeMs{};
+        std::uint32_t mapEpoch{1};
+        bool realtime{};
         std::string mapId, state;
         bool cleared{};
         std::vector<CombatPlayerState> players;
         std::vector<CombatMonsterState> monsters;
         std::vector<CombatProjectileState> projectiles;
+        static DungeonCombatSnapshot ParseRealtime(std::string_view inBytes);
         static DungeonCombatSnapshot Parse(std::string_view inJson);
     };
 }

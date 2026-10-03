@@ -798,6 +798,7 @@ namespace ActionRPG
                         ApplyDungeonMap(dungeonWorld->GetEntryMapId(), dungeonWorld->GetSpawn());
                         dungeonEntryState = DungeonEntryState::Entered;
                         combatStatus.clear();
+                        dungeonClient.StartRealtime(dungeonRoomId);
                         dungeonClient.StartCombatPolling();
                     }
                     catch (const std::exception&) { ResetDungeonEntry(); }
@@ -825,6 +826,18 @@ namespace ActionRPG
                         combatStatus = L"Dungeon combat: " + Utf8ToWide(error.what());
                     }
                 }
+                else if constexpr (std::is_same_v<EventType, DungeonRealtimeResetEvent>)
+                {
+                    if (inEvent.mapEpoch <= pendingMapEpoch) return;
+                    pendingMapEpoch = inEvent.mapEpoch;
+                    combatBuffer.Clear(); presentationSnapshot.reset();
+                }
+                else if constexpr (std::is_same_v<EventType, DungeonRealtimeEvent>)
+                {
+                    if (dungeonEntryState != DungeonEntryState::Entered || !dungeonWorld) return;
+                    try { ApplyCombatState(std::move(inEvent.snapshot)); }
+                    catch (const std::exception&) { /* Invalid full frame: keep reliable recovery. */ }
+                }
                 else if constexpr (std::is_same_v<EventType, DungeonActionResultEvent>)
                 {
                     if (inEvent.sequence > combatActionSequence) { ResetDungeonEntry(); return; }
@@ -838,15 +851,25 @@ namespace ActionRPG
 
     void GameWorld::ApplyCombatSnapshot(const std::string_view inJson)
     {
-        auto snapshot = DungeonCombatSnapshot::Parse(inJson);
-        if (snapshot.roomId != dungeonRoomId || (hasCombatTick && (snapshot.serverTick < lastCombatTick
-            || (snapshot.serverTick == lastCombatTick && !(snapshot.cleared && !dungeonCleared))))) return;
+        ApplyCombatState(DungeonCombatSnapshot::Parse(inJson));
+    }
+
+    void GameWorld::ApplyCombatState(DungeonCombatSnapshot snapshot)
+    {
+        if (snapshot.roomId != dungeonRoomId || snapshot.mapEpoch < pendingMapEpoch
+            || snapshot.mapEpoch < appliedMapEpoch) return;
+        if (hasCombatTick && snapshot.serverTick < lastCombatTick) return;
+        if (dungeonCleared && !snapshot.cleared && snapshot.state != "Stopped") return;
+        if (!snapshot.realtime && combatBuffer.HasFreshRealtime() && !snapshot.cleared) return;
+        if (!snapshot.realtime && hasCombatTick && snapshot.serverTick == lastCombatTick
+            && !(snapshot.cleared && !dungeonCleared)) return;
         const auto self = std::find_if(snapshot.players.begin(), snapshot.players.end(), [this](const auto& inPlayer)
             { return inPlayer.playerId == localPlayerId; });
         if (self == snapshot.players.end()) throw std::runtime_error("Combat snapshot omits the local player.");
         if (self->actionSequence > combatActionSequence || self->moveSequence > dungeonMovementSequence)
             throw std::runtime_error("Combat acknowledgement exceeds the sent sequence.");
-        if (snapshot.mapId != dungeonMapId && self->moveSequence < lastDungeonStateSequence) return;
+        if (snapshot.mapId != dungeonMapId && self->moveSequence <= lastDungeonStateSequence
+            && snapshot.mapEpoch <= appliedMapEpoch) return;
         const auto& map = dungeonWorld->GetMap(snapshot.mapId);
         for (const auto& source : snapshot.monsters)
         {
@@ -856,10 +879,16 @@ namespace ActionRPG
                 throw std::runtime_error("Combat monster does not belong to this map.");
         }
         if (snapshot.state == "Stopped") { ResetDungeonEntry(); return; }
-        if (snapshot.mapId != dungeonMapId) ApplyDungeonMap(snapshot.mapId, self->position);
+        if (snapshot.mapId != dungeonMapId || snapshot.mapEpoch != appliedMapEpoch)
+        {
+            ApplyDungeonMap(snapshot.mapId, self->position);
+            combatBuffer.Clear(); presentationSnapshot.reset();
+        }
+        appliedMapEpoch = pendingMapEpoch = snapshot.mapEpoch;
         const auto& rules = dungeonWorld->GetCombatRules();
         // Old movement acknowledgements affect only position correction, not HP/entities/clear state.
         if (self->moveSequence >= lastDungeonStateSequence) player.ReconcileGroundPosition(self->position);
+        lastDungeonStateSequence = std::max(lastDungeonStateSequence, self->moveSequence);
         player.ApplyCombatState(*self, rules);
         std::unordered_set<std::uint64_t> presentPlayers;
         for (const auto& state : snapshot.players)
@@ -869,7 +898,7 @@ namespace ActionRPG
             auto& actor = combatPlayers[state.playerId];
             const bool created = !actor;
             if (created) { actor = std::make_unique<Player>(player); actor->ResetActionState(); }
-            actor->ApplyCombatState(state, rules, created);
+            if (created) actor->ApplyCombatState(state, rules, true);
         }
         std::erase_if(combatPlayers, [&presentPlayers](const auto& inEntry) { return !presentPlayers.contains(inEntry.first); });
         auto& monsters = dungeonMonsters.at(dungeonMapId);
@@ -879,8 +908,7 @@ namespace ActionRPG
             presentMonsters.insert(state.instanceId);
             const auto actor = std::find_if(monsters.begin(), monsters.end(), [&state](const auto& inMonster)
                 { return inMonster->GetInstanceId() == state.instanceId; });
-            if (actor != monsters.end()) (*actor)->ApplyCombatState(state, rules);
-            else
+            if (actor == monsters.end())
             {
                 MonsterSpawn spawn{state.instanceId, state.dataId, state.position, state.facingLeft, state.hp, state.maxHp};
                 auto created = std::make_unique<Monster>(*monsterTemplates.at(state.dataId), spawn);
@@ -897,6 +925,9 @@ namespace ActionRPG
             isDungeonSelectionOpen = false;
             SetSystemUiPage(SystemUiPage::Closed);
         }
+        if (!snapshot.realtime) snapshot.serverTimeMs = snapshot.serverTick * 50;
+        if (snapshot.cleared) combatBuffer.Clear();
+        combatBuffer.Push(snapshot);
         lastCombatTick = snapshot.serverTick; hasCombatTick = true; dungeonCleared = snapshot.cleared;
         combatSnapshotAge = 0.0f; combatSnapshot = std::move(snapshot);
     }
@@ -920,14 +951,30 @@ namespace ActionRPG
         if (combatInputWindowSeconds >= 1.0f) { combatInputWindowSeconds = 0.0f; combatInputsThisSecond = 0; }
         combatSnapshotAge = std::min(0.25f, combatSnapshotAge + inDeltaSeconds);
         rejectedActionSeconds = std::max(0.0f, rejectedActionSeconds - inDeltaSeconds);
-        for (const auto& [id, actor] : combatPlayers) actor->UpdateCombatPresentation(inDeltaSeconds, gameplayMap);
+        presentationSnapshot = combatBuffer.Sample();
+        if (!presentationSnapshot || !dungeonWorld) return;
+        const auto& rules = dungeonWorld->GetCombatRules();
+        for (const auto& state : presentationSnapshot->players)
+        {
+            if (state.playerId == localPlayerId) continue;
+            if (const auto actor = combatPlayers.find(state.playerId); actor != combatPlayers.end())
+            {
+                actor->second->ApplyBufferedCombatState(state, rules);
+                actor->second->UpdateCombatPresentation(inDeltaSeconds, gameplayMap);
+            }
+        }
+        if (const auto monsters = dungeonMonsters.find(dungeonMapId); monsters != dungeonMonsters.end())
+            for (const auto& state : presentationSnapshot->monsters)
+                for (const auto& actor : monsters->second)
+                    if (actor->GetInstanceId() == state.instanceId) actor->ApplyCombatState(state, rules, true);
     }
 
     void GameWorld::RenderCombatProjectiles(D2DRenderer& inRenderer) const
     {
         if (!combatSnapshot || !dungeonWorld) return;
-        const float distance = dungeonWorld->GetCombatRules().projectileSpeed * combatSnapshotAge;
-        for (const auto& projectile : combatSnapshot->projectiles)
+        const float distance = presentationSnapshot ? 0.0f : dungeonWorld->GetCombatRules().projectileSpeed * combatSnapshotAge;
+        const auto& projectiles = presentationSnapshot ? presentationSnapshot->projectiles : combatSnapshot->projectiles;
+        for (const auto& projectile : projectiles)
         {
             const float height = projectile.height + projectile.heightDirection * distance;
             if (height < 0.0f) continue;
@@ -1505,10 +1552,12 @@ namespace ActionRPG
                 { return a->GetGroundPosition().y < b->GetGroundPosition().y; });
             dungeonMonsters.emplace(inMapId, std::move(monsters));
         }
+        for (const auto& actor : dungeonMonsters.at(inMapId)) actor->ClearPresentationHistory();
         gameplayMap.Configure(room.map);
         mapBackground.Configure(room.map);
         transitionZones = room.map.transitionZones;
         dungeonMapId = inMapId;
+        combatBuffer.Clear(); presentationSnapshot.reset();
         combatPlayers.clear(); combatSnapshot.reset(); combatSnapshotAge = 0.0f;
         remotePlayers.clear();
         player.SetGroundPosition(inPosition); player.ResetActionState(); player.ResetMovementSpeeds(); player.SetRunningEnabled(true);
@@ -1533,6 +1582,7 @@ namespace ActionRPG
         dungeonClient.Stop();
         const bool restoreTown = dungeonWorld.has_value();
         dungeonWorld.reset(); dungeonMonsters.clear(); dungeonMapId.clear();
+        combatBuffer.Clear(); presentationSnapshot.reset(); appliedMapEpoch = pendingMapEpoch = 0;
         combatPlayers.clear(); combatSnapshot.reset(); hasCombatTick = dungeonCleared = false;
         lastCombatTick = 0; combatActionSequence = lastCombatActionResult = combatInputsThisSecond = 0;
         combatInputWindowSeconds = combatSnapshotAge = rejectedActionSeconds = 0.0f;

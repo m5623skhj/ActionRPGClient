@@ -231,9 +231,17 @@ namespace ActionRPG
     void Monster::ResetActionState()
     {
         Character::ResetActionState();
+        bufferedPresentation = false; animationPresentationSeconds = 0.0f;
         serverState.reset(); serverPresentationSeconds = 0.0f;
         for (auto& entry : clips) entry.second.animation.Reset();
         motion = Motion::Idle;
+    }
+
+    void Monster::ClearPresentationHistory()
+    {
+        serverState.reset(); serverPresentationSeconds = animationPresentationSeconds = 0.0f;
+        bufferedPresentation = false;
+        if (motion != Motion::Death) PlayMotion(Motion::Idle);
     }
 
     void Monster::PlayMotion(const MonsterMotion inMotion)
@@ -274,7 +282,7 @@ namespace ActionRPG
         if (!std::isfinite(inDeltaSeconds) || inDeltaSeconds < 0.0f)
             throw std::runtime_error("Invalid monster update interval.");
         auto& clip = clips.at(motion);
-        if (serverState)
+        if (serverState && !bufferedPresentation)
         {
             serverPresentationSeconds = std::min(0.25f, serverPresentationSeconds + inDeltaSeconds);
             const float blend = 1.0f - std::exp(-12.0f * inDeltaSeconds);
@@ -290,6 +298,12 @@ namespace ActionRPG
             clip.animation.Update(inDeltaSeconds, clip.loop);
             return;
         }
+        if (serverState && bufferedPresentation)
+        {
+            clip.animation.Update(inDeltaSeconds, clip.loop);
+            animationPresentationSeconds += inDeltaSeconds;
+            return;
+        }
         clip.animation.Update(inDeltaSeconds, clip.loop);
         if (!clip.loop && clip.animation.IsFinished()
             && (motion == Motion::Hit || motion == Motion::Attack || motion == Motion::GetUp || !clip.holdLastFrame))
@@ -297,7 +311,7 @@ namespace ActionRPG
     }
 
     // HP/reaction precede AI presentation. Repeated snapshots do not restart death or attacks.
-    void Monster::ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules)
+    void Monster::ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules, const bool inBuffered)
     {
         if (inState.instanceId != instanceId || inState.dataId != dataId)
             throw std::runtime_error("Combat monster identity mismatch.");
@@ -324,25 +338,34 @@ namespace ActionRPG
                 else if (inState.animationId != "idle") throw std::runtime_error("Unsupported monster animation ID.");
             }
             else if ((inState.actionType == "MoveToTarget" || inState.actionType == "ReturnToSpawn")
-                && (!serverState || std::abs(serverState->position.x - inState.position.x) > 0.5f
+                && (inBuffered ? inState.presentationMoving : !serverState
+                    || std::abs(serverState->position.x - inState.position.x) > 0.5f
                     || std::abs(serverState->position.y - inState.position.y) > 0.5f)) next = Motion::Move;
         }
-        const bool newAction = serverState && (inState.aiNodeId != serverState->aiNodeId
-            || inState.actionSeconds < serverState->actionSeconds || (!serverState->actionStarted && inState.actionStarted));
-        if (next != motion || (next == Motion::Attack && newAction)) PlayMotion(next);
+        const bool newAction = serverState && (inState.actionSequence != serverState->actionSequence
+            || inState.aiNodeId != serverState->aiNodeId || (!serverState->actionStarted && inState.actionStarted));
+        const bool newReaction = serverState && inState.reactionSequence != serverState->reactionSequence;
+        const bool restart = next != motion || (next == Motion::Attack && newAction) || (next == Motion::Hit && newReaction);
+        if (restart) { PlayMotion(next); animationPresentationSeconds = 0.0f; }
+        bufferedPresentation = inBuffered;
         SetFacingLeft(inState.facingLeft);
         SetPresentationHeight(inState.height);
-        if (!serverState) SetGroundPosition(inState.position);
+        if (!serverState || inBuffered) SetGroundPosition(inState.position);
         if (next != Motion::Death)
         {
             auto& animation = clips.at(motion).animation;
             if (next == Motion::Attack || (inState.actionType == "PlayMotion" && inState.reaction == CombatReaction::None))
-                animation.Seek(inState.actionSeconds, clips.at(motion).loop);
+            {
+                animationPresentationSeconds = restart ? inState.actionSeconds : std::max(animationPresentationSeconds, inState.actionSeconds);
+                animation.Seek(animationPresentationSeconds, clips.at(motion).loop);
+            }
             else if (next == Motion::Hit || next == Motion::Knockdown || next == Motion::GetUp)
             {
                 const float duration = next == Motion::Hit ? inRules.hitStunSeconds
                     : next == Motion::Knockdown ? inRules.downSeconds : inRules.riseSeconds;
-                animation.Seek(std::max(0.0f, duration - inState.reactionSeconds) / duration * animation.GetDuration());
+                const float seconds = std::max(0.0f, duration - inState.reactionSeconds) / duration * animation.GetDuration();
+                animationPresentationSeconds = restart ? seconds : std::max(animationPresentationSeconds, seconds);
+                animation.Seek(animationPresentationSeconds);
             }
         }
         serverState = inState; serverRules = inRules; serverPresentationSeconds = 0.0f;

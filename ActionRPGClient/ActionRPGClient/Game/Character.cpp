@@ -218,6 +218,7 @@ namespace ActionRPG
 
     void Character::ResetActionState()
     {
+        bufferedPresentation = false; combatAnimationChanged = true; lastCombatAnimation = nullptr; lastCombatAnimationSeconds = 0;
         combatState.reset(); combatPresentationSeconds = deathPresentationSeconds = 0.0f;
         CancelAttack();
         pendingProjectileRequests.clear();
@@ -508,6 +509,12 @@ namespace ActionRPG
     void Character::ApplyCombatState(const CombatPlayerState& inState, const CombatRules& inRules,
         const bool inSetPosition)
     {
+        combatAnimationChanged = combatAnimationChanged || !combatState || combatState->reaction != inState.reaction
+            || combatState->reactionSequence != inState.reactionSequence
+            || combatState->shotSequence != inState.shotSequence || combatState->jumpSequence != inState.jumpSequence
+            || combatState->shotPhase != inState.shotPhase || combatState->jumpPhase != inState.jumpPhase
+            || combatState->shotCount != inState.shotCount || combatState->airShotCount != inState.airShotCount;
+        bufferedPresentation = false;
         const bool wasDead = combatState && combatState->hp == 0;
         isMoving = combatState && (std::abs(inState.position.x - combatState->position.x) > 0.5f
             || std::abs(inState.position.y - combatState->position.y) > 0.5f);
@@ -517,6 +524,16 @@ namespace ActionRPG
         height = inState.height; facingLeft = inState.facingLeft;
         ConfigureMovementSpeeds(inRules.walkSpeed, inRules.runSpeed);
         pendingProjectileRequests.clear();
+    }
+
+    void Character::ApplyBufferedCombatState(const CombatPlayerState& inState, const CombatRules& inRules)
+    {
+        ApplyCombatState(inState, inRules, true);
+        bufferedPresentation = true;
+        isMoving = inState.presentationMoving && inState.hp != 0 && inState.reaction == CombatReaction::None;
+        runningRequested = isMoving && (inState.running || inState.presentationSpeed > (inRules.walkSpeed + inRules.runSpeed) * 0.5f);
+        const float speed = runningRequested ? inRules.runSpeed : inRules.walkSpeed;
+        movementAnimationScale = isMoving ? std::clamp(inState.presentationSpeed / speed, 0.25f, 2.0f) : 1.0f;
     }
 
     const SpriteAnimation& Character::GetCombatAnimation() const
@@ -552,7 +569,7 @@ namespace ActionRPG
     {
         if (!combatState) return;
         const auto& state = *combatState;
-        combatPresentationSeconds = std::min(0.25f, combatPresentationSeconds + inDeltaSeconds);
+        combatPresentationSeconds = bufferedPresentation ? 0.0f : std::min(0.25f, combatPresentationSeconds + inDeltaSeconds);
         if (state.hp == 0) deathPresentationSeconds += inDeltaSeconds;
         if (inLocalDirection)
         {
@@ -572,14 +589,14 @@ namespace ActionRPG
                 groundPosition = inMap.ConstrainGroundMovement(previous, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
             }
         }
-        else
+        else if (!bufferedPresentation)
         {
             const float blend = 1.0f - std::exp(-12.0f * inDeltaSeconds);
             groundPosition.x += (state.position.x - groundPosition.x) * blend;
             groundPosition.y += (state.position.y - groundPosition.y) * blend;
         }
         height = state.height;
-        if (height > 0.0f && state.hp != 0)
+        if (!bufferedPresentation && height > 0.0f && state.hp != 0)
             height = std::max(0.0f, height + state.verticalSpeed * combatPresentationSeconds
                 - 0.5f * combatRules.gravity * combatPresentationSeconds * combatPresentationSeconds);
         auto& animation = GetCombatAnimation();
@@ -604,8 +621,12 @@ namespace ActionRPG
                 : state.shotPhase == CombatShotPhase::Fire ? combatRules.shotIntervalSeconds : combatRules.shotRecoverSeconds;
         }
         else if (state.jumpPhase == CombatJumpPhase::Airborne) elapsed = 0.0f;
-        else { animation.Update(inDeltaSeconds); return; }
-        animation.Seek(std::max(0.0f, elapsed) / duration * animation.GetDuration(), loop);
+        else { animation.Update(inDeltaSeconds * (bufferedPresentation ? movementAnimationScale : 1.0f)); return; }
+        const float seconds = std::max(0.0f, elapsed) / duration * animation.GetDuration();
+        lastCombatAnimationSeconds = combatAnimationChanged || lastCombatAnimation != &animation
+            ? seconds : std::max(lastCombatAnimationSeconds, seconds);
+        lastCombatAnimation = &animation; combatAnimationChanged = false;
+        animation.Seek(lastCombatAnimationSeconds, loop);
     }
 
     void Character::Render(D2DRenderer& inRenderer, const Camera& inCamera) const

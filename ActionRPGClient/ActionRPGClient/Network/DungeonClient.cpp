@@ -212,6 +212,7 @@ namespace ActionRPG
     {
         if (stopTask.valid()) stopTask.get();
         impl->StopClient();
+        ResetRealtime();
         worldJson.clear(); worldBytes = 0; receivingWorld = false;
         combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
         lastCompletedCombatId = 0;
@@ -222,6 +223,7 @@ namespace ActionRPG
     void DungeonClient::RequestStop()
     {
         if (stopTask.valid()) return;
+        ResetRealtime();
         combatPolling = combatRequestPending = receivingWorld = false;
         stopTask = std::async(std::launch::async, [this]() { impl->StopClient(); });
     }
@@ -245,7 +247,7 @@ namespace ActionRPG
     {
         if (stopTask.valid()) return DungeonConnectionState::Stopped;
         if (receivingWorld && std::chrono::steady_clock::now() > worldDeadline) return DungeonConnectionState::Failed;
-        if (combatPolling && std::chrono::steady_clock::now() > combatProgressDeadline) return DungeonConnectionState::Failed;
+        if (combatPolling && !HasFreshRealtime() && std::chrono::steady_clock::now() > combatProgressDeadline) return DungeonConnectionState::Failed;
         return impl->GetConnectionState();
     }
 
@@ -256,6 +258,101 @@ namespace ActionRPG
         combatPolling = true; combatRequestPending = false;
         combatNextRequest = std::chrono::steady_clock::now();
         combatProgressDeadline = combatNextRequest + std::chrono::seconds(30);
+    }
+
+    void DungeonClient::ResetRealtime()
+    {
+        realtimeAssemblies.clear();
+        realtimeChallenge = realtimeRoomId = realtimeSequence = realtimeTick = realtimeTime = 0;
+        realtimeDungeonId = realtimeMapEpoch = 0;
+        realtimeRequested = realtimeSeen = realtimeFallbackPending = false; realtimeLastFrame = {};
+    }
+
+    void DungeonClient::StartRealtime(const std::uint64_t inRoomId)
+    {
+        if (inRoomId == 0 || realtimeChallenge == 0 || GetConnectionState() != DungeonConnectionState::Connected) return;
+        realtimeRoomId = inRoomId; realtimeRequested = true;
+        DungeonProtocol::DungeonRealtimeRequest request;
+        request.version = 1; request.enabled = 1; request.challenge = realtimeChallenge;
+        SendReliable(request);
+    }
+
+    bool DungeonClient::HasFreshRealtime() const
+    {
+        return realtimeSeen && std::chrono::steady_clock::now() - realtimeLastFrame < std::chrono::milliseconds(500);
+    }
+
+    // The RUDP worker owns its queues; ConsumeEvents owns parsing/history on the game thread.
+    // Incomplete frames never reach GameWorld. Keep at most two 48KiB assemblies.
+    void DungeonClient::ReceiveRealtime(DungeonProtocol::DungeonRealtimeChunk packet, std::vector<DungeonEvent>& outEvents)
+    {
+        constexpr std::uint32_t MAX_REALTIME_BYTES = 48 * 1024;
+        constexpr std::uint32_t REALTIME_CHUNK_BYTES = 768;
+        if (!realtimeRequested || receivingWorld || packet.version != 1 || packet.challenge != realtimeChallenge
+            || packet.roomId != realtimeRoomId || packet.dungeonId == 0 || packet.mapEpoch == 0
+            || packet.snapshotSequence == 0 || packet.serverTimeMs == 0 || packet.state > 3
+            || packet.mapId.empty() || packet.mapId.size() > 64 || packet.mapId.find('\0') != std::string::npos
+            || packet.totalBytes < 6 || packet.totalBytes > MAX_REALTIME_BYTES
+            || packet.offset >= packet.totalBytes || packet.offset % REALTIME_CHUNK_BYTES != 0
+            || packet.payload.size() != std::min(REALTIME_CHUNK_BYTES, packet.totalBytes - packet.offset)
+            || (realtimeDungeonId != 0 && realtimeDungeonId != packet.dungeonId)
+            || packet.mapEpoch < realtimeMapEpoch || packet.snapshotSequence <= realtimeSequence) return;
+        const auto now = std::chrono::steady_clock::now();
+        std::erase_if(realtimeAssemblies, [now](const auto& assembly)
+            { return now - assembly.created > std::chrono::milliseconds(500); });
+        if (packet.mapEpoch > realtimeMapEpoch)
+        {
+            realtimeMapEpoch = packet.mapEpoch;
+            realtimeAssemblies.clear();
+            outEvents.emplace_back(DungeonRealtimeResetEvent{packet.mapEpoch});
+        }
+        auto assembly = std::find_if(realtimeAssemblies.begin(), realtimeAssemblies.end(), [&packet](const auto& value)
+            { return value.metadata.snapshotSequence == packet.snapshotSequence; });
+        if (assembly == realtimeAssemblies.end())
+        {
+            if (realtimeAssemblies.size() == 2 && packet.snapshotSequence < realtimeAssemblies.front().metadata.snapshotSequence) return;
+            RealtimeAssembly value;
+            value.metadata = packet; value.metadata.payload.clear(); value.created = now;
+            value.bytes.resize(packet.totalBytes);
+            value.received.resize((packet.totalBytes + REALTIME_CHUNK_BYTES - 1) / REALTIME_CHUNK_BYTES);
+            const auto position = std::find_if(realtimeAssemblies.begin(), realtimeAssemblies.end(), [&packet](const auto& current)
+                { return current.metadata.snapshotSequence > packet.snapshotSequence; });
+            realtimeAssemblies.insert(position, std::move(value));
+            if (realtimeAssemblies.size() > 2) realtimeAssemblies.pop_front();
+            assembly = std::find_if(realtimeAssemblies.begin(), realtimeAssemblies.end(), [&packet](const auto& current)
+                { return current.metadata.snapshotSequence == packet.snapshotSequence; });
+            if (assembly == realtimeAssemblies.end()) return;
+        }
+        const auto& metadata = assembly->metadata;
+        if (metadata.dungeonId != packet.dungeonId || metadata.mapId != packet.mapId || metadata.mapEpoch != packet.mapEpoch || metadata.totalBytes != packet.totalBytes
+            || metadata.serverTick != packet.serverTick || metadata.serverTimeMs != packet.serverTimeMs || metadata.state != packet.state)
+        { realtimeAssemblies.erase(assembly); return; }
+        const auto index = packet.offset / REALTIME_CHUNK_BYTES;
+        if (assembly->received[index]) return;
+        assembly->bytes.replace(packet.offset, packet.payload.size(), packet.payload);
+        assembly->received[index] = true;
+        if (++assembly->receivedCount != assembly->received.size()) return;
+        if (packet.serverTick < realtimeTick || packet.serverTimeMs < realtimeTime)
+        { realtimeAssemblies.erase(assembly); return; }
+        try
+        {
+            auto snapshot = DungeonCombatSnapshot::ParseRealtime(assembly->bytes);
+            constexpr const char* STATES[] = {"WaitingForPlayers", "Running", "Cleared", "Stopped"};
+            snapshot.roomId = packet.roomId; snapshot.mapEpoch = packet.mapEpoch; snapshot.mapId = packet.mapId;
+            snapshot.serverTick = packet.serverTick; snapshot.serverTimeMs = packet.serverTimeMs;
+            snapshot.snapshotSequence = packet.snapshotSequence; snapshot.state = STATES[packet.state]; snapshot.cleared = packet.state == 2;
+            realtimeDungeonId = packet.dungeonId;
+            realtimeSequence = packet.snapshotSequence; realtimeTick = packet.serverTick; realtimeTime = packet.serverTimeMs;
+            realtimeSeen = realtimeFallbackPending = true; realtimeLastFrame = now;
+            combatProgressDeadline = now + std::chrono::seconds(30);
+            outEvents.emplace_back(DungeonRealtimeEvent{std::move(snapshot)});
+            while (!realtimeAssemblies.empty() && realtimeAssemblies.front().metadata.snapshotSequence <= realtimeSequence)
+                realtimeAssemblies.pop_front();
+        }
+        catch (const std::exception&)
+        {
+            realtimeAssemblies.erase(assembly);
+        }
     }
 
     void DungeonClient::SendAction(const std::uint32_t inSequence, const std::uint8_t inAction, const bool inFacingLeft)
@@ -275,6 +372,11 @@ namespace ActionRPG
         {
             if (now < combatResponseDeadline) return;
             combatRequestPending = false;
+        }
+        if (!HasFreshRealtime() && realtimeFallbackPending && !combatRequestPending)
+        {
+            combatNextRequest = std::min(combatNextRequest, now);
+            realtimeFallbackPending = false;
         }
         if (now < combatNextRequest) return;
         DungeonProtocol::DungeonCombatStateRequest request;
@@ -301,6 +403,9 @@ namespace ActionRPG
     std::vector<DungeonEvent> DungeonClient::ConsumeEvents()
     {
         if (stopTask.valid()) return {};
+        const auto now = std::chrono::steady_clock::now();
+        std::erase_if(realtimeAssemblies, [now](const auto& assembly)
+            { return now - assembly.created > std::chrono::milliseconds(500); });
         std::vector<DungeonEvent> events;
         bool invalidPacket = false;
 
@@ -328,6 +433,7 @@ namespace ActionRPG
                 }
                 else
                 {
+                    realtimeChallenge = packet.challenge;
                     events.emplace_back(DungeonChallengeEvent{ packet.challenge });
                 }
                 break;
@@ -344,6 +450,18 @@ namespace ActionRPG
                 {
                     events.emplace_back(DungeonAuthResultEvent{ packet.succeeded != 0 });
                 }
+                break;
+            }
+            case DungeonProtocol::PacketType::DUNGEON_REALTIME_RESULT:
+            {
+                DungeonProtocol::DungeonRealtimeResult packet; packet.BufferToPacket(*buffer);
+                if (buffer->GetBufferError() != 0 || buffer->GetUseSize() != 0) { invalidPacket = true; break; }
+                if (!realtimeRequested || packet.challenge != realtimeChallenge || packet.roomId != realtimeRoomId) break;
+                if (packet.version != 1 || packet.accepted != 1 || packet.dungeonId == 0
+                    || packet.tickIntervalMs != 50 || packet.snapshotIntervalMs < 50 || packet.snapshotIntervalMs > 100
+                    || (realtimeDungeonId != 0 && realtimeDungeonId != packet.dungeonId))
+                { realtimeRequested = realtimeSeen = false; realtimeAssemblies.clear(); break; }
+                realtimeDungeonId = packet.dungeonId;
                 break;
             }
             case DungeonProtocol::PacketType::DUNGEON_WORLD_CHUNK:
@@ -429,7 +547,7 @@ namespace ActionRPG
                     lastCompletedCombatId = combatSnapshotId;
                     events.emplace_back(DungeonCombatEvent{std::move(combatJson)});
                     combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
-                    combatNextRequest = now + std::chrono::milliseconds(200);
+                    combatNextRequest = now + std::chrono::milliseconds(HasFreshRealtime() ? 1000 : 200);
                 }
                 break;
             }
@@ -447,12 +565,15 @@ namespace ActionRPG
 
         for (int packetCount = 0; packetCount < MAX_PACKETS_PER_UPDATE; ++packetCount)
         {
-            NetBuffer* const buffer = impl->GetReceivedUnreliablePacket();
-            if (buffer == nullptr)
-            {
-                break;
-            }
-            NetBuffer::Free(buffer);
+            NetBuffer* const received = impl->GetReceivedUnreliablePacket();
+            if (received == nullptr) break;
+            const std::unique_ptr<NetBuffer, decltype(&NetBuffer::Free)> buffer(received, &NetBuffer::Free);
+            ::PacketId packetId{}; *buffer >> packetId;
+            if (static_cast<DungeonProtocol::PacketType>(packetId) != DungeonProtocol::PacketType::DUNGEON_REALTIME_CHUNK) continue;
+            DungeonProtocol::DungeonRealtimeChunk packet; packet.BufferToPacket(*buffer);
+            // Unreliable malformed/stale data is discarded; reliable recovery remains available.
+            if (buffer->GetBufferError() != 0 || buffer->GetUseSize() != 0) continue;
+            ReceiveRealtime(std::move(packet), events);
         }
 
         if (invalidPacket)

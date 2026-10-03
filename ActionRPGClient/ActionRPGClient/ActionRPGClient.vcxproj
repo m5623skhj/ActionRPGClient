@@ -103,6 +103,7 @@
     <ClCompile Include="Game\GameplayMap.cpp" />
     <ClCompile Include="Game\Monster.cpp" />
     <ClCompile Include="Game\DungeonWorld.cpp" />
+    <ClCompile Include="Game\DungeonCombatBuffer.cpp" />
     <ClCompile Include="Game\DungeonCombat.cpp" />
     <ClCompile Include="Game\GameWorld.cpp" />
     <ClCompile Include="Game\InputCommandQueue.cpp" />
@@ -132,6 +133,7 @@
     <ClInclude Include="Game\GameplayMap.h" />
     <ClInclude Include="Game\Monster.h" />
     <ClInclude Include="Game\DungeonWorld.h" />
+    <ClInclude Include="Game\DungeonCombatBuffer.h" />
     <ClInclude Include="Game\DungeonCombat.h" />
     <ClInclude Include="Game\GameWorld.h" />
     <ClInclude Include="Game\InputCommandQueue.h" />
