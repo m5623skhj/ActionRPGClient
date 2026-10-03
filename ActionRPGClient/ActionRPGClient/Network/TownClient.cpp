@@ -110,6 +110,15 @@ namespace ActionRPG
         });
     }
 
+    void TownClient::RequestDungeonCompletion(const std::uint64_t inRoomId, const bool inRetry)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::DungeonCompletionRequest{inRoomId, inRetry})]() mutable
+        {
+            if (connected.load()) QueuePacket(std::move(packet));
+        });
+    }
+
     void TownClient::ConfirmDungeonJoin(
         const std::uint64_t inRoomId,
         const std::uint64_t inChallenge)
@@ -350,6 +359,10 @@ namespace ActionRPG
             break;
         case TownProtocol::PacketType::EnterDungeonResponse:
             if (auto packet = TownProtocol::DecodeEnterDungeonResponse(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::DungeonCompletionResponse:
+            if (auto packet = TownProtocol::DecodeDungeonCompletionResponse(receiveBody)) PushEvent(std::move(*packet));
             else HandleDisconnect();
             break;
         case TownProtocol::PacketType::MapChanged:

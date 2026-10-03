@@ -21,7 +21,8 @@ namespace ActionRPG
         TownProtocol::EnterDungeonResponse, TownProtocol::MapChanged,
         TownProtocol::DungeonSelectionOpen, TownProtocol::PartyInvitation,
         TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult,
-        TownProtocol::PartyDirectoryPage, TownProtocol::PartyDirectoryChanged>;
+        TownProtocol::PartyDirectoryPage, TownProtocol::PartyDirectoryChanged,
+        TownProtocol::DungeonCompletionResponse>;
 
     class TownClient final
     {
@@ -37,6 +38,7 @@ namespace ActionRPG
         void Stop();
         void SendMovement(const TownProtocol::MoveInput& inInput);
         void RequestDungeon(std::string inZoneId, std::uint32_t inDungeonId);
+        void RequestDungeonCompletion(std::uint64_t inRoomId, bool inRetry);
         void ConfirmDungeonJoin(std::uint64_t inRoomId, std::uint64_t inChallenge);
         void InviteToParty(std::uint64_t inTargetPlayerId);
         void AnswerPartyInvitation(std::uint64_t inInvitationId, bool inAccepted);

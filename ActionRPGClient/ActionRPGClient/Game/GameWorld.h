@@ -10,7 +10,7 @@
 #include "Game/ProjectileSystem.h"
 #include "Game/SkillCommandSystem.h"
 #include "Input/InputState.h"
-#include "Network/TownProtocol.h"
+#include "Network/TownClient.h"
 #include "Resources/SpriteAnimation.h"
 
 #include <d2d1_1.h>
@@ -108,6 +108,9 @@ namespace ActionRPG
         void RenderCombatProjectiles(D2DRenderer& inRenderer) const;
         void RenderCombatHud(D2DRenderer& inRenderer) const;
         void ProcessPlayerHits();
+        void UpdateDungeonCompletion(float inDeltaSeconds, const InputState& inInput);
+        void RenderDungeonCompletion(D2DRenderer& inRenderer) const;
+        void ProcessDungeonCompletion();
         void UpdateDungeonSelection(const InputState& inInput);
         void UpdateSystemInterface(const InputState& inInput);
         void UpdatePartyInterface(const InputState& inInput);
@@ -148,6 +151,12 @@ namespace ActionRPG
         std::unordered_map<std::uint64_t, std::unique_ptr<Player>> combatPlayers;
         std::uint64_t lastCombatTick{};
         bool hasCombatTick{}, dungeonCleared{};
+        bool completionPending{}, completionStopping{};
+        float completionWaitSeconds{};
+        std::size_t selectedCompletionIndex{};
+        std::wstring completionStatus;
+        std::optional<TownProtocol::DungeonCompletionResponse> completionResponse;
+        std::vector<TownEvent> deferredTownEvents;
         std::uint32_t combatActionSequence{}, lastCombatActionResult{}, combatInputsThisSecond{};
         float combatInputWindowSeconds{}, combatSnapshotAge{}, rejectedActionSeconds{};
         std::wstring combatStatus;

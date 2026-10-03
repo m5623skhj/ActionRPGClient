@@ -197,6 +197,7 @@ namespace ActionRPG
         std::string inSessionBrokerAddress,
         const std::uint16_t inSessionBrokerPort)
     {
+        if (!IsStopComplete()) return false;
         const DungeonConnectionState connectionState = impl->GetConnectionState();
         if (connectionState != DungeonConnectionState::Stopped
             && connectionState != DungeonConnectionState::Failed)
@@ -209,11 +210,28 @@ namespace ActionRPG
 
     void DungeonClient::Stop()
     {
+        if (stopTask.valid()) stopTask.get();
         impl->StopClient();
         worldJson.clear(); worldBytes = 0; receivingWorld = false;
         combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
         lastCompletedCombatId = 0;
         combatPolling = combatRequestPending = false;
+    }
+
+    // Game-thread API: only the worker touches impl while this future is active.
+    void DungeonClient::RequestStop()
+    {
+        if (stopTask.valid()) return;
+        combatPolling = combatRequestPending = receivingWorld = false;
+        stopTask = std::async(std::launch::async, [this]() { impl->StopClient(); });
+    }
+
+    bool DungeonClient::IsStopComplete()
+    {
+        if (!stopTask.valid()) return true;
+        if (stopTask.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return false;
+        stopTask.get();
+        return true;
     }
 
     void DungeonClient::RequestWorld()
@@ -225,6 +243,7 @@ namespace ActionRPG
 
     DungeonConnectionState DungeonClient::GetConnectionState() const
     {
+        if (stopTask.valid()) return DungeonConnectionState::Stopped;
         if (receivingWorld && std::chrono::steady_clock::now() > worldDeadline) return DungeonConnectionState::Failed;
         if (combatPolling && std::chrono::steady_clock::now() > combatProgressDeadline) return DungeonConnectionState::Failed;
         return impl->GetConnectionState();
@@ -281,6 +300,7 @@ namespace ActionRPG
 
     std::vector<DungeonEvent> DungeonClient::ConsumeEvents()
     {
+        if (stopTask.valid()) return {};
         std::vector<DungeonEvent> events;
         bool invalidPacket = false;
 

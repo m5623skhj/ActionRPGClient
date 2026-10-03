@@ -1,4 +1,5 @@
 #include "Game/GameWorld.h"
+#include <array>
 #include <unordered_set>
 #include <limits>
 
@@ -27,6 +28,21 @@ namespace ActionRPG
         constexpr float MENU_TILE_HEIGHT = 194.0f;
         constexpr float MENU_ICON_SIZE = 128.0f;
         constexpr float MENU_TILE_GAP = 18.0f;
+
+        struct DungeonCompletionLayout
+        {
+            D2D1_RECT_F panel;
+            std::array<D2D1_RECT_F, 2> buttons;
+        };
+
+        DungeonCompletionLayout CalculateDungeonCompletionLayout(const float inWidth, const float inHeight)
+        {
+            const float left = std::max(16.0f, (inWidth - 520.0f) * 0.5f);
+            const float top = std::max(16.0f, (inHeight - 270.0f) * 0.5f);
+            return {{left, top, left + 520.0f, top + 270.0f},
+                {{{left + 28.0f, top + 126.0f, left + 250.0f, top + 178.0f},
+                  {left + 270.0f, top + 126.0f, left + 492.0f, top + 178.0f}}}};
+        }
 
         struct SystemMenuLayout
         {
@@ -329,15 +345,20 @@ namespace ActionRPG
         uiMouseX = inInput.mouseX;
         uiMouseY = inInput.mouseY;
         uiClickConsumed = false;
+        ProcessDungeonCompletion();
         ProcessNetworkEvents(inInput);
-        ProcessDungeonEvents();
+        if (!completionStopping) ProcessDungeonEvents();
         ProcessPlayerHits();
-        UpdateSystemInterface(inInput);
-        UpdatePartyInterface(inInput);
-        UpdateDungeonSelection(inInput);
+        if (dungeonCleared) UpdateDungeonCompletion(inDeltaSeconds, inInput);
+        else
+        {
+            UpdateSystemInterface(inInput);
+            UpdatePartyInterface(inInput);
+            UpdateDungeonSelection(inInput);
+        }
 
         InputState gameplayInput = inInput;
-        if (isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
+        if (dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
             || pendingPartyInvitation.has_value()
             || (dungeonEntryState != DungeonEntryState::Idle && dungeonEntryState != DungeonEntryState::Entered))
         {
@@ -463,6 +484,7 @@ namespace ActionRPG
         RenderDungeonSelection(inRenderer);
         RenderSystemInterface(inRenderer);
         RenderPartyInterface(inRenderer);
+        RenderDungeonCompletion(inRenderer);
     }
 
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
@@ -506,14 +528,28 @@ namespace ActionRPG
 
     bool GameWorld::IsUiOverlayVisible() const noexcept
     {
-        return isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
+        return dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
             || pendingPartyInvitation.has_value();
     }
 
     void GameWorld::ProcessNetworkEvents(const InputState& inInput)
     {
-        for (TownEvent& event : townClient.ConsumeEvents())
+        auto incoming = townClient.ConsumeEvents();
+        if (completionStopping)
         {
+            for (auto& event : incoming) deferredTownEvents.push_back(std::move(event));
+            return;
+        }
+        auto events = std::move(deferredTownEvents);
+        deferredTownEvents.clear();
+        for (auto& event : incoming) events.push_back(std::move(event));
+        for (TownEvent& event : events)
+        {
+            if (completionStopping)
+            {
+                deferredTownEvents.push_back(std::move(event));
+                continue;
+            }
             std::visit([this, &inInput](auto& inEvent)
             {
                 using EventType = std::decay_t<decltype(inEvent)>;
@@ -607,6 +643,22 @@ namespace ActionRPG
                         return;
                     }
                     dungeonEntryState = DungeonEntryState::Connecting;
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::DungeonCompletionResponse>)
+                {
+                    if (inEvent.previousRoomId != dungeonRoomId
+                        || dungeonEntryState != DungeonEntryState::Entered) return;
+                    if (!inEvent.succeeded)
+                    {
+                        completionPending = false;
+                        completionStatus = L"요청을 처리하지 못했습니다. 다시 선택해 주세요.";
+                        return;
+                    }
+                    completionResponse = std::move(inEvent);
+                    dungeonCleared = true;
+                    completionPending = completionStopping = true;
+                    completionStatus = completionResponse->retry ? L"재도전 준비 중..." : L"마을로 이동 중...";
+                    dungeonClient.RequestStop();
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::MapChanged>)
                 {
@@ -787,7 +839,8 @@ namespace ActionRPG
     void GameWorld::ApplyCombatSnapshot(const std::string_view inJson)
     {
         auto snapshot = DungeonCombatSnapshot::Parse(inJson);
-        if (snapshot.roomId != dungeonRoomId || (hasCombatTick && snapshot.serverTick <= lastCombatTick)) return;
+        if (snapshot.roomId != dungeonRoomId || (hasCombatTick && (snapshot.serverTick < lastCombatTick
+            || (snapshot.serverTick == lastCombatTick && !(snapshot.cleared && !dungeonCleared))))) return;
         const auto self = std::find_if(snapshot.players.begin(), snapshot.players.end(), [this](const auto& inPlayer)
             { return inPlayer.playerId == localPlayerId; });
         if (self == snapshot.players.end()) throw std::runtime_error("Combat snapshot omits the local player.");
@@ -835,6 +888,15 @@ namespace ActionRPG
             }
         }
         std::erase_if(monsters, [&presentMonsters](const auto& inMonster) { return !presentMonsters.contains(inMonster->GetInstanceId()); });
+        if (snapshot.cleared && !dungeonCleared)
+        {
+            completionPending = completionStopping = false;
+            completionWaitSeconds = 0.0f;
+            selectedCompletionIndex = 0;
+            completionStatus.clear();
+            isDungeonSelectionOpen = false;
+            SetSystemUiPage(SystemUiPage::Closed);
+        }
         lastCombatTick = snapshot.serverTick; hasCombatTick = true; dungeonCleared = snapshot.cleared;
         combatSnapshotAge = 0.0f; combatSnapshot = std::move(snapshot);
     }
@@ -903,6 +965,91 @@ namespace ActionRPG
             inRenderer.DrawText(L"YOU ARE DOWN", 24.0f, 60.0f, 300.0f, 94.0f, D2D1::ColorF(0.9f, 0.2f, 0.2f));
         if (rejectedActionSeconds > 0.0f)
             inRenderer.DrawText(L"ACTION NOT ACCEPTED", 24.0f, 98.0f, 360.0f, 128.0f, D2D1::ColorF(0.95f, 0.7f, 0.3f));
+    }
+
+    void GameWorld::UpdateDungeonCompletion(const float inDeltaSeconds, const InputState& inInput)
+    {
+        if (!dungeonCleared || completionStopping) return;
+        if (completionPending)
+        {
+            completionWaitSeconds += inDeltaSeconds;
+            if (townClient.IsConnected() && completionWaitSeconds < 30.0f) return;
+            completionPending = false;
+            completionStatus = L"응답이 지연되고 있습니다. 다시 선택해 주세요.";
+        }
+        if (!townClient.IsConnected())
+        {
+            completionStatus = L"마을 서버 연결을 기다리는 중...";
+            return;
+        }
+        if (partySnapshot.partyId != 0 && !IsPartyLeader()) return;
+        if (inInput.WasPressed(InputKey::MoveLeft) || inInput.WasPressed(InputKey::MoveUp)) selectedCompletionIndex = 0;
+        if (inInput.WasPressed(InputKey::MoveRight) || inInput.WasPressed(InputKey::MoveDown)) selectedCompletionIndex = 1;
+        bool confirm = inInput.WasPressed(InputKey::ConfirmSelection);
+        const auto layout = CalculateDungeonCompletionLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
+        if (inInput.leftMousePressed)
+        {
+            uiClickConsumed = true;
+            for (std::size_t index = 0; index < layout.buttons.size(); ++index)
+                if (ContainsPoint(layout.buttons[index], inInput.clickX, inInput.clickY))
+                { selectedCompletionIndex = index; confirm = true; }
+        }
+        if (!confirm) return;
+        completionPending = true;
+        completionWaitSeconds = 0.0f;
+        completionStatus = L"서버 응답을 기다리는 중...";
+        townClient.RequestDungeonCompletion(dungeonRoomId, selectedCompletionIndex == 1);
+    }
+
+    // Poll cleanup without joining on the game thread, then reset before replaying town events.
+    void GameWorld::ProcessDungeonCompletion()
+    {
+        if (!completionStopping || !dungeonClient.IsStopComplete()) return;
+        auto response = std::move(*completionResponse);
+        ResetDungeonEntry();
+        if (!response.retry) return;
+        dungeonRoomId = response.roomId;
+        combatSeed = response.combatSeed;
+        if (dungeonClient.Start(std::move(response.sessionBrokerAddress), response.sessionBrokerPort))
+            dungeonEntryState = DungeonEntryState::Connecting;
+        else
+        {
+            ResetDungeonEntry();
+            partyStatusText = L"재도전 연결에 실패했습니다.";
+        }
+    }
+
+    void GameWorld::RenderDungeonCompletion(D2DRenderer& inRenderer) const
+    {
+        if (!dungeonCleared) return;
+        const auto layout = CalculateDungeonCompletionLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
+        const auto& panel = layout.panel;
+        const bool canChoose = !completionPending && !completionStopping
+            && townClient.IsConnected() && (partySnapshot.partyId == 0 || IsPartyLeader());
+        inRenderer.FillRectangle(0.0f, 0.0f, camera.GetViewportWidth(), camera.GetViewportHeight(),
+            D2D1::ColorF(0.01f, 0.015f, 0.025f, 0.78f));
+        inRenderer.FillRectangle(panel.left, panel.top, panel.right, panel.bottom, D2D1::ColorF(0.10f, 0.08f, 0.055f, 0.97f));
+        inRenderer.DrawRectangle(panel.left, panel.top, panel.right, panel.bottom, D2D1::ColorF(0.82f, 0.62f, 0.24f), 3.0f);
+        inRenderer.DrawText(L"던전 클리어", panel.left + 28.0f, panel.top + 24.0f, panel.right - 28.0f, panel.top + 62.0f,
+            D2D1::ColorF(1.0f, 0.85f, 0.25f));
+        inRenderer.DrawText(L"다음 행동을 선택해 주세요.", panel.left + 28.0f, panel.top + 70.0f, panel.right - 28.0f, panel.top + 106.0f,
+            D2D1::ColorF(D2D1::ColorF::White));
+        for (std::size_t index = 0; index < layout.buttons.size(); ++index)
+        {
+            const auto& button = layout.buttons[index];
+            const bool selected = canChoose && (selectedCompletionIndex == index || ContainsPoint(button, uiMouseX, uiMouseY));
+            inRenderer.FillRectangle(button.left, button.top, button.right, button.bottom,
+                selected ? D2D1::ColorF(0.32f, 0.23f, 0.10f) : D2D1::ColorF(0.16f, 0.14f, 0.11f));
+            inRenderer.DrawRectangle(button.left, button.top, button.right, button.bottom,
+                selected ? D2D1::ColorF(1.0f, 0.85f, 0.25f) : D2D1::ColorF(0.45f, 0.40f, 0.30f), 2.0f);
+            inRenderer.DrawText(index == 0 ? L"마을로 이동" : L"재도전", button.left + 20.0f, button.top + 12.0f,
+                button.right - 12.0f, button.bottom - 8.0f,
+                canChoose ? D2D1::ColorF(D2D1::ColorF::White) : D2D1::ColorF(0.55f, 0.55f, 0.55f));
+        }
+        const auto text = !completionStatus.empty() ? completionStatus
+            : partySnapshot.partyId != 0 && !IsPartyLeader() ? L"파티장의 선택을 기다리는 중..." : L"방향키로 선택 / Enter로 확인";
+        inRenderer.DrawText(text, panel.left + 28.0f, panel.top + 200.0f, panel.right - 28.0f, panel.bottom - 20.0f,
+            D2D1::ColorF(0.85f, 0.82f, 0.72f));
     }
 
     void GameWorld::UpdateDungeonSelection(const InputState& inInput)
@@ -1380,6 +1527,9 @@ namespace ActionRPG
 
     void GameWorld::ResetDungeonEntry()
     {
+        completionPending = completionStopping = false;
+        completionWaitSeconds = 0.0f;
+        completionResponse.reset(); completionStatus.clear();
         dungeonClient.Stop();
         const bool restoreTown = dungeonWorld.has_value();
         dungeonWorld.reset(); dungeonMonsters.clear(); dungeonMapId.clear();

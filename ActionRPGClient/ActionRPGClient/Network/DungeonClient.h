@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <chrono>
+#include <future>
 #include <memory>
 #include <string>
 #include <variant>
@@ -55,6 +56,8 @@ namespace ActionRPG
 
         bool Start(std::string inSessionBrokerAddress, std::uint16_t inSessionBrokerPort);
         void Stop();
+        void RequestStop();
+        [[nodiscard]] bool IsStopComplete();
         void RequestWorld();
         void StartCombatPolling();
         void SendAction(std::uint32_t inSequence, std::uint8_t inAction, bool inFacingLeft);
@@ -65,6 +68,7 @@ namespace ActionRPG
 
     private:
         class Impl;
+        std::future<void> stopTask;
         std::unique_ptr<Impl> impl;
         std::string worldJson;
         std::uint32_t worldBytes{};
