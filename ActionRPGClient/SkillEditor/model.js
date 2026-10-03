@@ -179,7 +179,7 @@
   }
   function ReadProject(value) {
     assert(value?.format === "PlayerSkillEditorProject" && value.schemaVersion === 1 && Array.isArray(value.characters)
-      && Array.isArray(value.skills) && value.skills.length <= 256, "스킬 작업 파일 형식 오류");
+      && value.characters.length <= 256 && Array.isArray(value.skills) && value.skills.length <= 256, "스킬 작업 파일 형식 오류");
     if (value.animations) C.ValidateAnimations(value.animations);
     const ids = new Set();
     for (const character of value.characters) {
@@ -215,5 +215,5 @@
       y: Math.sin(yaw) * Math.cos(pitch) * speed, height: Math.sin(pitch) * speed };
   }
   window.PlayerSkillModel = { NewProject, Characters, NewSkill, Variant, SetType, Motion, Scale,
-    EffectMotion, Build, Check, ReadProject, Velocity, COORDINATES, KEYS, clone };
+    EffectMotion, Build, Check, ReadProject, Velocity, COORDINATES, KEYS, IsId: id, clone };
 })();

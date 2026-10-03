@@ -30,7 +30,8 @@
     const current = skill(), v = variant(), m = motion();
     const character = current?.characterId || $("character").value || project.characters[0]?.id;
     Options($("character"), project.characters.map(value => [value.id, value.id + " · ID " + value.dataId]), character);
-    Options($("skills"), project.skills.filter(value => value.characterId === character).map(value => [value.id, value.name + " · " + value.type]), selectedId);
+    const labels = { direct: "직접 공격", projectile: "투사체 공격", buff: "버프" };
+    Options($("skills"), project.skills.filter(value => value.characterId === character).map(value => [value.id, value.name + " [" + value.id + "] · " + labels[value.type]]), selectedId);
     $("common").hidden = !current;
     $("variantPanel").hidden = !current;
     $("new").disabled = busy || !character || !project.animations?.characters[character];
@@ -126,7 +127,7 @@
   };
   $("duplicate").onclick = () => {
     const current = skill(); if (!current) return; const id = prompt("복제할 스킬의 새 ID"); if (!id) return;
-    if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(id) || project.skills.some(value => value.id === id)) { tell("스킬 ID 형식 또는 중복 오류"); return; }
+    if (!M.IsId(id) || project.skills.some(value => value.id === id)) { tell("스킬 ID 형식 또는 중복 오류"); return; }
     Remember(); const copied = M.clone(current); copied.id = id; copied.name += " 복사"; project.skills.push(copied); changed(); SetSelection(id);
   };
   $("delete").onclick = () => { if (!skill() || !confirm("현재 스킬을 삭제할까요?")) return; Remember(); project.skills = project.skills.filter(value => value.id !== selectedId); changed(); SetSelection(project.skills[0]?.id || ""); };
@@ -198,7 +199,9 @@
       const incoming = await Json(file, 8 * 1024 * 1024); C.ValidateAnimations(incoming);
       if (!project.characters.length) throw new Error("캐릭터 ID를 읽기 위해 플레이어 데이터 폴더를 먼저 불러오세요.");
       const next = M.clone(project.animations); const allowed = new Set(project.characters.map(value => value.id)); let count = 0;
-      for (const [id, value] of Object.entries(incoming.characters)) if (allowed.has(id)) { next.characters[id] = M.clone(value); count++; }
+      for (const [id, value] of Object.entries(incoming.characters)) if (allowed.has(id)) {
+        next.characters[id] = { ...next.characters[id], ...M.clone(value), motions: { ...next.characters[id].motions, ...M.clone(value.motions) } }; count++;
+      }
       if (!count) throw new Error("characters.ini에 등록된 플레이어 ID와 일치하는 모션이 없습니다.");
       C.ValidateAnimations(next); project.animations = next; project.hurtRects = null; undo = []; redo = []; changed(); tell("플레이어 모션을 교체했습니다. 시점·공격 영역과 이미지 참조를 검사하세요.");
     });
@@ -211,6 +214,7 @@
       const paths = new Set(C.Entries(project.animations).map(value => value.motion.image));
       const next = { ...images }; let bytes = 0;
       for (const path of paths) {
+        if (next[path] && !files.some(file => pathOf(file) === path || pathOf(file).endsWith("/" + path))) continue;
         const file = Find(files, path); bytes += file.size; if (bytes > MAX_IMAGES) throw new Error("이미지 원본 총량 초과"); next[path] = await ImageFile(file);
       }
       ImageBudget(next); images = next; changed(); tell("모션 이미지 불러오기 완료");
@@ -359,6 +363,9 @@
     else if (event.code === "Space") { event.preventDefault(); $("play").click(); }
   });
   window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
+  document.addEventListener("focusin", event => {
+    if (playing && /INPUT|SELECT/.test(event.target.tagName) && event.target.id !== "frame") { pause(); Refresh(); }
+  });
   function Tick(time) {
     const delta = lastTime ? Math.min(.1, (time - lastTime) / 1000) : 0; lastTime = time;
     const m = motion(); if (playing && m && !busy && !drag) {
@@ -367,6 +374,7 @@
         duration = Math.max(duration, effect.eventFrame / m.fps + effectMotion.frameCount / effectMotion.fps); } } catch (_) { /* Draft effect. */ }
       elapsed += delta; if (elapsed >= duration) elapsed = 0; frame = Math.min(m.frameCount - 1, Math.floor(elapsed * m.fps));
       $("frame").value = frame; $("frameText").textContent = "프레임 " + frame + " / " + (m.frameCount - 1); Draw();
+      const r = rect(); for (const [name, key] of [["rectX", "x"], ["rectY", "y"], ["rectW", "width"], ["rectH", "height"]]) $(name).value = r?.[key] ?? "";
     }
     requestAnimationFrame(Tick);
   }
