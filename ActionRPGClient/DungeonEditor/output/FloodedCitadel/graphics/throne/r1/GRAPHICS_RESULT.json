@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 1,
+  "jobId": "flooded-citadel-20261003-01",
+  "requestId": "flooded-citadel-20261003-01-05-bg-throne",
+  "revision": 1,
+  "requirementsRevision": 1,
+  "ruleVersion": "1.0.1",
+  "ruleAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\docs\\workflows\\DUNGEON_CREATION.md",
+  "stage": "05",
+  "backgroundKey": "throne",
+  "roomIds": [
+    "DrownedThrone"
+  ],
+  "status": "completed",
+  "completionScope": "One throne background created and delivered with conservative dry-floor revision proposal. Original entire rectangle is not passed; coordinator reconciliation required before stage 09.",
+  "tool": "built-in image_gen",
+  "requestedPixels": {
+    "width": 1600,
+    "height": 900
+  },
+  "actualPixels": {
+    "width": 1672,
+    "height": 941
+  },
+  "originalPixels": {
+    "width": 1672,
+    "height": 941
+  },
+  "finalPixels": {
+    "width": 1672,
+    "height": 941
+  },
+  "mode": "RGB",
+  "opaque": true,
+  "outputAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\FloodedCitadel_Throne.png",
+  "originalsAbsoluteDirectory": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\throne\\r1\\originals",
+  "deliveryMetadataAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\throne\\r1\\GRAPHICS_RESULT.json",
+  "layoutReviewAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\throne\\r1\\layout-review.png",
+  "originals": [
+    {
+      "file": "throne_generated_r1.png",
+      "absolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\throne\\r1\\originals\\throne_generated_r1.png",
+      "generatedSource": "C:\\Users\\KimHyeongJin\\.codex\\generated_images\\01a0fa9f-7587-73e2-a85d-be95e68d307f\\exec-37cda76b-459b-479c-8f71-a42d858b06da.png",
+      "role": "Unaltered generator original, byte-identical to production PNG",
+      "actualPixels": {
+        "width": 1672,
+        "height": 941
+      },
+      "sha256": "74de31283326b46963e943a49f034cd5d3a76173f0dffa1b91b96138a6bba9d5"
+    }
+  ],
+  "finalSha256": "74de31283326b46963e943a49f034cd5d3a76173f0dffa1b91b96138a6bba9d5",
+  "imageWorldMapping": {
+    "designWorld": {
+      "left": 0,
+      "top": 0,
+      "right": 1600,
+      "bottom": 900
+    },
+    "origin": {
+      "x": 0,
+      "y": 0
+    },
+    "scaleX": 0.9569377990430622,
+    "scaleY": 0.9564293304994687,
+    "worldUnitsPerImagePixel": {
+      "x": 0.9569377990430622,
+      "y": 0.9564293304994687
+    },
+    "aspectMismatchPercent": 0.05313496280551222,
+    "largeAspectMismatch": false,
+    "uniformScaleWorldRevisionRequired": false,
+    "assetResampling": false,
+    "crop": false,
+    "placementApplied": false,
+    "note": "Place native-resolution asset at 1600x900 design-world rectangle using existing editor model. Metadata records proposal only; editor/game data unchanged."
+  },
+  "visualReview": {
+    "method": "Direct inspection of generated image and native-resolution overlay of requested/recommended floor, west transition, arrival and boss foot. Visual annotation, not exact shoreline segmentation or gameplay validation.",
+    "requestedDryFloorPolygons": [
+      [
+        {
+          "x": 40,
+          "y": 340
+        },
+        {
+          "x": 1560,
+          "y": 340
+        },
+        {
+          "x": 1560,
+          "y": 820
+        },
+        {
+          "x": 40,
+          "y": 820
+        }
+      ]
+    ],
+    "requestedDryFloorResult": "does-not-pass-entire-rectangle",
+    "reason": "Lower requested boundary y=820 intersects rendered foreground parapet/embankment and small pillar caps beginning approximately design y=795..825. Do not pass original rectangle. Upper edge also given extra conservative margin.",
+    "recommendedDryFloorPolygons": [
+      [
+        {
+          "x": 40,
+          "y": 360
+        },
+        {
+          "x": 1560,
+          "y": 360
+        },
+        {
+          "x": 1560,
+          "y": 780
+        },
+        {
+          "x": 40,
+          "y": 780
+        }
+      ]
+    ],
+    "recommendedDryFloorResult": "visually clear flat dry paving without water/solid obstacles, with margin from north pool and south parapet",
+    "transitionRegions": [
+      {
+        "roomId": "DrownedThrone",
+        "direction": "west",
+        "polygon": [
+          {
+            "x": 40,
+            "y": 510
+          },
+          {
+            "x": 80,
+            "y": 510
+          },
+          {
+            "x": 80,
+            "y": 630
+          },
+          {
+            "x": 40,
+            "y": 630
+          }
+        ],
+        "visualCenter": {
+          "x": 60,
+          "y": 570
+        },
+        "targetRoomId": "CollapsedGallery",
+        "targetEntryPointId": "Entry_east"
+      }
+    ],
+    "transitionResult": "entire west band x40..80,y510..630 and center (60,570) clear; dry paving connects to left edge",
+    "arrivalPointReview": [
+      {
+        "point": {
+          "x": 112,
+          "y": 570
+        },
+        "result": "clear dry paving inside recommended polygon; no change needed"
+      }
+    ],
+    "monsterFootPositions": [
+      {
+        "roomId": "DrownedThrone",
+        "positions": [
+          [
+            1080,
+            600
+          ]
+        ]
+      }
+    ],
+    "monsterFootPositionsResult": "boss foot (1080,600) clear dry paving inside recommended polygon; no change needed",
+    "decorativeWaterPolygonsExactMatch": false,
+    "decorativeWaterDifference": "Northern pool extends across center below throne rather than only requested side pockets. Southern water is irregular beyond parapet; requested masks not claimed pixel-exact.",
+    "recommendedDecorativeWaterEnvelopes": [
+      [
+        {
+          "x": 0,
+          "y": 260
+        },
+        {
+          "x": 1600,
+          "y": 260
+        },
+        {
+          "x": 1600,
+          "y": 325
+        },
+        {
+          "x": 0,
+          "y": 325
+        }
+      ],
+      [
+        {
+          "x": 0,
+          "y": 840
+        },
+        {
+          "x": 1600,
+          "y": 840
+        },
+        {
+          "x": 1600,
+          "y": 900
+        },
+        {
+          "x": 0,
+          "y": 900
+        }
+      ]
+    ],
+    "decorativeEnvelopeCaveat": "Approximate visual envelopes; northern region includes throne-platform projections and southern region includes rubble projections. Not all-water polygons or collision geometry.",
+    "recommendedBlockedRegions": [
+      [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 1600,
+          "y": 0
+        },
+        {
+          "x": 1600,
+          "y": 350
+        },
+        {
+          "x": 0,
+          "y": 350
+        }
+      ],
+      [
+        {
+          "x": 0,
+          "y": 790
+        },
+        {
+          "x": 1600,
+          "y": 790
+        },
+        {
+          "x": 1600,
+          "y": 900
+        },
+        {
+          "x": 0,
+          "y": 900
+        }
+      ]
+    ],
+    "throneSceneryNote": "Empty broken stone throne, blue/navy textiles and ruined rear platform confined to northern background; no platform/stairs on recommended combat floor.",
+    "layoutReviewLegend": {
+      "red": "requested dry rectangle",
+      "green": "recommended dry rectangle",
+      "yellow": "west transition/center and boss foot",
+      "cyan": "west arrival (112,570)"
+    },
+    "prohibitedElements": "No characters, monsters, gates/warp markers, loot, UI or text in production PNG; annotation colors only in separate layout-review.png."
+  },
+  "geometryRevision": {
+    "required": true,
+    "coordinatorConfirmationRequiredBeforeStage09": true,
+    "worldSizeChanged": false,
+    "dryFloorPolygonsChanged": true,
+    "exitCoordinatesChanged": false,
+    "arrivalPointChanged": false,
+    "monsterFootPositionsChanged": false,
+    "requiredTransitionChanges": [],
+    "requiredArrivalPointChanges": [],
+    "requirementsFileModified": false,
+    "jobOrQueueModified": false,
+    "blockedRegionReconciliationNeeded": true,
+    "decorationMaskReconciliationNeeded": true,
+    "note": "Coordinator confirms x40..1560,y360..780 dry-floor rectangle, reconciles blocked/decorative masks, then validates using existing editor. West exit/arrival and boss foot remain unchanged."
+  },
+  "prompts": {
+    "generation": "Create one production background for a Korean pixel-art 2D belt-scrolling action RPG, matching the supplied player, armored monsters and existing citadel references. Theme: flooded ruined medieval citadel, broken gray stone walls, muted blue-green standing water, damp stone, faded navy banners and subtle cool daylight. Fixed oblique side view of the floor and north-side scenery, no isometric camera rotation, crisp pixel clusters, no smoothing. Requested canvas 1600 x 900 pixels; actual output resolution must be reported. Purpose: 보스 1마리를 배치하는 침수된 왕좌 배경. Coordinates are left-top-origin design-world pixels. Keep this entire continuous DRY raised stone floor visibly above water and free of walls, rubble, pillars and props: [[{\"x\":40,\"y\":340},{\"x\":1560,\"y\":340},{\"x\":1560,\"y\":820},{\"x\":40,\"y\":820}]]. Standing-water decorative masks, entirely outside playable dry floor: [[{\"x\":40,\"y\":260},{\"x\":430,\"y\":260},{\"x\":430,\"y\":320},{\"x\":40,\"y\":320}],[{\"x\":1170,\"y\":260},{\"x\":1560,\"y\":260},{\"x\":1560,\"y\":320},{\"x\":1170,\"y\":320}],[{\"x\":0,\"y\":840},{\"x\":1600,\"y\":840},{\"x\":1600,\"y\":900},{\"x\":0,\"y\":900}]]. Water must not appear under any playable-floor point, entry or monster; damp stone is allowed but no puddles on dry floor. Keep all planned transition regions unobstructed: [{\"roomId\":\"DrownedThrone\",\"direction\":\"west\",\"polygon\":[{\"x\":40,\"y\":510},{\"x\":80,\"y\":510},{\"x\":80,\"y\":630},{\"x\":40,\"y\":630}],\"visualCenter\":{\"x\":60,\"y\":570},\"targetRoomId\":\"CollapsedGallery\",\"targetEntryPointId\":\"Entry_east\"}]. Do not paint gates, glowing portals, characters, monsters, loot, UI or text; the editor adds gate/pad markers separately. Broken throne and drowned royal remnants only in north-side scenery above y=260, leave the arena x=40..1560,y=340..820 clear, boss foot at (1080,600); avoid foreground decoration covering the boss. Maintain medium-value, low-contrast combat floor so gray armor and dark blue/red boss remain readable. Independent single-image background, no tiling or seamless edges required. Preserve the unedited generator original and record exact source dimensions and any transformation. One background request at a time through the coordinator.\nCRITICAL NORMALIZED SCREEN LAYOUT: opaque single wide 16:9 boss background. North throne, damaged walls, faded navy royal textiles and drowned ruined remnants occupy ONLY top 27% of canvas. The empty ruined stone throne is a background structure, no person sitting on it. North left/right blue-green shallow pools may occupy the band y29%..35%, separated by the north throne backdrop. All terrain across FULL canvas width from y37% through y92% must be flat, completely DRY quiet gray stone paving. No parapet, standing wall, vertical embankment face, loose rubble or puddle anywhere in that dry horizontal strip. For safety leave dry floor through y93%. Lower decorative water must be a thin band only in bottom 5%, y95%..100%. No stairs descending onto arena; any throne platform above y28%.\nLeft exit/arrival at x3.75%/x7%,y63.33% must connect horizontally through the left image edge. Future boss foot point x67.5%,y66.67% is featureless dry paving, no boss/marker. Empty broad rectangular combat arena, no camera rotation, no deep vanishing-point hallway, no floor taper. Match earlier FloodedCitadel_Causeway and Courtyard gray stone pixel clusters, desaturated blue-green water, pale cool misty daylight, faded navy banners; little warm light only on north wall. No central carpet across arena, no columns or foreground rubble. No gates, characters, text, UI, loot or portals."
+  },
+  "referenceArtAbsolutePaths": [
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Characters\\player_idle.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Monsters\\rusted_armor_soldier_idle.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Monsters\\fallen_citadel_warden_idle.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Dungeons\\FallenCitadel_Courtyard.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Dungeons\\FallenCitadel_ThroneRoom.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\FloodedCitadel_Causeway.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\FloodedCitadel_Courtyard.png"
+  ],
+  "performedChecks": [
+    "Measured source/output resolution and RGB opaque mode",
+    "Viewed local style references including Causeway/Courtyard",
+    "Viewed native-resolution requested/recommended floor overlay with west exit/arrival and boss foot",
+    "Verified delivered PNG/original SHA256 and dimensions; parsed result JSON; confirmed review file exists"
+  ],
+  "notPerformed": [
+    "DungeonEditor project/model validation",
+    "Package build or installation",
+    "Client/server build",
+    "Game execution or functional tests",
+    "Stage/commit/push"
+  ],
+  "reuse": "Standalone DrownedThrone background subject to coordinator geometry reconciliation; no tiling needed.",
+  "nextStep": "Coordinator confirms revised geometry and proceeds to subsequent authorized dungeon stages. No other background or gameplay data modified."
+}

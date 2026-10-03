@@ -1,0 +1,588 @@
+{
+  "schemaVersion": 1,
+  "jobId": "flooded-citadel-20261003-01",
+  "requestId": "flooded-citadel-20261003-01-05-bg-courtyard",
+  "revision": 1,
+  "requirementsRevision": 1,
+  "ruleVersion": "1.0.1",
+  "ruleAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\docs\\workflows\\DUNGEON_CREATION.md",
+  "stage": "05",
+  "backgroundKey": "courtyard",
+  "roomIds": [
+    "ReservoirCourt",
+    "SupplyTerrace",
+    "CollapsedGallery"
+  ],
+  "status": "completed",
+  "completionScope": "One common background created and delivered with a conservative hexagon revision proposal. Original hexagon is not passed in its entirety; coordinator confirmation/reconciliation required before stage 09.",
+  "tool": "built-in image_gen",
+  "requestedPixels": {
+    "width": 1280,
+    "height": 720
+  },
+  "actualPixels": {
+    "width": 1672,
+    "height": 941
+  },
+  "originalPixels": {
+    "width": 1672,
+    "height": 941
+  },
+  "finalPixels": {
+    "width": 1672,
+    "height": 941
+  },
+  "mode": "RGB",
+  "opaque": true,
+  "outputAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\FloodedCitadel_Courtyard.png",
+  "originalsAbsoluteDirectory": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\courtyard\\r1\\originals",
+  "deliveryMetadataAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\courtyard\\r1\\GRAPHICS_RESULT.json",
+  "layoutReviewAbsolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\courtyard\\r1\\layout-review.png",
+  "originals": [
+    {
+      "file": "courtyard_generated_r1.png",
+      "absolutePath": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\courtyard\\r1\\originals\\courtyard_generated_r1.png",
+      "generatedSource": "C:\\Users\\KimHyeongJin\\.codex\\generated_images\\01a0fa9f-7587-73e2-a85d-be95e68d307f\\exec-c688a37a-cec5-47d1-bb7a-d260d21039a6.png",
+      "role": "Unaltered generator original, byte-identical to production PNG",
+      "actualPixels": {
+        "width": 1672,
+        "height": 941
+      },
+      "sha256": "a92360a012dd7c7a188611e6c7c402e210c00d030c9d18f6ba4209976835258e"
+    }
+  ],
+  "finalSha256": "a92360a012dd7c7a188611e6c7c402e210c00d030c9d18f6ba4209976835258e",
+  "imageWorldMapping": {
+    "designWorld": {
+      "left": 0,
+      "top": 0,
+      "right": 1280,
+      "bottom": 720
+    },
+    "origin": {
+      "x": 0,
+      "y": 0
+    },
+    "scaleX": 0.7655502392344498,
+    "scaleY": 0.7651434643995749,
+    "worldUnitsPerImagePixel": {
+      "x": 0.7655502392344498,
+      "y": 0.7651434643995749
+    },
+    "aspectMismatchPercent": 0.05313496280551222,
+    "largeAspectMismatch": false,
+    "uniformScaleWorldRevisionRequired": false,
+    "assetResampling": false,
+    "crop": false,
+    "placementApplied": false,
+    "note": "Place native-resolution asset using existing editor model at 1280x720 design-world rectangle. Proposed placement metadata only; no editor document modified."
+  },
+  "visualReview": {
+    "method": "Direct inspection of generated background and native-resolution overlay of original/revised hexagons, all transition polygons, monster feet and candidate arrival points. Human visual annotation, not exact pixel segmentation.",
+    "requestedDryFloorPolygons": [
+      [
+        {
+          "x": 480,
+          "y": 30
+        },
+        {
+          "x": 800,
+          "y": 30
+        },
+        {
+          "x": 1240,
+          "y": 360
+        },
+        {
+          "x": 1240,
+          "y": 700
+        },
+        {
+          "x": 40,
+          "y": 700
+        },
+        {
+          "x": 40,
+          "y": 360
+        }
+      ]
+    ],
+    "requestedDryFloorResult": "does-not-pass-entire-hexagon",
+    "reason": "Northern requested vertices (480,30)/(800,30) and portions of the sloping shoulders approach/overlap water or wall/vegetation projections. Cannot claim exact requested hexagon is clear.",
+    "recommendedDryFloorPolygons": [
+      [
+        {
+          "x": 520,
+          "y": 30
+        },
+        {
+          "x": 760,
+          "y": 30
+        },
+        {
+          "x": 1240,
+          "y": 380
+        },
+        {
+          "x": 1240,
+          "y": 700
+        },
+        {
+          "x": 40,
+          "y": 700
+        },
+        {
+          "x": 40,
+          "y": 380
+        }
+      ]
+    ],
+    "recommendedDryFloorResult": "visually clear with conservative shoreline margin; continuous convex apron from north approach to wide lower arena",
+    "transitionRegions": [
+      {
+        "roomId": "ReservoirCourt",
+        "direction": "west",
+        "polygon": [
+          {
+            "x": 40,
+            "y": 420
+          },
+          {
+            "x": 80,
+            "y": 420
+          },
+          {
+            "x": 80,
+            "y": 540
+          },
+          {
+            "x": 40,
+            "y": 540
+          }
+        ],
+        "visualCenter": {
+          "x": 60,
+          "y": 480
+        },
+        "targetRoomId": "BrokenCauseway",
+        "targetEntryPointId": "Entry_east"
+      },
+      {
+        "roomId": "ReservoirCourt",
+        "direction": "east",
+        "polygon": [
+          {
+            "x": 1200,
+            "y": 420
+          },
+          {
+            "x": 1240,
+            "y": 420
+          },
+          {
+            "x": 1240,
+            "y": 540
+          },
+          {
+            "x": 1200,
+            "y": 540
+          }
+        ],
+        "visualCenter": {
+          "x": 1220,
+          "y": 480
+        },
+        "targetRoomId": "CollapsedGallery",
+        "targetEntryPointId": "Entry_west"
+      },
+      {
+        "roomId": "ReservoirCourt",
+        "direction": "south",
+        "polygon": [
+          {
+            "x": 600,
+            "y": 660
+          },
+          {
+            "x": 680,
+            "y": 660
+          },
+          {
+            "x": 680,
+            "y": 700
+          },
+          {
+            "x": 600,
+            "y": 700
+          }
+        ],
+        "visualCenter": {
+          "x": 640,
+          "y": 680
+        },
+        "targetRoomId": "SupplyTerrace",
+        "targetEntryPointId": "Entry_north"
+      },
+      {
+        "roomId": "SupplyTerrace",
+        "direction": "north",
+        "polygon": [
+          {
+            "x": 600,
+            "y": 40
+          },
+          {
+            "x": 680,
+            "y": 40
+          },
+          {
+            "x": 680,
+            "y": 80
+          },
+          {
+            "x": 600,
+            "y": 80
+          }
+        ],
+        "visualCenter": {
+          "x": 640,
+          "y": 60
+        },
+        "targetRoomId": "ReservoirCourt",
+        "targetEntryPointId": "Entry_south"
+      },
+      {
+        "roomId": "CollapsedGallery",
+        "direction": "west",
+        "polygon": [
+          {
+            "x": 40,
+            "y": 420
+          },
+          {
+            "x": 80,
+            "y": 420
+          },
+          {
+            "x": 80,
+            "y": 540
+          },
+          {
+            "x": 40,
+            "y": 540
+          }
+        ],
+        "visualCenter": {
+          "x": 60,
+          "y": 480
+        },
+        "targetRoomId": "ReservoirCourt",
+        "targetEntryPointId": "Entry_east"
+      },
+      {
+        "roomId": "CollapsedGallery",
+        "direction": "east",
+        "polygon": [
+          {
+            "x": 1200,
+            "y": 420
+          },
+          {
+            "x": 1240,
+            "y": 420
+          },
+          {
+            "x": 1240,
+            "y": 540
+          },
+          {
+            "x": 1200,
+            "y": 540
+          }
+        ],
+        "visualCenter": {
+          "x": 1220,
+          "y": 480
+        },
+        "targetRoomId": "DrownedThrone",
+        "targetEntryPointId": "Entry_west"
+      }
+    ],
+    "transitionResult": "all six transition records lie on clear flat stone; north (640,60), south (640,680), west/east (60,480)/(1220,480) clear without scenery or water",
+    "arrivalPointReview": [
+      {
+        "point": {
+          "x": 640,
+          "y": 112
+        },
+        "result": "clear dry paving on north approach; explicitly requested point"
+      },
+      {
+        "point": {
+          "x": 640,
+          "y": 608
+        },
+        "result": "clear dry paving; candidate south arrival for coordinator reconciliation"
+      },
+      {
+        "point": {
+          "x": 112,
+          "y": 480
+        },
+        "result": "clear dry paving; candidate west arrival for coordinator reconciliation"
+      },
+      {
+        "point": {
+          "x": 1168,
+          "y": 480
+        },
+        "result": "clear dry paving; candidate east arrival for coordinator reconciliation"
+      }
+    ],
+    "monsterFootPositions": [
+      {
+        "roomId": "ReservoirCourt",
+        "positions": [
+          [
+            360,
+            450
+          ],
+          [
+            500,
+            590
+          ],
+          [
+            750,
+            430
+          ],
+          [
+            920,
+            590
+          ],
+          [
+            1080,
+            470
+          ]
+        ]
+      },
+      {
+        "roomId": "SupplyTerrace",
+        "positions": [
+          [
+            490,
+            460
+          ],
+          [
+            660,
+            550
+          ],
+          [
+            840,
+            460
+          ]
+        ]
+      },
+      {
+        "roomId": "CollapsedGallery",
+        "positions": [
+          [
+            360,
+            460
+          ],
+          [
+            560,
+            590
+          ],
+          [
+            820,
+            440
+          ],
+          [
+            1040,
+            580
+          ]
+        ]
+      }
+    ],
+    "monsterFootPositionsResult": "all 12 planned points viewed on dry paving inside recommended polygon; no positions changed",
+    "decorativeWaterPolygonsExactMatch": false,
+    "decorativeWaterDifference": "Actual upper pools have sloping shorelines around the flared apron, interspersed with ruins/vegetation; not exact requested triangles. The bottom water is only a narrow irregular edge around/after design y=708, not the whole requested y=702..720 strip.",
+    "recommendedDecorativeWaterEnvelopes": [
+      [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 510,
+          "y": 0
+        },
+        {
+          "x": 510,
+          "y": 30
+        },
+        {
+          "x": 30,
+          "y": 365
+        },
+        {
+          "x": 0,
+          "y": 365
+        }
+      ],
+      [
+        {
+          "x": 770,
+          "y": 0
+        },
+        {
+          "x": 1280,
+          "y": 0
+        },
+        {
+          "x": 1280,
+          "y": 365
+        },
+        {
+          "x": 1250,
+          "y": 365
+        },
+        {
+          "x": 770,
+          "y": 30
+        }
+      ],
+      [
+        {
+          "x": 0,
+          "y": 708
+        },
+        {
+          "x": 1280,
+          "y": 708
+        },
+        {
+          "x": 1280,
+          "y": 720
+        },
+        {
+          "x": 0,
+          "y": 720
+        }
+      ]
+    ],
+    "decorativeEnvelopeCaveat": "Approximate outer decoration envelopes include stone scenery; not all-water polygons or exact shoreline measurements. Do not infer combat/terrain semantics from them.",
+    "recommendedBlockedRegions": [
+      [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 520,
+          "y": 0
+        },
+        {
+          "x": 520,
+          "y": 30
+        },
+        {
+          "x": 40,
+          "y": 380
+        },
+        {
+          "x": 0,
+          "y": 380
+        }
+      ],
+      [
+        {
+          "x": 760,
+          "y": 0
+        },
+        {
+          "x": 1280,
+          "y": 0
+        },
+        {
+          "x": 1280,
+          "y": 380
+        },
+        {
+          "x": 1240,
+          "y": 380
+        },
+        {
+          "x": 760,
+          "y": 30
+        }
+      ],
+      [
+        {
+          "x": 0,
+          "y": 702
+        },
+        {
+          "x": 1280,
+          "y": 702
+        },
+        {
+          "x": 1280,
+          "y": 720
+        },
+        {
+          "x": 0,
+          "y": 720
+        }
+      ]
+    ],
+    "layoutReviewLegend": {
+      "red": "requested hexagon",
+      "green": "recommended hexagon",
+      "yellow": "transition polygons and 12 monster feet",
+      "cyan": "north requested arrival and candidate south/west/east arrivals"
+    },
+    "prohibitedElements": "No characters, monsters, gates/warp markers, loot, UI or text in production PNG; QA colors only in separate layout-review.png."
+  },
+  "geometryRevision": {
+    "required": true,
+    "coordinatorConfirmationRequiredBeforeStage09": true,
+    "worldSizeChanged": false,
+    "dryFloorPolygonsChanged": true,
+    "exitCoordinatesChanged": false,
+    "monsterFootPositionsChanged": false,
+    "requiredArrivalPointChanges": [],
+    "requiredTransitionChanges": [],
+    "requirementsFileModified": false,
+    "jobOrQueueModified": false,
+    "blockedRegionReconciliationNeeded": true,
+    "decorationMaskReconciliationNeeded": true,
+    "note": "Coordinator must confirm revised six-vertex dry polygon and reconcile blocked/decorative masks with existing editor validation; arrival candidates are visual review proposals rather than edits to authoritative entries."
+  },
+  "prompts": {
+    "generation": "Create one production background for a Korean pixel-art 2D belt-scrolling action RPG, matching the supplied player, armored monsters and existing citadel references. Theme: flooded ruined medieval citadel, broken gray stone walls, muted blue-green standing water, damp stone, faded navy banners and subtle cool daylight. Fixed oblique side view of the floor and north-side scenery, no isometric camera rotation, crisp pixel clusters, no smoothing. Requested canvas 1280 x 720 pixels; actual output resolution must be reported. Purpose: 안뜰·회랑·선택 보급대의 공통 배경. Coordinates are left-top-origin design-world pixels. Keep this entire continuous DRY raised stone floor visibly above water and free of walls, rubble, pillars and props: [[{\"x\":480,\"y\":30},{\"x\":800,\"y\":30},{\"x\":1240,\"y\":360},{\"x\":1240,\"y\":700},{\"x\":40,\"y\":700},{\"x\":40,\"y\":360}]]. Standing-water decorative masks, entirely outside playable dry floor: [[{\"x\":40,\"y\":40},{\"x\":440,\"y\":40},{\"x\":40,\"y\":340}],[{\"x\":840,\"y\":40},{\"x\":1240,\"y\":40},{\"x\":1240,\"y\":340}],[{\"x\":0,\"y\":702},{\"x\":1280,\"y\":702},{\"x\":1280,\"y\":720},{\"x\":0,\"y\":720}]]. Water must not appear under any playable-floor point, entry or monster; damp stone is allowed but no puddles on dry floor. Keep all planned transition regions unobstructed: [{\"roomId\":\"ReservoirCourt\",\"direction\":\"west\",\"polygon\":[{\"x\":40,\"y\":420},{\"x\":80,\"y\":420},{\"x\":80,\"y\":540},{\"x\":40,\"y\":540}],\"visualCenter\":{\"x\":60,\"y\":480},\"targetRoomId\":\"BrokenCauseway\",\"targetEntryPointId\":\"Entry_east\"},{\"roomId\":\"ReservoirCourt\",\"direction\":\"east\",\"polygon\":[{\"x\":1200,\"y\":420},{\"x\":1240,\"y\":420},{\"x\":1240,\"y\":540},{\"x\":1200,\"y\":540}],\"visualCenter\":{\"x\":1220,\"y\":480},\"targetRoomId\":\"CollapsedGallery\",\"targetEntryPointId\":\"Entry_west\"},{\"roomId\":\"ReservoirCourt\",\"direction\":\"south\",\"polygon\":[{\"x\":600,\"y\":660},{\"x\":680,\"y\":660},{\"x\":680,\"y\":700},{\"x\":600,\"y\":700}],\"visualCenter\":{\"x\":640,\"y\":680},\"targetRoomId\":\"SupplyTerrace\",\"targetEntryPointId\":\"Entry_north\"},{\"roomId\":\"SupplyTerrace\",\"direction\":\"north\",\"polygon\":[{\"x\":600,\"y\":40},{\"x\":680,\"y\":40},{\"x\":680,\"y\":80},{\"x\":600,\"y\":80}],\"visualCenter\":{\"x\":640,\"y\":60},\"targetRoomId\":\"ReservoirCourt\",\"targetEntryPointId\":\"Entry_south\"},{\"roomId\":\"CollapsedGallery\",\"direction\":\"west\",\"polygon\":[{\"x\":40,\"y\":420},{\"x\":80,\"y\":420},{\"x\":80,\"y\":540},{\"x\":40,\"y\":540}],\"visualCenter\":{\"x\":60,\"y\":480},\"targetRoomId\":\"ReservoirCourt\",\"targetEntryPointId\":\"Entry_east\"},{\"roomId\":\"CollapsedGallery\",\"direction\":\"east\",\"polygon\":[{\"x\":1200,\"y\":420},{\"x\":1240,\"y\":420},{\"x\":1240,\"y\":540},{\"x\":1200,\"y\":540}],\"visualCenter\":{\"x\":1220,\"y\":480},\"targetRoomId\":\"DrownedThrone\",\"targetEntryPointId\":\"Entry_west\"}]. Do not paint gates, glowing portals, characters, monsters, loot, UI or text; the editor adds gate/pad markers separately. The dry floor is a convex hexagonal apron widening from a 320-pixel-wide north approach to a broad arena; NO thin bridge or inward corners. North scenery and water stay outside that hexagon. The identical background is reused in three rooms, so avoid distinct doors or symbols implying nonexistent graph links. Maintain medium-value, low-contrast combat floor so gray armor and dark blue/red boss remain readable. Independent single-image background, no tiling or seamless edges required. Preserve the unedited generator original and record exact source dimensions and any transformation. One background request at a time through the coordinator.\nCRITICAL PLAYABLE SHAPE: unlike the previous horizontal causeway, this image has DRY FLOOR THROUGH THE TOP CENTER: an open broad 320-pixel-wide approach x480..800 starting at TOP edge y0, visibly continuous FLAT DRY PAVING at (640,60) and (640,112), widening smoothly down to the FULL arena width x0..1280 at y360. No central north wall, horizon, sky, rear railing, arch threshold, stairway or water across this central approach. Place all ruined wall/sky scenery ONLY in extreme upper LEFT and upper RIGHT corner regions, outside the widening dry hexagon. Broad apron, not a long thin bridge. Geometry dominates: top center is ground, not a perspective wall.\nLower half y360..720 must be FULL WIDTH flat dry gray paving, including both side exit bands at y420..540 and southern central band x600..680,y660..700 with midpoint (640,680). For safety allow paving right through bottom edge at x560..720; any tiny decorative bottom water strip must stay outside this central southern corridor. No foreground parapet, no vertical edge face, no water across the bottom-center route. No columns, rubble or supplies on usable floor.\nMatch FloodedCitadel_Causeway's gray pixel-cluster stone floor, muted blue-green water, damp mossy gray ruins and faded navy banners. Opaque single 16:9 game image, no characters, no labels, no visible gate markers. North-center floor must be viewed as horizontal paving in the same fixed oblique belt-scroll camera, not vertical brick wall."
+  },
+  "referenceArtAbsolutePaths": [
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Characters\\player_idle.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Monsters\\rusted_armor_soldier_idle.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Monsters\\fallen_citadel_warden_idle.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Dungeons\\FallenCitadel_Courtyard.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\Assets\\Images\\Dungeons\\FallenCitadel_ThroneRoom.png",
+    "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\DungeonEditor\\output\\FloodedCitadel\\graphics\\FloodedCitadel_Causeway.png"
+  ],
+  "performedChecks": [
+    "Measured generator output size and RGB opaque mode",
+    "Viewed local style references and Causeway production PNG",
+    "Viewed polygon/transition/arrival/monster-foot overlay",
+    "Verified delivered PNG/original SHA256, measured delivery size, parsed result JSON and checked QA-file existence"
+  ],
+  "notPerformed": [
+    "DungeonEditor project/model validation",
+    "Package build/installation",
+    "Client/server build",
+    "Game execution or functional tests",
+    "Stage/commit/push"
+  ],
+  "reuse": "One independent image reusable by ReservoirCourt, SupplyTerrace and CollapsedGallery after coordinator geometry reconciliation; no room-specific doors, symbols or supply props; no tiling required.",
+  "nextStep": "Coordinator confirms dry-floor/mask revision and continues sequential production. No throne image created."
+}

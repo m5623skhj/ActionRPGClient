@@ -1,0 +1,76 @@
+{
+  "format": "DungeonPackageReport",
+  "version": 1,
+  "status": "package-generated",
+  "dataId": 6,
+  "dungeonId": "FloodedCitadel",
+  "schemaVersion": 3,
+  "manifestVersion": 3,
+  "roomVersion": 5,
+  "roomCount": 6,
+  "monsterCount": 16,
+  "issues": [],
+  "jsonBytes": 17845,
+  "zipBytes": 8276902,
+  "entryCount": 19,
+  "editorUiUsed": false,
+  "sourceMigrated": false,
+  "installed": false,
+  "gameBuildOrPlayTestPerformed": false,
+  "playableVerified": false,
+  "sourceProject": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\output\\dungeon-jobs\\flooded-citadel-20261003-01\\FloodedCitadel.dungeon-project.json",
+  "sourceHash": "db24c8bebd717c7643146da3414d6e8e3fd375ef413f94caf6852a4786c24a8d",
+  "dependencies": [
+    {
+      "dataId": 2,
+      "monsterId": "rusted_armor_soldier",
+      "definitionFile": "rusted_armor_soldier.ai.json",
+      "previewImage": "Images/Monsters/rusted_armor_soldier_idle.png",
+      "motions": [
+        "move",
+        "hit",
+        "airborne",
+        "attack",
+        "death"
+      ]
+    },
+    {
+      "dataId": 3,
+      "monsterId": "fallen_citadel_warden",
+      "definitionFile": "fallen_citadel_warden.ai.json",
+      "previewImage": "Images/Monsters/fallen_citadel_warden_idle.png",
+      "motions": [
+        "move",
+        "hit",
+        "airborne",
+        "attack",
+        "death"
+      ]
+    }
+  ],
+  "dependencyWarnings": [],
+  "deploymentProfile": "server-json-client-assets",
+  "serverDungeonFiles": [
+    "Dungeon.json",
+    "Maps/FloodedCitadel_Floodgate.json",
+    "Maps/FloodedCitadel_BrokenCauseway.json",
+    "Maps/FloodedCitadel_ReservoirCourt.json",
+    "Maps/FloodedCitadel_SupplyTerrace.json",
+    "Maps/FloodedCitadel_CollapsedGallery.json",
+    "Maps/FloodedCitadel_DrownedThrone.json"
+  ],
+  "packageOnlyFiles": [
+    "Minimap.svg",
+    "Icons/normal.svg",
+    "Icons/boss.svg",
+    "Minimap.png",
+    "Icons/normal.png",
+    "Icons/boss.png"
+  ],
+  "runtimeInstallationRequested": false,
+  "installation": {
+    "status": "not-installed",
+    "plannedChanges": 12
+  },
+  "runtimeIntegration": "ID 2/3 rendering, AI, battle and rewards are separate work; deployment does not verify playability."
+}

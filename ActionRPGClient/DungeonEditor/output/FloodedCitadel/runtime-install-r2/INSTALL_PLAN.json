@@ -1,0 +1,109 @@
+{
+  "roots": {
+    "server": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer",
+    "client": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient",
+    "room": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug",
+    "town": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\ActionRPGServer\\x64\\Debug",
+    "game": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\artifacts\\bin\\x64\\Debug"
+  },
+  "runtimeTargets": [
+    {
+      "root": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug",
+      "name": "GameRoomServer.exe"
+    },
+    {
+      "root": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\ActionRPGServer\\x64\\Debug",
+      "name": "TownServer.exe"
+    },
+    {
+      "root": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\artifacts\\bin\\x64\\Debug",
+      "name": "ActionRPGClient.exe"
+    }
+  ],
+  "files": [
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug\\Data\\Dungeons\\FloodedCitadel\\Maps\\FloodedCitadel_Floodgate.json",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "308068223785355fa25a30ff85c02c719a1bfb1b74ac48eb0ca3fca7a18905ef",
+      "bytes": 2654
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug\\Data\\Dungeons\\FloodedCitadel\\Maps\\FloodedCitadel_BrokenCauseway.json",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "41fc3a6954660d3d9d7f22da2b7db7998fc3574a49f29ae410b9310dbab62426",
+      "bytes": 4082
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug\\Data\\Dungeons\\FloodedCitadel\\Maps\\FloodedCitadel_ReservoirCourt.json",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "d120dd4828516f8946c581d3f5b2187eb90fe6483e379a37681df7a327cc33bf",
+      "bytes": 5590
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug\\Data\\Dungeons\\FloodedCitadel\\Maps\\FloodedCitadel_SupplyTerrace.json",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "40fea680f7ed22deb3e0cbcccba6d7f272b2cc36d74f097f22f6cf36a2427d24",
+      "bytes": 3285
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug\\Data\\Dungeons\\FloodedCitadel\\Maps\\FloodedCitadel_CollapsedGallery.json",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "1d8ceb4dc4682015f41379ce9cff25d6d16709add5463f4f9d91c9cb07d4ef0f",
+      "bytes": 4446
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug\\Data\\Dungeons\\FloodedCitadel\\Maps\\FloodedCitadel_DrownedThrone.json",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "3719bade3f78a55858710c0c2923ff03e3baa3836dd9e5218f9413ef6cac3ffe",
+      "bytes": 2800
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\artifacts\\bin\\x64\\Debug\\Assets\\Images\\Dungeons\\FloodedCitadel_Causeway.png",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "b0d4bb76f51f28e4046c23b7019f3f1d7d3bd119691d1ea1bf91c3b0ccac3094",
+      "bytes": 2545789
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\artifacts\\bin\\x64\\Debug\\Assets\\Images\\Dungeons\\FloodedCitadel_Courtyard.png",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "a92360a012dd7c7a188611e6c7c402e210c00d030c9d18f6ba4209976835258e",
+      "bytes": 2946068
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\artifacts\\bin\\x64\\Debug\\Assets\\Images\\Dungeons\\FloodedCitadel_Throne.png",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "74de31283326b46963e943a49f034cd5d3a76173f0dffa1b91b96138a6bba9d5",
+      "bytes": 2733356
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\artifacts\\bin\\x64\\Debug\\Assets\\Images\\Dungeons\\FloodedCitadel_Editor_gate.png",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "040894aada6703ad427db990b97947773aa894f856e1bf06387bc46855ad51a4",
+      "bytes": 1077
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGClient\\ActionRPGClient\\artifacts\\bin\\x64\\Debug\\Assets\\Images\\Dungeons\\FloodedCitadel_Editor_pad.png",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "37afa3c491b5fd054563726704dc84cb28a44e41919661fce69d253453e64ac8",
+      "bytes": 4431
+    },
+    {
+      "target": "C:\\Users\\KimHyeongJin\\source\\repos\\ActionRPGServer\\artifacts\\bin\\x64\\Debug\\Data\\Dungeons\\FloodedCitadel\\Dungeon.json",
+      "action": "create",
+      "beforeHash": null,
+      "afterHash": "18d8dffdf1041f11c88241016245360d800f3991f01c8c0640b2c945e6c7b94b",
+      "bytes": 10631
+    }
+  ]
+}
