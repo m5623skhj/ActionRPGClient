@@ -32,7 +32,7 @@ CharacterEditor/model.js로 animations.json의 프레임 좌표·기준점을 �
 ```powershell
 $dungeonTool = 'C:\Users\KimHyeongJin\source\repos\ActionRPGClient\ActionRPGClient\DungeonEditor\tools\dungeon-package.cjs'
 $dungeonWork = 'C:\Users\KimHyeongJin\source\repos\ActionRPGServer\output\dungeons\FallenCitadel\FallenCitadel.dungeon-project.json'
-$dungeonOutput = 'C:\Users\KimHyeongJin\source\repos\ActionRPGServer\output\dungeons\FallenCitadel\automated-output-01'
+$dungeonOutput = 'C:\Users\KimHyeongJin\source\repos\ActionRPGClient\ActionRPGClient\DungeonEditor\output\FallenCitadel\automated-output-01'
 $serverRepo = 'C:\Users\KimHyeongJin\source\repos\ActionRPGServer'
 $clientProject = 'C:\Users\KimHyeongJin\source\repos\ActionRPGClient\ActionRPGClient'
 $sharpModule = 'C:\Users\KimHyeongJin\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\sharp'
@@ -67,7 +67,7 @@ Data ID와 패키지 내부 경로는 기존 규칙을 따릅니다. 출력 폴�
 $roomRuntime = 'C:\Users\KimHyeongJin\source\repos\ActionRPGServer\artifacts\bin\x64\Debug'
 $townRuntime = 'C:\Users\KimHyeongJin\source\repos\ActionRPGServer\ActionRPGServer\x64\Debug'
 $clientRuntime = 'C:\Users\KimHyeongJin\source\repos\ActionRPGClient\ActionRPGClient\artifacts\bin\x64\Debug'
-$dungeonOutput = 'C:\Users\KimHyeongJin\source\repos\ActionRPGServer\output\dungeons\FallenCitadel\automated-output-02'
+$dungeonOutput = 'C:\Users\KimHyeongJin\source\repos\ActionRPGClient\ActionRPGClient\DungeonEditor\output\FallenCitadel\automated-output-02'
 
 node $dungeonTool --project $dungeonWork --out $dungeonOutput --server-repo $serverRepo --client-project $clientProject --sharp-module $sharpModule --room-runtime $roomRuntime --town-runtime $townRuntime --client-runtime $clientRuntime
 ```
@@ -75,9 +75,13 @@ node $dungeonTool --project $dungeonWork --out $dungeonOutput --server-repo $ser
 이 명령도 설치 목록 확인만 합니다. 실제 설치는 같은 인자에 `--install`을 추가하고 새 출력 폴더를 지정합니다.
 Release는 세 실행 루트의 마지막 폴더를 Release로 지정합니다. 각 루트에 해당 EXE가 있어야 합니다.
 
+미니맵 PNG/SVG와 일반·보스 아이콘은 공용 ZIP의 미리보기 자료로 보존하지만 서버 원본/실행 폴더에는 설치하지 않습니다.
+서버 output에는 작업 JSON·서버 JSON·보고서만 두고, 공용 ZIP과 그래픽 제작 자료는 클라이언트 또는 별도 산출물 폴더에 보관하세요.
+기존 미니맵/아이콘을 포함한 설치 저널의 복원은 계속 지원합니다. 새 설치는 이미지 경로를 거부합니다.
+
 실행 설치는 다음을 함께 처리합니다.
 
-- GameRoomServer `Data/Dungeons/<DungeonId>`에 던전 JSON·미니맵·아이콘.
+- GameRoomServer `Data/Dungeons/<DungeonId>`에 `Dungeon.json`과 `Maps/*.json`만 설치합니다.
 - GameRoomServer `Data/Monsters`에 원본 카탈로그와 그 카탈로그가 참조하는 모든 AI 정의.
 - TownServer `Data/DungeonCatalog.json`에 이미 등록된 원본 카탈로그 스냅샷.
 - 클라이언트 실행 `Assets`에 던전 이미지·Dummy 이미지.

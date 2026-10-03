@@ -31,8 +31,10 @@ async function Snapshot(target) {
   return { bytes, hash: hash(bytes) };
 }
 
-function Allowed(root, relative) {
-  const dungeon = "[A-Za-z][A-Za-z0-9_-]{0,63}/(?:Dungeon\\.json|Maps/[A-Za-z0-9_-]+\\.json|Minimap\\.(?:svg|png)|Icons/(?:normal|boss)\\.(?:svg|png))";
+function Allowed(root, relative, legacyGraphics = false) {
+  // Graphics are allowed only when recovering pre-separation journals.
+  const dungeon = "[A-Za-z][A-Za-z0-9_-]{0,63}/(?:Dungeon\\.json|Maps/[A-Za-z0-9_-]+\\.json"
+    + (legacyGraphics ? "|Minimap\\.(?:svg|png)|Icons/(?:normal|boss)\\.(?:svg|png)" : "") + ")";
   if (root === "server") return new RegExp("^ActionRPGServer/GameRoomServer/Data/Dungeons/" + dungeon + "$", "i").test(relative);
   if (root === "room") return new RegExp("^Data/(?:Dungeons/" + dungeon + "|Monsters/[A-Za-z][A-Za-z0-9_.-]*\\.json)$", "i").test(relative);
   if (root === "town") return relative === "Data/DungeonCatalog.json";
@@ -213,7 +215,7 @@ async function Recover(directory, roots, runtimeTargets) {
     || !["preparing", "installing", "rollback-incomplete", "installed"].includes(journal.status)) fail("복원 이력 또는 명시한 설치 루트가 다릅니다.");
   const seen = new Set();
   for (const operation of journal.operations) {
-    if (!Object.hasOwn(roots, operation.root) || !Allowed(operation.root, operation.relative) || typeof operation.started !== "boolean" || !/^[a-f0-9]{64}$/.test(operation.afterHash)
+    if (!Object.hasOwn(roots, operation.root) || !Allowed(operation.root, operation.relative, true) || typeof operation.started !== "boolean" || !/^[a-f0-9]{64}$/.test(operation.afterHash)
       || (operation.beforeHash !== null && !/^[a-f0-9]{64}$/.test(operation.beforeHash))) fail("복원 항목 형식 오류");
     const target = await SafePath(roots[operation.root], operation.relative);
     if (operation.temporary && operation.temporary !== operation.relative + "." + journal.id + ".install") fail("복원 임시 경로 오류");

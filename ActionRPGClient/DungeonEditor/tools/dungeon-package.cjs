@@ -6,6 +6,8 @@ const Installer = require("./install.cjs");
 const { SafePath, hash, exists } = Installer;
 const fail = message => { throw new Error(message); };
 const ID = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const SERVER_DUNGEON_FILE = /^(?:Dungeon\.json|Maps\/[A-Za-z0-9_-]+\.json)$/;
+const PACKAGE_RESOURCE_FILE = /^(?:Minimap\.(?:svg|png)|Icons\/(?:normal|boss)\.(?:svg|png))$/;
 
 function Arguments(values) {
   const options = {};
@@ -248,10 +250,12 @@ async function Plan(bundle, dependencies, roots, runtimeTargets) {
     if (file.name.startsWith("Assets/")) {
       add("client", "Assets/" + file.name.slice(7), file.data);
       if (roots.game) add("game", file.name, file.data);
-    } else {
+    } else if (SERVER_DUNGEON_FILE.test(file.name)) {
       add("server", "ActionRPGServer/GameRoomServer/Data/Dungeons/" + bundle.project.dungeonId + "/" + file.name, file.data);
       if (roots.room) add("room", "Data/Dungeons/" + bundle.project.dungeonId + "/" + file.name, file.data);
-    }
+    } else if (!PACKAGE_RESOURCE_FILE.test(file.name)) {
+      fail("설치 대상이 분류되지 않은 패키지 파일: " + file.name);
+    } // Minimap/icons remain in the shared ZIP; no server runtime consumes them.
   }
   // Definitions/catalogues already exist in source; deploy them only to the chosen runtime snapshot.
   if (roots.room) {
@@ -305,6 +309,9 @@ async function Main() {
   const plan = await Plan(bundle, dependencies, roots, runtimeTargets);
   bundle.report.sourceProject = projectPath; bundle.report.sourceHash = hash(projectBytes);
   bundle.report.dependencies = dependencies.dependencyRows; bundle.report.dependencyWarnings = dependencies.warnings;
+  bundle.report.deploymentProfile = "server-json-client-assets";
+  bundle.report.serverDungeonFiles = bundle.files.filter(file => SERVER_DUNGEON_FILE.test(file.name)).map(file => file.name);
+  bundle.report.packageOnlyFiles = bundle.files.filter(file => PACKAGE_RESOURCE_FILE.test(file.name)).map(file => file.name);
   bundle.report.runtimeInstallationRequested = !!roots.room; bundle.report.installation = { status: "not-installed", plannedChanges: plan.report.length };
   bundle.report.runtimeIntegration = "ID 2/3 rendering, AI, battle and rewards are separate work; deployment does not verify playability.";
   // Publish output only after all checks. Never extract or trust an arbitrary input ZIP.
