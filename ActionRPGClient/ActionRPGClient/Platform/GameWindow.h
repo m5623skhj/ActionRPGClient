@@ -21,6 +21,8 @@ namespace ActionRPG
         GameWindow(const GameWindow&) = delete;
         GameWindow& operator=(const GameWindow&) = delete;
 
+        static void SetMinimumClientSize(std::uint32_t inWidth, std::uint32_t inHeight);
+        static void ConsumeUiPointer(InputState& inInput);
         [[nodiscard]] bool ProcessMessages();
         [[nodiscard]] bool ConsumeResize(std::uint32_t& outWidth, std::uint32_t& outHeight);
         [[nodiscard]] InputState ConsumeInputState();
@@ -39,6 +41,7 @@ namespace ActionRPG
     private:
         static constexpr wchar_t WINDOW_CLASS_NAME[] = L"ActionRPGClientWindow";
 
+        inline static GameWindow* activeWindow{};
         HINSTANCE instance{};
         HWND windowHandle{};
         std::uint32_t clientWidth{};
@@ -51,6 +54,9 @@ namespace ActionRPG
         float pendingClickY{};
         int pendingMouseWheelDelta{};
         bool pendingLeftMousePressed{};
+        bool leftMouseDown{}, pendingLeftMouseReleased{}, pendingRightMousePressed{}, pendingCancelDrag{};
+        float pendingRightClickX{}, pendingRightClickY{};
+        std::uint32_t minimumWidth{}, minimumHeight{};
         std::wstring pendingTextInput;
         std::array<bool, 256> keyStates{};
         std::vector<InputKey> pendingPressedKeys;

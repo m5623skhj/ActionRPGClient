@@ -163,6 +163,29 @@ namespace ActionRPG
                     player.buffs.push_back(std::move(state));
                 }
             }
+            const bool hasProgression = source.contains("level") || source.contains("skillPoints")
+                || source.contains("skillLevels") || source.contains("skillCooldowns");
+            if (hasProgression)
+            {
+                const auto& levels=source.at("skillLevels"); const auto& cooldowns=source.at("skillCooldowns");
+                if (!levels.is_object() || levels.size()>256 || !cooldowns.is_object() || cooldowns.size()>256)
+                    throw std::runtime_error("Invalid combat skill maps.");
+                player.level=Integer(source.at("level")); player.skillPoints=Integer(source.at("skillPoints"));
+                if (player.level==0 || player.level>1000000) throw std::runtime_error("Invalid combat character level.");
+                for (const auto& [id,value]:levels.items())
+                {
+                    const auto rank=Integer(value);
+                    if (!PlayerSkills::Catalog::IsId(id) || rank==0 || rank>1000000) throw std::runtime_error("Invalid learned skill level.");
+                    player.skillLevels.emplace(id,rank);
+                }
+                for (const auto& [id,value]:cooldowns.items())
+                {
+                    const auto seconds=Number(value);
+                    if (!PlayerSkills::Catalog::IsId(id) || seconds>86400) throw std::runtime_error("Invalid skill cooldown.");
+                    player.skillCooldowns.emplace(id,seconds);
+                }
+                player.hasSkillState=true;
+            }
             result.players.push_back(std::move(player));
         }
         ids.clear();

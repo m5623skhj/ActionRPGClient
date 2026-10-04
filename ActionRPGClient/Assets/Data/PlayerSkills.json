@@ -2,6 +2,67 @@
   "format": "PlayerSkills",
   "schemaVersion": 1,
   "coordinates": "groundXY-height-facingRight-worldUnits",
-  "characters": [],
-  "skills": []
+  "characters": [
+    {
+      "id": "Character1",
+      "dataId": 1
+    },
+    {
+      "id": "Character2",
+      "dataId": 2
+    },
+    {
+      "id": "Character3",
+      "dataId": 3
+    }
+  ],
+  "skills": [
+    {
+      "id": "Character1.FrontKick",
+      "name": "앞차기",
+      "characterId": "Character1",
+      "type": "direct",
+      "input": {
+        "command": [
+          "Up",
+          "Z"
+        ],
+        "maxStepSeconds": 0.35
+      },
+      "cooldownSeconds": 2,
+      "execution": {
+        "damage": 25,
+        "depthRadius": 24
+      },
+      "ground": {
+        "motionId": "frontKick",
+        "frameCount": 8,
+        "fps": 16,
+        "durationSeconds": 0.5,
+        "eventFrame": 3,
+        "endFrame": 4,
+        "attackRects": [
+          {
+            "index": 3,
+            "rect": {
+              "x": 62.953929539295395,
+              "y": 81.15154979674797,
+              "width": 36.39524051490515,
+              "height": 38.362550813008134
+            }
+          },
+          {
+            "index": 4,
+            "rect": {
+              "x": 75.24961890243902,
+              "y": 86.56165311653116,
+              "width": 30.493309620596207,
+              "height": 38.362550813008134
+            }
+          }
+        ]
+      },
+      "air": null
+    }
+  ]
 }

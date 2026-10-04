@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <unordered_map>
 
 namespace ActionRPG
 {
@@ -45,6 +46,11 @@ namespace ActionRPG
         bool skillActive{}, skillAirborne{};
         float skillSeconds{}, movementMultiplier{1.0f};
         std::vector<CombatBuffState> buffs;
+        // JSON-only fields; SKL1 binary snapshots leave hasSkillState false.
+        bool hasSkillState{};
+        std::uint32_t level{}, skillPoints{};
+        std::unordered_map<std::string,std::uint32_t> skillLevels;
+        std::unordered_map<std::string,float> skillCooldowns;
     };
     struct CombatMonsterState : CombatActorState
     {

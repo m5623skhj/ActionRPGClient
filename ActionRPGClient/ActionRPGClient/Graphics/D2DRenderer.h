@@ -9,6 +9,9 @@
 
 #include <filesystem>
 #include <string_view>
+#include <map>
+#include <tuple>
+#include <string>
 
 namespace ActionRPG
 {
@@ -37,6 +40,10 @@ namespace ActionRPG
             const std::filesystem::path& inFilePath) const;
         void DrawBitmap(ID2D1Bitmap1* inBitmap, const D2D1_RECT_F& inSourceRectangle,
             const D2D1_RECT_F& inDestinationRectangle, bool inFlipHorizontal = false);
+        void SetUiFontFamily(std::wstring_view inFamily);
+        void DrawUiText(std::wstring_view inText, const D2D1_RECT_F& inRect, const D2D1_COLOR_F& inColor,
+            float inSize, bool inWrap = false, bool inCentered = false);
+        void DrawUiIcon(ID2D1Bitmap1* inBitmap, const D2D1_RECT_F& inRect, bool inGray);
         void DrawText(std::wstring_view inText, float inLeft, float inTop, float inRight, float inBottom,
             const D2D1_COLOR_F& inColor);
 
@@ -46,5 +53,8 @@ namespace ActionRPG
         Microsoft::WRL::ComPtr<IWICImagingFactory2> wicFactory;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solidColorBrush;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> defaultTextFormat;
+        Microsoft::WRL::ComPtr<ID2D1Effect> grayscaleEffect;
+        std::wstring uiFontFamily;
+        std::map<std::tuple<float,bool,bool>, Microsoft::WRL::ComPtr<IDWriteTextFormat>> uiTextFormats;
     };
 }

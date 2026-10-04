@@ -27,6 +27,7 @@ namespace ActionRPG
 
     private:
         static constexpr double HISTORY_SECONDS = 1.5;
+        double currentTimeSeconds{};
 
         std::deque<CommandInputEvent> events;
     };

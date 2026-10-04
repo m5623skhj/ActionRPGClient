@@ -7,6 +7,7 @@
 #include "Network/DungeonClient.h"
 #include "Network/DungeonProtocol.h"
 #include "Network/TownClient.h"
+#include "Platform/GameWindow.h"
 #include "Resources/AssetCatalog.h"
 
 #include <d2d1_1helper.h>
@@ -64,6 +65,45 @@ namespace ActionRPG
             D2D1_RECT_F kickButton{};
             D2D1_RECT_F leaveButton{};
         };
+
+        struct PartyNoticeLayout
+        {
+            D2D1_RECT_F panel, accept, decline;
+        };
+
+        PartyNoticeLayout CalculatePartyNoticeLayout(float inWidth, float inBottom)
+        {
+            const float right = inWidth - 16.0f;
+            const float left = std::max(16.0f, right - 344.0f);
+            const float bottom = std::max(164.0f, inBottom);
+            const float top = bottom - 148.0f;
+            const float middle = (left + right) * 0.5f;
+            return {{left, top, right, bottom},
+                {left + 12.0f, bottom - 44.0f, middle - 6.0f, bottom - 12.0f},
+                {middle + 6.0f, bottom - 44.0f, right - 12.0f, bottom - 12.0f}};
+        }
+
+        PartyNoticeLayout CalculateKickedNoticeLayout(float inWidth, float inHeight)
+        {
+            const float width = std::min(420.0f, inWidth - 32.0f);
+            const float left = (inWidth - width) * 0.5f;
+            const float top = (inHeight - 148.0f) * 0.5f;
+            return {{left, top, left + width, top + 148.0f},
+                {left + 24.0f, top + 100.0f, left + width - 24.0f, top + 132.0f}, {}};
+        }
+
+        PartyNoticeLayout CalculatePartyDetailsLayout(float inWidth, float inHeight)
+        {
+            const float width = std::min(620.0f, inWidth - 32.0f);
+            const float height = std::min(480.0f, inHeight - 32.0f);
+            const float left = (inWidth - width) * 0.5f;
+            const float top = (inHeight - height) * 0.5f;
+            const float bottom = top + height;
+            const float middle = (left + left + width) * 0.5f;
+            return {{left, top, left + width, bottom},
+                {left + 16.0f, bottom - 42.0f, middle - 6.0f, bottom - 10.0f},
+                {middle + 6.0f, bottom - 42.0f, left + width - 16.0f, bottom - 10.0f}};
+        }
 
         bool ContainsPoint(const D2D1_RECT_F& inRectangle, const float inX, const float inY)
         {
@@ -272,6 +312,14 @@ namespace ActionRPG
                 return L"The party is entering a dungeon.";
             case TownProtocol::PartyResultCode::InvalidTitle:
                 return L"Enter a valid party title (up to 96 UTF-8 bytes).";
+            case TownProtocol::PartyResultCode::AlreadyRequested:
+                return L"이미 응답을 기다리는 가입 요청이 있습니다.";
+            case TownProtocol::PartyResultCode::JoinRequestNotFound:
+                return L"해당 가입 요청이 종료되었습니다.";
+            case TownProtocol::PartyResultCode::PartyNotFound:
+                return L"해당 파티가 더 이상 존재하지 않습니다.";
+            case TownProtocol::PartyResultCode::NotPublic:
+                return L"비공개 파티에는 가입을 요청할 수 없습니다.";
             default:
                 return L"Party action failed.";
             }
@@ -305,8 +353,8 @@ namespace ActionRPG
         , systemMenuDefinitions(inAssetCatalog.GetDataPath("SystemMenu"))
         , player(Vector2{ 640.0f, 640.0f }, inAssetCatalog, inRenderer)
         , projectileSystem(inAssetCatalog)
-        , skillCommandSystem(inAssetCatalog)
         , playerSkillPresentation(inAssetCatalog, inRenderer)
+        , skillUi(inAssetCatalog, inRenderer)
         , assetCatalog(inAssetCatalog)
         , renderer(inRenderer)
         , townClient(inTownClient)
@@ -322,6 +370,7 @@ namespace ActionRPG
             {
                 action = SystemMenuAction::Party;
             }
+            else if (actionName == "Skills") action = SystemMenuAction::Skills;
             else if (actionName == "Exit")
             {
                 action = SystemMenuAction::Exit;
@@ -331,11 +380,12 @@ namespace ActionRPG
                 throw std::runtime_error("Unknown system menu action: " + actionName);
             }
             const std::string iconAssetId = systemMenuDefinitions.GetValue(section, "Icon");
+            Microsoft::WRL::ComPtr<ID2D1Bitmap1> menuIcon;
+            if (action == SystemMenuAction::Skills)
+            { try { menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId)); } catch (const std::exception&) {} }
+            else menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
             systemMenuEntries.push_back(SystemMenuEntry{
-                Utf8ToWide(systemMenuDefinitions.GetValue(section, "Label")),
-                action,
-                inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId))
-            });
+                Utf8ToWide(systemMenuDefinitions.GetValue(section, "Label")), action, std::move(menuIcon)});
         }
         player.SetRunningEnabled(false);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
@@ -344,6 +394,9 @@ namespace ActionRPG
 
     void GameWorld::Update(const float inDeltaSeconds, const InputState& inInput)
     {
+        InputState interfaceInput=inInput;
+        GameWindow::ConsumeUiPointer(interfaceInput);
+        const bool hadUiAtFrameStart=IsUiOverlayVisible();
         uiMouseX = inInput.mouseX;
         uiMouseY = inInput.mouseY;
         uiClickConsumed = false;
@@ -351,39 +404,78 @@ namespace ActionRPG
         ProcessNetworkEvents(inInput);
         if (!completionStopping) ProcessDungeonEvents();
         ProcessPlayerHits();
-        if (dungeonCleared) UpdateDungeonCompletion(inDeltaSeconds, inInput);
-        else
+        if (IsDungeonUiRestricted() || !townClient.IsConnected())
         {
-            UpdateSystemInterface(inInput);
-            UpdatePartyInterface(inInput);
-            UpdateDungeonSelection(inInput);
+            ResetPartyRequestUi();
+            pendingPartyInvitation.reset();
+            partyInvitationAnswerPending = false;
+            if (!townClient.IsConnected()) partyKickedNotice = false;
+        }
+        if (IsDungeonUiRestricted() && IsPartyUiPage(systemUiPage)) SetSystemUiPage(SystemUiPage::Menu);
+        const bool hadKickedNotice = partyKickedNotice;
+        UpdatePartyNotifications(inInput);
+        if (!hadKickedNotice && !partyKickedNotice)
+        {
+            if (dungeonCleared) UpdateDungeonCompletion(inDeltaSeconds, inInput);
+            else
+            {
+                UpdateSystemInterface(inInput);
+                UpdatePartyInterface(inInput);
+                UpdateDungeonSelection(inInput);
+            }
         }
 
+        if (hadKickedNotice || partyKickedNotice) { interfaceInput = {}; interfaceInput.cancelDrag = true; }
+        skillUi.SetConnected(townClient.IsConnected());
+        skillUi.SetLearningAllowed(!IsDungeonUiRestricted());
+        const bool skillBarVisible=!partyKickedNotice && !hadKickedNotice && !dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
+            && (systemUiPage==SystemUiPage::Closed || systemUiPage==SystemUiPage::Skills);
+        if (uiClickConsumed) interfaceInput.leftMousePressed=false;
+        const auto skillUiAction=skillUi.Update(inDeltaSeconds,interfaceInput,camera.GetViewportWidth(),camera.GetViewportHeight(),systemUiPage==SystemUiPage::Skills,skillBarVisible);
+        if (skillUiAction.requestState) townClient.RequestSkillState();
+        if (!IsDungeonUiRestricted() && !skillUiAction.learnSkill.empty()) townClient.LearnSkill(skillUiAction.learnSkill,skillUiAction.expectedSkillLevel);
         InputState gameplayInput = inInput;
-        if (dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
-            || pendingPartyInvitation.has_value()
-            || (dungeonEntryState != DungeonEntryState::Idle && dungeonEntryState != DungeonEntryState::Entered))
+        const bool gameplayBlocked = dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
+            || pendingPartyInvitation.has_value() || partyKickedNotice || hadKickedNotice || player.IsHitReacting() || hadUiAtFrameStart || interfaceInput.cancelDrag
+            || (dungeonEntryState != DungeonEntryState::Idle && dungeonEntryState != DungeonEntryState::Entered);
+        if (gameplayBlocked)
         {
             gameplayInput = InputState{};
         }
-        if (player.IsHitReacting())
-        {
-            gameplayInput = InputState{};
-        }
+        if (gameplayBlocked) { commandQueue.Clear(); }
         worldTimeSeconds += inDeltaSeconds;
         projectileSystem.Update(inDeltaSeconds, gameplayMap);
         commandQueue.Record(gameplayInput, worldTimeSeconds);
 
-        if (dungeonEntryState == DungeonEntryState::Idle && !player.IsHitReacting())
+        if (dungeonEntryState == DungeonEntryState::Idle && !gameplayBlocked)
         {
-            const std::optional<SkillActivation> skillActivation = skillCommandSystem.TryActivate(commandQueue);
-            if (skillActivation.has_value())
+            bool matched=false;
+            const auto command=playerSkillPresentation.TryCommand(commandQueue,localCharacterId,skillUi.GetProgression().skillLevels,matched);
+            const auto hotkey=skillUi.Hotkey(gameplayInput);
+            const auto id=!hotkey.empty() ? hotkey:command;
+            if (matched || !hotkey.empty())
             {
-                player.ActivateCommandSkill(skillActivation->effect);
+                commandQueue.Clear();
+                std::erase_if(gameplayInput.pressedKeys,[](InputKey key)
+                    { return key==InputKey::ActionX || key==InputKey::ActionC || key==InputKey::ActionV; });
+                if (!id.empty() && skillUi.CanUse(id,player.GetHeight()>0,false))
+                    (void)player.ActivateCatalogSkill(id,skillUi.GetProgression().skillLevels);
+                // Unavailable skill input is discarded immediately; never reserve it for a later frame.
             }
         }
 
+        if (dungeonEntryState==DungeonEntryState::Idle)
+        {
+            const bool movementBlocked=player.IsHitReacting() || player.IsAttacking() || player.IsLocallyCasting();
+            const auto directionX=static_cast<std::int8_t>(movementBlocked ? 0:
+                static_cast<int>(gameplayInput.moveRight)-static_cast<int>(gameplayInput.moveLeft));
+            const auto directionY=static_cast<std::int8_t>(movementBlocked ? 0:
+                static_cast<int>(gameplayInput.moveDown)-static_cast<int>(gameplayInput.moveUp));
+            if (directionX!=lastSentDirectionX || directionY!=lastSentDirectionY)
+                player.ClearTownPositionCorrection();
+        }
         player.Update(inDeltaSeconds, gameplayInput, gameplayMap);
+        if (dungeonEntryState==DungeonEntryState::Idle) skillUi.ApplyTownCooldowns(player.GetTownSkillCooldowns());
         if (dungeonEntryState == DungeonEntryState::Entered)
         {
             UpdateDungeonCombat(inDeltaSeconds);
@@ -432,6 +524,7 @@ namespace ActionRPG
         }
         if (!hits.empty())
         {
+            skillUi.CancelDrag();
             commandQueue.Clear();
             // Send a stop immediately instead of waiting for the next movement heartbeat.
             SendMovementInput(InputState{}, 0.0f);
@@ -483,14 +576,18 @@ namespace ActionRPG
                 if (monster->GetGroundPosition().y > player.GetGroundPosition().y) monster->Render(inRenderer, camera);
         inRenderer.PopAxisAlignedClip();
         RenderCombatHud(inRenderer);
+        if (!dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
+            && systemUiPage==SystemUiPage::Closed) skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),false);
         RenderDungeonSelection(inRenderer);
         RenderSystemInterface(inRenderer);
         RenderPartyInterface(inRenderer);
         RenderDungeonCompletion(inRenderer);
+        RenderPartyNotifications(inRenderer);
     }
 
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
     {
+        skillUi.CancelDrag();
         camera.Resize(inViewportWidth, inViewportHeight);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
@@ -531,7 +628,7 @@ namespace ActionRPG
     bool GameWorld::IsUiOverlayVisible() const noexcept
     {
         return dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
-            || pendingPartyInvitation.has_value();
+            || pendingPartyInvitation.has_value() || partyKickedNotice;
     }
 
     void GameWorld::ProcessNetworkEvents(const InputState& inInput)
@@ -558,13 +655,29 @@ namespace ActionRPG
                 if constexpr (std::is_same_v<EventType, TownProtocol::EnterTownResponse>)
                 {
                     localPlayerId = inEvent.playerId;
+                    localCharacterId = inEvent.characterId;
+                    player.ConfigureJumpSpeed(characterDefinitions, localCharacterId);
+                    skillUi.Invalidate();
                     partySnapshot = {};
+                    ResetPartyRequestUi();
+                    partyKickedNotice = false;
+                    wantedPartyDirectoryRevision = 0;
                     pendingPartyInvitation.reset();
                     partyInvitationAnswerPending = false;
                     SetSystemUiPage(SystemUiPage::Closed);
                     partyStatusText.clear();
                     movementSequence = 0;
                     ApplyMap(inEvent.map, Vector2{ inEvent.map.spawnX, inEvent.map.spawnY });
+                }
+                else if constexpr (std::is_same_v<EventType, SkillStateEvent>)
+                {
+                    try
+                    {
+                        skillUi.ApplyState(inEvent.payload,localCharacterId);
+                        if (dungeonEntryState==DungeonEntryState::Entered) dungeonClient.RequestCombatRefresh();
+                    }
+                    catch (const std::exception& error)
+                    { skillUi.Invalidate(); partyStatusText=L"스킬 상태 오류: "+Utf8ToWide(error.what()); }
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerAppear>)
                 {
@@ -589,17 +702,43 @@ namespace ActionRPG
                     if (dungeonEntryState == DungeonEntryState::Entered || dungeonEntryState == DungeonEntryState::WaitingWorld) return;
                     if (inEvent.playerId == localPlayerId)
                     {
-                        const std::int8_t currentDirectionX = static_cast<std::int8_t>(
-                            static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
-                        const std::int8_t currentDirectionY = static_cast<std::int8_t>(
-                            static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
-                        const bool inputMatchesSentState = currentDirectionX == lastSentDirectionX
-                            && currentDirectionY == lastSentDirectionY;
-                        if (inputMatchesSentState && inEvent.lastProcessedInput == movementSequence)
+                        if (!hasSentMovementInput || inEvent.lastProcessedInput>movementSequence
+                            || (hasTownMovementTick && inEvent.serverTick<=lastTownMovementTick)) return;
+                        lastTownMovementTick=inEvent.serverTick;
+                        hasTownMovementTick=true;
+                        const auto sent=std::find_if(townMovementSends.begin(),townMovementSends.end(),
+                            [&inEvent](const auto& input){return input.sequence==inEvent.lastProcessedInput;});
+                        if (sent==townMovementSends.end()) return;
+                        // An ack may describe an older heartbeat with the same direction. Use that
+                        // input's actual send time once; never pretend this is synchronized snapshot age.
+                        if (inEvent.lastProcessedInput>lastTownAcknowledgedSequence)
                         {
-                            player.ReconcileGroundPosition(
-                                Vector2{ inEvent.position.x, inEvent.position.y });
+                            const float responseSeconds=std::chrono::duration<float>(
+                                std::chrono::steady_clock::now()-sent->sentTime).count();
+                            const float sample=std::clamp(responseSeconds*0.5f,0.0f,0.25f);
+                            townSnapshotDelaySeconds=hasTownDelaySample
+                                ? townSnapshotDelaySeconds+(sample-townSnapshotDelaySeconds)*0.2f:sample;
+                            hasTownDelaySample=true;
+                            lastTownAcknowledgedSequence=inEvent.lastProcessedInput;
                         }
+                        // Do not reconcile across a direction/stop change, including turning away
+                        // and back to the same direction. Continuous same-state heartbeats are safe.
+                        const bool movementBlocked=IsUiOverlayVisible() || player.IsHitReacting()
+                            || player.IsAttacking() || player.IsLocallyCasting();
+                        const auto currentDirectionX=static_cast<std::int8_t>(movementBlocked ? 0:
+                            static_cast<int>(inInput.moveRight)-static_cast<int>(inInput.moveLeft));
+                        const auto currentDirectionY=static_cast<std::int8_t>(movementBlocked ? 0:
+                            static_cast<int>(inInput.moveDown)-static_cast<int>(inInput.moveUp));
+                        const bool inputMatchesSentState=currentDirectionX==lastSentDirectionX
+                            && currentDirectionY==lastSentDirectionY;
+                        if (inputMatchesSentState && inEvent.lastProcessedInput>=townMovementStateSequence
+                            && inEvent.lastProcessedInput>=lastTownAcknowledgedSequence)
+                            player.ReconcileTownGroundPosition({inEvent.position.x,inEvent.position.y},
+                                {inEvent.velocity.x,inEvent.velocity.y},townSnapshotDelaySeconds,gameplayMap);
+                        // Keep the acknowledged entry while subsequent snapshots still refer to it.
+                        while (!townMovementSends.empty() && townMovementSends.front().sequence<lastTownAcknowledgedSequence)
+                            townMovementSends.pop_front();
+
                     }
                     else if (auto iterator = remotePlayers.find(inEvent.playerId); iterator != remotePlayers.end())
                     {
@@ -608,10 +747,11 @@ namespace ActionRPG
                         iterator->second.snapshotPosition = snapshotPosition;
                         iterator->second.velocity = velocity;
                         iterator->second.secondsSinceSnapshot = 0.0f;
-                        if (velocity.x == 0.0f && velocity.y == 0.0f)
-                        {
+                        const Vector2 difference{snapshotPosition.x - iterator->second.displayedPosition.x,
+                            snapshotPosition.y - iterator->second.displayedPosition.y};
+                        constexpr float SNAP_DISTANCE = 200.0f;
+                        if (difference.x * difference.x + difference.y * difference.y > SNAP_DISTANCE * SNAP_DISTANCE)
                             iterator->second.displayedPosition = snapshotPosition;
-                        }
                     }
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerDisappear>)
@@ -680,6 +820,7 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyInvitation>)
                 {
+                    if (IsDungeonUiRestricted()) return;
                     pendingPartyInvitation = std::move(inEvent);
                     partyInvitationAnswerPending = false;
                     partyStatusText = L"Party invitation received.";
@@ -688,7 +829,18 @@ namespace ActionRPG
                 {
                     const std::uint64_t previousPartyId = partySnapshot.partyId;
                     const bool partyChanged = previousPartyId != inEvent.partyId;
+                    const bool leaderChanged = partySnapshot.leaderPlayerId != inEvent.leaderPlayerId;
                     partySnapshot = std::move(inEvent);
+                    if (partyChanged || leaderChanged || !IsPartyLeader())
+                    {
+                        partyJoinRequests.clear();
+                        answeringPartyJoinRequestId = 0;
+                    }
+                    if (partySnapshot.partyId != 0)
+                    {
+                        ownPartyJoinRequest.reset();
+                        partyJoinSendPending = false;
+                    }
                     if (partyChanged || !editingPartyTitle)
                     {
                         partyTitleDraft = Utf8ToWide(partySnapshot.title);
@@ -706,7 +858,7 @@ namespace ActionRPG
                     }
                     else if (previousPartyId == 0 && partySnapshot.partyId != 0
                         && (systemUiPage == SystemUiPage::PartyDirectory
-                            || systemUiPage == SystemUiPage::PartyCreate))
+                            || systemUiPage == SystemUiPage::PartyCreate || systemUiPage == SystemUiPage::PartyDetails))
                     {
                         partyCreationPending = false;
                         SetSystemUiPage(SystemUiPage::Party);
@@ -715,6 +867,17 @@ namespace ActionRPG
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyOperationResult>)
                 {
                     partyStatusText = GetPartyResultText(inEvent.result);
+                    if (inEvent.operation == TownProtocol::PartyOperationType::RequestJoin)
+                    {
+                        if (inEvent.result != TownProtocol::PartyResultCode::Succeeded) partyJoinSendPending = false;
+                        else partyStatusText = L"가입 요청을 보냈습니다. 파티장의 응답을 기다리는 중입니다.";
+                    }
+                    if (inEvent.operation == TownProtocol::PartyOperationType::AnswerJoin
+                        && inEvent.result != TownProtocol::PartyResultCode::Succeeded)
+                    {
+                        // Results contain no requestId: never remove another queued request here.
+                        answeringPartyJoinRequestId = 0;
+                    }
                     if (inEvent.operation == TownProtocol::PartyOperationType::Create
                         && inEvent.result != TownProtocol::PartyResultCode::Succeeded)
                     {
@@ -729,21 +892,85 @@ namespace ActionRPG
                         partyInvitationAnswerPending = false;
                     }
                 }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDetailResponse>)
+                {
+                    if (systemUiPage != SystemUiPage::PartyDetails || inEvent.partyId != selectedDirectoryPartyId
+                        || IsDungeonUiRestricted()) return;
+                    partyDetailRequestPending = false;
+                    partyDetails = std::move(inEvent);
+                    if (partyDetails->result != TownProtocol::PartyResultCode::Succeeded)
+                        partyStatusText = GetPartyResultText(partyDetails->result);
+                    if (partyDetailRefreshNeeded)
+                    {
+                        partyDetailRefreshNeeded = false;
+                        RequestSelectedPartyDetail();
+                    }
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartyJoinRequestUpdate>)
+                {
+                    const bool pending = inEvent.state == TownProtocol::PartyJoinRequestState::Pending;
+                    if (inEvent.requesterPlayerId == localPlayerId)
+                    {
+                        partyJoinSendPending = false;
+                        if (pending)
+                        {
+                            if (!IsDungeonUiRestricted() && partySnapshot.partyId == 0)
+                            {
+                                ownPartyJoinRequest = inEvent;
+                                partyStatusText = L"파티장의 응답을 기다리는 중입니다.";
+                            }
+                        }
+                        else if (!ownPartyJoinRequest || ownPartyJoinRequest->requestId == inEvent.requestId)
+                        {
+                            ownPartyJoinRequest.reset();
+                            partyStatusText = inEvent.state == TownProtocol::PartyJoinRequestState::Accepted
+                                ? L"가입이 승인되었습니다."
+                                : inEvent.state == TownProtocol::PartyJoinRequestState::Rejected
+                                    ? L"가입 요청이 거절되었습니다." : std::wstring(GetPartyResultText(inEvent.result));
+                        }
+                    }
+                    if (!pending)
+                    {
+                        // Remove the exact ID from the visible request and the rest of the queue.
+                        std::erase_if(partyJoinRequests, [&inEvent](const auto& request)
+                            { return request.requestId == inEvent.requestId; });
+                        if (answeringPartyJoinRequestId == inEvent.requestId) answeringPartyJoinRequestId = 0;
+                    }
+                    else if (IsPartyLeader() && partySnapshot.partyId == inEvent.partyId
+                        && !IsDungeonUiRestricted() && inEvent.requesterPlayerId != localPlayerId)
+                    {
+                        const auto position = std::lower_bound(partyJoinRequests.begin(), partyJoinRequests.end(),
+                            inEvent.requestId, [](const auto& request, std::uint64_t inId)
+                                { return request.requestId < inId; });
+                        if (position == partyJoinRequests.end() || position->requestId != inEvent.requestId)
+                            partyJoinRequests.insert(position, std::move(inEvent));
+                    }
+                }
+                else if constexpr (std::is_same_v<EventType, TownProtocol::PartyKicked>)
+                {
+                    // Explicit victim-only server event; never infer a kick from an empty snapshot.
+                    partyKickedNotice = true;
+                    skillUi.CancelDrag();
+                    commandQueue.Clear();
+                }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDirectoryPage>)
                 {
-                    if (systemUiPage == SystemUiPage::PartyDirectory)
+                    if (systemUiPage == SystemUiPage::PartyDirectory || systemUiPage == SystemUiPage::PartyDetails)
                     {
                         partyDirectoryPage = std::move(inEvent);
                         directoryPageRequestPending = false;
+                        if (partyDirectoryPage.revision < wantedPartyDirectoryRevision)
+                            RequestPartyDirectoryPage(std::max(1U, partyDirectoryPage.page));
                     }
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDirectoryChanged>)
                 {
-                    if (systemUiPage == SystemUiPage::PartyDirectory
-                        && !directoryPageRequestPending
+                    if ((systemUiPage == SystemUiPage::PartyDirectory || systemUiPage == SystemUiPage::PartyDetails)
                         && inEvent.revision > partyDirectoryPage.revision)
                     {
+                        wantedPartyDirectoryRevision = std::max(wantedPartyDirectoryRevision, inEvent.revision);
                         RequestPartyDirectoryPage(std::max(1U, partyDirectoryPage.page));
+                        if (systemUiPage == SystemUiPage::PartyDetails) RequestSelectedPartyDetail();
                     }
                 }
             }, event);
@@ -833,6 +1060,9 @@ namespace ActionRPG
                 {
                     if (inEvent.mapEpoch <= pendingMapEpoch) return;
                     pendingMapEpoch = inEvent.mapEpoch;
+                    player.ClearPredictedAttackFacing();
+                    skillUi.CancelDrag();
+                    commandQueue.Clear();
                     combatBuffer.Clear(); presentationSnapshot.reset();
                 }
                 else if constexpr (std::is_same_v<EventType, DungeonRealtimeEvent>)
@@ -844,6 +1074,12 @@ namespace ActionRPG
                 else if constexpr (std::is_same_v<EventType, DungeonActionResultEvent>)
                 {
                     if (inEvent.sequence > combatActionSequence) { ResetDungeonEntry(); return; }
+                    player.ResolvePredictedAttackFacing(inEvent.sequence, inEvent.accepted);
+                    if (const auto skill=skillActionIds.find(inEvent.sequence); skill!=skillActionIds.end())
+                    {
+                        if (inEvent.accepted) { lastAcceptedSkillSequence=std::max(lastAcceptedSkillSequence,inEvent.sequence); skillUi.AcceptSkill(skill->second); dungeonClient.RequestCombatRefresh(); }
+                        skillActionIds.erase(skill);
+                    }
                     if (inEvent.sequence <= lastCombatActionResult) return;
                     lastCombatActionResult = inEvent.sequence;
                     if (!inEvent.accepted) rejectedActionSeconds = 1.0f;
@@ -854,7 +1090,18 @@ namespace ActionRPG
 
     void GameWorld::ApplyCombatSnapshot(const std::string_view inJson)
     {
-        ApplyCombatState(DungeonCombatSnapshot::Parse(inJson));
+        auto snapshot=DungeonCombatSnapshot::Parse(inJson);
+        // Reliable JSON carries progression/CD even when newer realtime poses are already displayed.
+        // Use an independent monotonic tick; never apply these JSON positions over realtime poses.
+        if (dungeonWorld && snapshot.roomId==dungeonRoomId && snapshot.mapEpoch>=pendingMapEpoch
+            && snapshot.mapEpoch>=appliedMapEpoch && snapshot.mapId==dungeonMapId
+            && (!hasSkillStateTick || snapshot.serverTick>=lastSkillStateTick))
+        {
+            const auto self=std::find_if(snapshot.players.begin(),snapshot.players.end(),[this](const auto& actor){return actor.playerId==localPlayerId;});
+            if (self!=snapshot.players.end() && self->actionSequence>=lastAcceptedSkillSequence && self->actionSequence<=combatActionSequence && self->moveSequence<=dungeonMovementSequence)
+            { skillUi.ApplyCombatState(*self); lastSkillStateTick=snapshot.serverTick; hasSkillStateTick=true; }
+        }
+        ApplyCombatState(std::move(snapshot));
     }
 
     void GameWorld::ApplyCombatState(DungeonCombatSnapshot snapshot)
@@ -939,7 +1186,7 @@ namespace ActionRPG
                 throw std::runtime_error("Combat tick time exceeds the supported range.");
             snapshot.serverTimeMs = static_cast<std::uint64_t>(timeMs);
         }
-        if (snapshot.cleared) combatBuffer.Clear();
+        if (snapshot.cleared) { player.ClearPredictedAttackFacing(); combatBuffer.Clear(); }
         combatBuffer.Push(snapshot);
         lastCombatTick = snapshot.serverTick; hasCombatTick = true; dungeonCleared = snapshot.cleared;
         combatSnapshotAge = 0.0f; combatSnapshot = std::move(snapshot);
@@ -947,28 +1194,41 @@ namespace ActionRPG
 
     void GameWorld::SendCombatActions(const InputState& inInput)
     {
-        if (!combatSnapshot || combatSnapshot->state != "Running" || player.IsCombatDead()) return;
-        const auto actor = std::find_if(combatSnapshot->players.begin(), combatSnapshot->players.end(),
-            [this](const auto& value) { return value.playerId == localPlayerId; });
-        if (actor != combatSnapshot->players.end() && !actor->skillActive && actor->reaction == CombatReaction::None
-            && actor->shotPhase == CombatShotPhase::None && actor->jumpPhase != CombatJumpPhase::Prepare && combatInputsThisSecond < 20)
+        if (!combatSnapshot || combatSnapshot->state!="Running" || player.IsCombatDead()
+            || pendingMapEpoch>appliedMapEpoch) { commandQueue.Clear(); return; }
+        const auto actor=std::find_if(combatSnapshot->players.begin(),combatSnapshot->players.end(),
+            [this](const auto& value){return value.playerId==localPlayerId;});
+        bool matched=false;
+        const auto command=playerSkillPresentation.TryCommand(commandQueue,localCharacterId,skillUi.GetProgression().skillLevels,matched);
+        const auto hotkey=skillUi.Hotkey(inInput);
+        const auto id=!hotkey.empty() ? hotkey:command;
+        if (matched || !hotkey.empty())
         {
-            const auto id = playerSkillPresentation.TryCommand(commandQueue, actor->characterId, actor->height > 0);
-            if (!id.empty())
+            commandQueue.Clear();
+            if (actor!=combatSnapshot->players.end() && actor->hp>0 && actor->reaction==CombatReaction::None
+                && !actor->skillActive && actor->jumpPhase!=CombatJumpPhase::Prepare
+                && (actor->shotPhase==CombatShotPhase::None || actor->shotPhase==CombatShotPhase::Recover)
+                && !id.empty() && skillUi.CanUse(id,actor->height>0,true) && combatInputsThisSecond<20 && skillActionIds.size()<64)
             {
-                if (combatActionSequence == std::numeric_limits<std::uint32_t>::max()) { ResetDungeonEntry(); return; }
+                if (combatActionSequence==std::numeric_limits<std::uint32_t>::max()) { ResetDungeonEntry(); return; }
                 ++combatInputsThisSecond;
-                dungeonClient.SendSkill(++combatActionSequence, id, player.GetFacingLeft());
-                return; // A command ending in X/C does not also trigger the basic action.
+                const auto sequence=++combatActionSequence;
+                skillActionIds.emplace(sequence,id);
+                player.PredictAttackFacing(sequence, true);
+                dungeonClient.SendSkill(sequence,id,player.GetFacingLeft());
             }
+            return; // No skill reservation; an unavailable command ending in X/C cannot also fire/jump.
         }
-        for (const auto key : inInput.pressedKeys)
+        if (actor==combatSnapshot->players.end() || actor->hp==0 || actor->reaction!=CombatReaction::None) return;
+        for (const auto key:inInput.pressedKeys)
         {
-            const std::uint8_t action = key == InputKey::ActionX ? 1 : key == InputKey::ActionC ? 2 : 0;
-            if (action == 0 || combatInputsThisSecond >= 20) continue;
-            if (combatActionSequence == std::numeric_limits<std::uint32_t>::max()) { ResetDungeonEntry(); return; }
+            const std::uint8_t action=key==InputKey::ActionX ? 1:key==InputKey::ActionC ? 2:0;
+            if (action==0 || combatInputsThisSecond>=20) continue;
+            if (combatActionSequence==std::numeric_limits<std::uint32_t>::max()) { ResetDungeonEntry(); return; }
             ++combatInputsThisSecond;
-            dungeonClient.SendAction(++combatActionSequence, action, player.GetFacingLeft());
+            const auto sequence = ++combatActionSequence;
+            if (action == 1) player.PredictAttackFacing(sequence);
+            dungeonClient.SendAction(sequence,action,player.GetFacingLeft());
         }
     }
 
@@ -1163,6 +1423,7 @@ namespace ActionRPG
 
     void GameWorld::SetSystemUiPage(const SystemUiPage inPage)
     {
+        if (IsDungeonUiRestricted() && IsPartyUiPage(inPage)) return;
         SystemUiPage page = inPage;
         if (page == SystemUiPage::Party || page == SystemUiPage::PartyDirectory)
         {
@@ -1177,17 +1438,27 @@ namespace ActionRPG
         {
             return;
         }
-        if (systemUiPage == SystemUiPage::PartyDirectory)
+        const bool wasDirectory = systemUiPage == SystemUiPage::PartyDirectory || systemUiPage == SystemUiPage::PartyDetails;
+        const bool isDirectory = page == SystemUiPage::PartyDirectory || page == SystemUiPage::PartyDetails;
+        if (wasDirectory && !isDirectory)
         {
             townClient.UnsubscribePartyDirectory();
             directoryPageRequestPending = false;
         }
-        if (page == SystemUiPage::PartyDirectory)
+        if (page == SystemUiPage::PartyDirectory && !wasDirectory)
         {
             partyDirectoryPage = {};
+            wantedPartyDirectoryRevision = 0;
             partyDirectoryPage.page = 1;
             partyDirectoryPage.totalPages = 1;
             RequestPartyDirectoryPage(1);
+        }
+        if (systemUiPage == SystemUiPage::PartyDetails && page != SystemUiPage::PartyDetails)
+        {
+            selectedDirectoryPartyId = 0;
+            partyDetails.reset();
+            partyDetailRequestPending = false;
+            partyDetailRefreshNeeded = false;
         }
         if (page == SystemUiPage::Party)
         {
@@ -1202,10 +1473,166 @@ namespace ActionRPG
             partyStatusText.clear();
         }
         systemUiPage = page;
+        commandQueue.Clear(); skillUi.CancelDrag();
+        if (page==SystemUiPage::Skills) townClient.RequestSkillState();
+    }
+
+    void GameWorld::RequestSelectedPartyDetail()
+    {
+        if (IsDungeonUiRestricted() || !townClient.IsConnected() || selectedDirectoryPartyId == 0) return;
+        if (partyDetailRequestPending)
+        {
+            partyDetailRefreshNeeded = true;
+            return;
+        }
+        partyDetailRequestPending = true;
+        townClient.RequestPartyDetail(selectedDirectoryPartyId);
+    }
+
+    bool GameWorld::CanRequestPartyJoin() const noexcept
+    {
+        return !IsDungeonUiRestricted() && townClient.IsConnected() && partySnapshot.partyId == 0
+            && !partyJoinSendPending && !ownPartyJoinRequest && !partyDetailRequestPending
+            && partyDetails && partyDetails->partyId == selectedDirectoryPartyId
+            && partyDetails->result == TownProtocol::PartyResultCode::Succeeded
+            && partyDetails->isPublic && !partyDetails->busy && partyDetails->members.size() < 8;
+    }
+
+    void GameWorld::ResetPartyRequestUi()
+    {
+        partyJoinRequests.clear();
+        ownPartyJoinRequest.reset();
+        answeringPartyJoinRequestId = 0;
+        partyJoinSendPending = false;
+        selectedDirectoryPartyId = 0;
+        partyDetails.reset();
+        partyDetailRequestPending = false;
+        partyDetailRefreshNeeded = false;
+    }
+
+    bool GameWorld::IsPartyJoinNoticeVisible() const noexcept
+    {
+        return townClient.IsConnected() && !IsDungeonUiRestricted() && IsPartyLeader()
+            && !partyJoinRequests.empty() && !pendingPartyInvitation && !partyKickedNotice;
+    }
+
+    void GameWorld::UpdatePartyNotifications(const InputState& inInput)
+    {
+        if (partyKickedNotice)
+        {
+            const auto layout = CalculateKickedNoticeLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
+            if (inInput.WasPressed(InputKey::ConfirmSelection) || inInput.WasPressed(InputKey::ToggleSystemMenu)
+                || (inInput.leftMousePressed && ContainsPoint(layout.accept, inInput.clickX, inInput.clickY)))
+                partyKickedNotice = false;
+            uiClickConsumed = true;
+            skillUi.CancelDrag();
+            return;
+        }
+        if (!IsPartyJoinNoticeVisible() || !inInput.leftMousePressed || uiClickConsumed) return;
+        const auto layout = CalculatePartyNoticeLayout(camera.GetViewportWidth(),
+            skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight()).top - 12.0f);
+        if (!ContainsPoint(layout.panel, inInput.clickX, inInput.clickY)) return;
+        uiClickConsumed = true;
+        skillUi.CancelDrag();
+        if (answeringPartyJoinRequestId != 0) return;
+        const bool accepted = ContainsPoint(layout.accept, inInput.clickX, inInput.clickY);
+        if (!accepted && !ContainsPoint(layout.decline, inInput.clickX, inInput.clickY)) return;
+        answeringPartyJoinRequestId = partyJoinRequests.front().requestId;
+        townClient.AnswerPartyJoin(answeringPartyJoinRequestId, accepted);
+        // Keep this ID until its authoritative Accepted/Rejected/Invalidated update arrives.
+    }
+
+    void GameWorld::RenderPartyNotifications(D2DRenderer& inRenderer) const
+    {
+        const auto drawPanel = [&inRenderer](const D2D1_RECT_F& inPanel)
+        {
+            inRenderer.FillRectangle(inPanel.left, inPanel.top, inPanel.right, inPanel.bottom,
+                D2D1::ColorF(0.04f, 0.06f, 0.09f, 0.98f));
+            inRenderer.DrawRectangle(inPanel.left, inPanel.top, inPanel.right, inPanel.bottom,
+                D2D1::ColorF(0.55f, 0.73f, 0.94f), 2.0f);
+        };
+        const auto drawButton = [&inRenderer](const D2D1_RECT_F& inButton, std::wstring_view inText, bool inEnabled)
+        {
+            inRenderer.FillRectangle(inButton.left, inButton.top, inButton.right, inButton.bottom,
+                inEnabled ? D2D1::ColorF(0.17f, 0.31f, 0.46f) : D2D1::ColorF(0.18f, 0.18f, 0.18f));
+            inRenderer.DrawUiText(inText, inButton, D2D1::ColorF(0.93f, 0.95f, 1.0f), 16.0f, false, true);
+        };
+        if (partyKickedNotice)
+        {
+            const auto layout = CalculateKickedNoticeLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
+            inRenderer.FillRectangle(0, 0, camera.GetViewportWidth(), camera.GetViewportHeight(),
+                D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.55f));
+            drawPanel(layout.panel);
+            inRenderer.DrawUiText(L"파티에서 강퇴되었습니다.",
+                {layout.panel.left + 16.0f, layout.panel.top + 24.0f, layout.panel.right - 16.0f, layout.panel.top + 84.0f},
+                D2D1::ColorF(0.96f, 0.94f, 0.89f), 18.0f, true, true);
+            drawButton(layout.accept, L"확인", true);
+        }
+        else if (IsPartyJoinNoticeVisible())
+        {
+            const auto layout = CalculatePartyNoticeLayout(camera.GetViewportWidth(),
+                skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight()).top - 12.0f);
+            drawPanel(layout.panel);
+            inRenderer.DrawUiText(L"파티 가입 요청 · " + std::to_wstring(partyJoinRequests.size()) + L"건",
+                {layout.panel.left + 12.0f, layout.panel.top + 10.0f, layout.panel.right - 12.0f, layout.panel.top + 34.0f},
+                D2D1::ColorF(0.92f, 0.94f, 1.0f), 16.0f);
+            inRenderer.DrawUiText(Utf8ToWide(partyJoinRequests.front().requesterName) + L" 님의 가입 요청",
+                {layout.panel.left + 12.0f, layout.panel.top + 40.0f, layout.panel.right - 12.0f, layout.panel.bottom - 52.0f},
+                D2D1::ColorF(0.94f, 0.91f, 0.80f), 16.0f, true);
+            const bool enabled = answeringPartyJoinRequestId == 0;
+            drawButton(layout.accept, enabled ? L"승인" : L"처리 중", enabled);
+            drawButton(layout.decline, L"거절", enabled);
+        }
+    }
+
+    void GameWorld::RenderPartyDetails(D2DRenderer& inRenderer) const
+    {
+        const auto layout = CalculatePartyDetailsLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
+        const auto& panel = layout.panel;
+        inRenderer.FillRectangle(panel.left, panel.top, panel.right, panel.bottom,
+            D2D1::ColorF(0.035f, 0.045f, 0.065f, 0.98f));
+        inRenderer.DrawRectangle(panel.left, panel.top, panel.right, panel.bottom,
+            D2D1::ColorF(0.45f, 0.68f, 0.88f), 2.0f);
+        const bool valid = partyDetails && partyDetails->result == TownProtocol::PartyResultCode::Succeeded;
+        inRenderer.DrawUiText(valid ? Utf8ToWide(partyDetails->title) : L"파티 상세 정보",
+            {panel.left + 16.0f, panel.top + 10.0f, panel.right - 16.0f, panel.top + 38.0f},
+            D2D1::ColorF(0.95f, 0.94f, 0.85f), 18.0f);
+        if (valid)
+        {
+            inRenderer.DrawUiText(L"파티원 " + std::to_wstring(partyDetails->members.size()) + L"/8 · 공개 파티",
+                {panel.left + 16.0f, panel.top + 40.0f, panel.right - 16.0f, panel.top + 64.0f},
+                D2D1::ColorF(0.82f, 0.86f, 0.94f), 16.0f);
+            const float rowHeight = std::min(36.0f, (panel.bottom - panel.top - 154.0f) / 8.0f);
+            for (std::size_t index = 0; index < partyDetails->members.size(); ++index)
+            {
+                const auto& member = partyDetails->members[index];
+                const float top = panel.top + 70.0f + static_cast<float>(index) * rowHeight;
+                const bool leader = member.playerId == partyDetails->leaderPlayerId;
+                const auto text = std::wstring(leader ? L"[파티장] " : L"[파티원] ")
+                    + Utf8ToWide(member.playerName) + L" · 슬롯 " + std::to_wstring(member.slot + 1);
+                inRenderer.DrawUiText(text, {panel.left + 16.0f, top, panel.right - 16.0f, top + rowHeight},
+                    leader ? D2D1::ColorF(0.96f, 0.85f, 0.48f) : D2D1::ColorF(0.84f, 0.89f, 0.96f), 16.0f);
+            }
+        }
+        std::wstring status = partyStatusText;
+        if (partyDetailRequestPending) status = L"파티 정보를 확인하는 중입니다.";
+        else if (ownPartyJoinRequest || partyJoinSendPending) status = L"파티장의 응답을 기다리는 중입니다.";
+        else if (valid && partyDetails->busy) status = L"던전 입장 중인 파티에는 가입할 수 없습니다.";
+        else if (valid && partyDetails->members.size() >= 8) status = L"파티 인원이 가득 찼습니다.";
+        inRenderer.DrawUiText(status, {panel.left + 16.0f, panel.bottom - 80.0f, panel.right - 16.0f, panel.bottom - 46.0f},
+            D2D1::ColorF(0.95f, 0.80f, 0.43f), 14.0f, true);
+        const bool canJoin = CanRequestPartyJoin();
+        inRenderer.FillRectangle(layout.accept.left, layout.accept.top, layout.accept.right, layout.accept.bottom,
+            canJoin ? D2D1::ColorF(0.16f, 0.34f, 0.50f) : D2D1::ColorF(0.16f, 0.16f, 0.16f));
+        inRenderer.FillRectangle(layout.decline.left, layout.decline.top, layout.decline.right, layout.decline.bottom,
+            D2D1::ColorF(0.19f, 0.23f, 0.29f));
+        inRenderer.DrawUiText(L"가입 요청", layout.accept, D2D1::ColorF(0.93f, 0.95f, 1.0f), 16.0f, false, true);
+        inRenderer.DrawUiText(L"목록으로", layout.decline, D2D1::ColorF(0.93f, 0.95f, 1.0f), 16.0f, false, true);
     }
 
     void GameWorld::RequestPartyDirectoryPage(const std::uint32_t inPage)
     {
+        if (IsDungeonUiRestricted()) return;
         if (directoryPageRequestPending)
         {
             return;
@@ -1216,6 +1643,7 @@ namespace ActionRPG
 
     void GameWorld::SubmitPartyTitle()
     {
+        if (IsDungeonUiRestricted()) return;
         const std::optional<std::string> title = WideToUtf8(partyTitleDraft);
         if (!title.has_value() || title->size() > 96)
         {
@@ -1228,6 +1656,7 @@ namespace ActionRPG
 
     void GameWorld::SubmitPartyCreation()
     {
+        if (IsDungeonUiRestricted()) return;
         if (partyCreationPending || localPlayerId == 0)
         {
             return;
@@ -1245,6 +1674,7 @@ namespace ActionRPG
 
     void GameWorld::UpdateSystemInterface(const InputState& inInput)
     {
+        if (uiClickConsumed) return;
         if (pendingPartyInvitation.has_value())
         {
             return;
@@ -1328,8 +1758,11 @@ namespace ActionRPG
             {
                 continue;
             }
-            SetSystemUiPage(systemMenuEntries[index].action == SystemMenuAction::Party
-                ? SystemUiPage::Party : SystemUiPage::ExitConfirmation);
+            const auto action=systemMenuEntries[index].action;
+            if (action==SystemMenuAction::Party && IsDungeonUiRestricted())
+            { uiClickConsumed=true; return; }
+            SetSystemUiPage(action==SystemMenuAction::Party ? SystemUiPage::Party
+                : action==SystemMenuAction::Skills ? SystemUiPage::Skills:SystemUiPage::ExitConfirmation);
             uiClickConsumed = true;
             return;
         }
@@ -1337,6 +1770,7 @@ namespace ActionRPG
 
     void GameWorld::UpdatePartyInterface(const InputState& inInput)
     {
+        if (IsDungeonUiRestricted() || !townClient.IsConnected() || partyKickedNotice) return;
         if (pendingPartyInvitation.has_value())
         {
             if (partyInvitationAnswerPending || !inInput.leftMousePressed || uiClickConsumed)
@@ -1366,6 +1800,27 @@ namespace ActionRPG
             return;
         }
 
+        if (systemUiPage == SystemUiPage::PartyDetails)
+        {
+            if (!inInput.leftMousePressed || uiClickConsumed) return;
+            const auto layout = CalculatePartyDetailsLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
+            if (ContainsPoint(layout.decline, inInput.clickX, inInput.clickY))
+            {
+                SetSystemUiPage(SystemUiPage::PartyDirectory);
+                uiClickConsumed = true;
+            }
+            else if (ContainsPoint(layout.accept, inInput.clickX, inInput.clickY))
+            {
+                uiClickConsumed = true;
+                if (CanRequestPartyJoin())
+                {
+                    partyJoinSendPending = true;
+                    partyStatusText = L"가입 요청을 보내는 중입니다.";
+                    townClient.RequestPartyJoin(selectedDirectoryPartyId);
+                }
+            }
+            return;
+        }
         if (systemUiPage == SystemUiPage::PartyDirectory)
         {
             if (!inInput.leftMousePressed || uiClickConsumed)
@@ -1397,6 +1852,24 @@ namespace ActionRPG
             {
                 RequestPartyDirectoryPage(partyDirectoryPage.page + 1);
                 uiClickConsumed = true;
+            }
+            else if (!directoryPageRequestPending)
+            {
+                for (std::size_t index = 0; index < partyDirectoryPage.parties.size(); ++index)
+                {
+                    const float rowTop = layout.panel.top + 92.0f + static_cast<float>(index) * 48.0f;
+                    if (!ContainsPoint({layout.panel.left + 22.0f, rowTop, layout.panel.right - 22.0f, rowTop + 44.0f},
+                        inInput.clickX, inInput.clickY)) continue;
+                    selectedDirectoryPartyId = partyDirectoryPage.parties[index].partyId;
+                    partyDetails.reset();
+                    partyDetailRequestPending = false;
+                    partyDetailRefreshNeeded = false;
+                    partyStatusText.clear();
+                    SetSystemUiPage(SystemUiPage::PartyDetails);
+                    RequestSelectedPartyDetail();
+                    uiClickConsumed = true;
+                    break;
+                }
             }
             return;
         }
@@ -1544,6 +2017,7 @@ namespace ActionRPG
         player.ConfigureMovementSpeeds(inMap.walkSpeed, inMap.runSpeed);
         player.SetGroundPosition(inPosition);
         player.ResetActionState();
+        skillUi.CancelDrag();
         commandQueue.Clear();
         projectileSystem.Clear();
         {
@@ -1551,6 +2025,11 @@ namespace ActionRPG
             pendingPlayerHits.clear();
         }
         movementSendAccumulator = 0.0f;
+        townMovementSends.clear();
+        townMovementStateSequence = 0;
+        lastTownAcknowledgedSequence = lastTownMovementTick = 0;
+        townSnapshotDelaySeconds = 0.0f;
+        hasTownMovementTick = hasTownDelaySample = false;
         lastSentDirectionX = 0;
         lastSentDirectionY = 0;
         hasSentMovementInput = false;
@@ -1587,6 +2066,7 @@ namespace ActionRPG
         dungeonMapId = inMapId;
         combatBuffer.Clear(); presentationSnapshot.reset();
         combatPlayers.clear(); combatSnapshot.reset(); combatSnapshotAge = 0.0f;
+        skillUi.CancelDrag();
         remotePlayers.clear();
         player.SetGroundPosition(inPosition); player.ResetActionState(); player.ResetMovementSpeeds(); player.SetRunningEnabled(true);
         CombatPlayerState initial;
@@ -1604,6 +2084,8 @@ namespace ActionRPG
 
     void GameWorld::ResetDungeonEntry()
     {
+        skillUi.ResetCombatState(); skillActionIds.clear(); lastSkillStateTick=0; lastAcceptedSkillSequence=0; hasSkillStateTick=false;
+        commandQueue.Clear();
         completionPending = completionStopping = false;
         completionWaitSeconds = 0.0f;
         completionResponse.reset(); completionStatus.clear();
@@ -1614,6 +2096,7 @@ namespace ActionRPG
         combatPlayers.clear(); combatSnapshot.reset(); hasCombatTick = dungeonCleared = false;
         lastCombatTick = 0; combatActionSequence = lastCombatActionResult = combatInputsThisSecond = 0;
         combatInputWindowSeconds = combatSnapshotAge = rejectedActionSeconds = 0.0f;
+        player.ClearPredictedAttackFacing();
         player.SetRunningEnabled(false);
         dungeonEntryState = DungeonEntryState::Idle;
         dungeonRoomId = 0;
@@ -1744,6 +2227,8 @@ namespace ActionRPG
 
     void GameWorld::RenderSystemInterface(D2DRenderer& inRenderer) const
     {
+        if (systemUiPage==SystemUiPage::Skills)
+        { skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),true); return; }
         if (systemUiPage == SystemUiPage::Closed && !pendingPartyInvitation.has_value())
         {
             return;
@@ -1769,7 +2254,8 @@ namespace ActionRPG
             {
                 const D2D1_RECT_F tile = GetSystemMenuTileRectangle(
                     layout, index, systemMenuScrollOffset);
-                const bool hovered = ContainsPoint(tile, uiMouseX, uiMouseY)
+                const bool disabled=systemMenuEntries[index].action==SystemMenuAction::Party && IsDungeonUiRestricted();
+                const bool hovered = !disabled && ContainsPoint(tile, uiMouseX, uiMouseY)
                     && ContainsPoint(D2D1::RectF(
                         layout.left, layout.top, layout.right, layout.bottom), uiMouseX, uiMouseY);
                 inRenderer.FillRectangle(tile.left, tile.top, tile.right, tile.bottom,
@@ -1783,15 +2269,16 @@ namespace ActionRPG
                 if (systemMenuEntries[index].icon)
                 {
                     const D2D1_SIZE_F bitmapSize = systemMenuEntries[index].icon->GetSize();
-                    inRenderer.DrawBitmap(systemMenuEntries[index].icon.Get(),
-                        D2D1::RectF(0.0f, 0.0f, bitmapSize.width, bitmapSize.height),
-                        D2D1::RectF(iconLeft, iconTop,
-                            iconLeft + MENU_ICON_SIZE, iconTop + MENU_ICON_SIZE));
+                    const auto destination=D2D1::RectF(iconLeft,iconTop,iconLeft+MENU_ICON_SIZE,iconTop+MENU_ICON_SIZE);
+                    if (disabled || systemMenuEntries[index].action==SystemMenuAction::Skills)
+                        inRenderer.DrawUiIcon(systemMenuEntries[index].icon.Get(),destination,disabled);
+                    else inRenderer.DrawBitmap(systemMenuEntries[index].icon.Get(),
+                        D2D1::RectF(0.0f,0.0f,bitmapSize.width,bitmapSize.height),destination);
                 }
                 inRenderer.DrawText(systemMenuEntries[index].label,
                     tile.left + 12.0f, tile.bottom - 42.0f,
                     tile.right - 12.0f, tile.bottom - 12.0f,
-                    D2D1::ColorF(0.94f, 0.94f, 0.92f));
+                    disabled ? D2D1::ColorF(0.48f,0.54f,0.62f):D2D1::ColorF(0.94f,0.94f,0.92f));
             }
             inRenderer.PopAxisAlignedClip();
 
@@ -1837,7 +2324,12 @@ namespace ActionRPG
 
     void GameWorld::RenderPartyInterface(D2DRenderer& inRenderer) const
     {
-        if (systemUiPage == SystemUiPage::Party)
+        if (IsDungeonUiRestricted()) return;
+        if (systemUiPage == SystemUiPage::PartyDetails)
+        {
+            RenderPartyDetails(inRenderer);
+        }
+        else if (systemUiPage == SystemUiPage::Party)
         {
             const PartyLayout layout = CalculatePartyLayout(
                 camera.GetViewportWidth(), camera.GetViewportHeight());
@@ -2148,10 +2640,10 @@ namespace ActionRPG
         }
 
         const std::int8_t directionX = static_cast<std::int8_t>(
-            player.IsHitReacting() ? 0
+            (player.IsHitReacting() || player.IsAttacking() || player.IsLocallyCasting()) ? 0
                 : static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
         const std::int8_t directionY = static_cast<std::int8_t>(
-            player.IsHitReacting() ? 0
+            (player.IsHitReacting() || player.IsAttacking() || player.IsLocallyCasting()) ? 0
                 : static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
         const bool isMoving = directionX != 0 || directionY != 0;
         const bool stateChanged = !hasSentMovementInput
@@ -2163,8 +2655,17 @@ namespace ActionRPG
         }
 
         movementSendAccumulator = 0.0f;
+        constexpr std::size_t MAX_TOWN_MOVEMENT_SENDS = 64;
+        const auto sequence=++movementSequence;
+        if (stateChanged)
+        {
+            townMovementStateSequence=sequence;
+            player.ClearTownPositionCorrection();
+        }
+        townMovementSends.push_back({sequence,std::chrono::steady_clock::now()});
+        if (townMovementSends.size()>MAX_TOWN_MOVEMENT_SENDS) townMovementSends.pop_front();
         townClient.SendMovement(TownProtocol::MoveInput{
-            ++movementSequence,
+            sequence,
             directionX,
             directionY,
             false

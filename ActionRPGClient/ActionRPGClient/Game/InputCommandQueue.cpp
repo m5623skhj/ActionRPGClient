@@ -6,6 +6,7 @@ namespace ActionRPG
 {
     void InputCommandQueue::Record(const InputState& inInput, const double inCurrentTimeSeconds)
     {
+        currentTimeSeconds = inCurrentTimeSeconds;
         RemoveExpiredEvents(inCurrentTimeSeconds);
 
         for (const InputKey key : inInput.pressedKeys)
@@ -17,7 +18,9 @@ namespace ActionRPG
     bool InputCommandQueue::TryConsume(const std::span<const InputKey> inSequence,
         const double inMaxStepSeconds)
     {
-        if (inSequence.empty() || events.size() < inSequence.size())
+        // Completed commands live for 250 ms; opening a menu must not replay an old command.
+        if (inSequence.empty() || events.size() < inSequence.size()
+            || currentTimeSeconds - events.back().timeSeconds > 0.25)
         {
             return false;
         }

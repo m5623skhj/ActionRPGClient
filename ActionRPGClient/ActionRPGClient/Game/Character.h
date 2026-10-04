@@ -103,11 +103,19 @@ namespace ActionRPG
         }
         void ResetMovementSpeeds() { walkSpeed = DEFAULT_WALK_SPEED; runSpeed = DEFAULT_RUN_SPEED; }
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
+        void ConfigureJumpSpeed(const IniDocument& inDefinitions, std::uint32_t inCharacterId);
+        void PredictAttackFacing(std::uint32_t inSequence, bool inSkill = false);
+        void ResolvePredictedAttackFacing(std::uint32_t inSequence, bool inAccepted);
+        void ClearPredictedAttackFacing();
         void ApplyCombatState(const CombatPlayerState& inState, const CombatRules& inRules,
             bool inSetPosition = false);
         void ApplyBufferedCombatState(const CombatPlayerState& inState, const CombatRules& inRules);
         void UpdateCombatPresentation(float inDeltaSeconds, const GameplayMap& inMap,
             const Vector2* inLocalDirection = nullptr, bool inRun = false);
+        [[nodiscard]] bool IsAttacking() const { return attackPhase != AttackPhase::None; }
+        [[nodiscard]] bool CanStartCommandSkill() const;
+        void CancelAttackRecovery();
+        void PrepareCommandSkill();
         [[nodiscard]] bool HasCombatState() const { return combatState.has_value(); }
         [[nodiscard]] bool GetFacingLeft() const { return facingLeft; }
         [[nodiscard]] bool IsCombatDead() const { return combatState && combatState->hp == 0; }
@@ -127,6 +135,8 @@ namespace ActionRPG
         static constexpr float DEFAULT_RUN_SPEED = 480.0f;
         static constexpr float WIDTH = 64.0f;
         static constexpr float HEIGHT = 96.0f;
+        static constexpr float HORIZONTAL_RADIUS = WIDTH * 0.5f;
+        static constexpr float DEPTH_RADIUS = 18.0f;
 
     private:
         enum class HitPhase
@@ -155,9 +165,9 @@ namespace ActionRPG
             End
         };
 
-        [[nodiscard]] bool IsAttacking() const { return attackPhase != AttackPhase::None; }
         void BeginJump();
         float UpdateJump(float inDeltaSeconds);
+        [[nodiscard]] bool IsAttackFacingLocked() const;
         void BeginAttack(bool inAirAttack, bool inContinueCombo = false);
         void CancelAttack();
         [[nodiscard]] SpriteAnimation& GetAttackAnimation();
@@ -170,10 +180,6 @@ namespace ActionRPG
         [[nodiscard]] const SpriteAnimation& GetCombatAnimation() const;
 
     private:
-        static constexpr float HORIZONTAL_RADIUS = WIDTH * 0.5f;
-        static constexpr float DEPTH_RADIUS = 18.0f;
-        // Approximately 1.5 times the 192-unit standing sprite, including frame integration.
-        static constexpr float JUMP_SPEED = 1035.0f;
         static constexpr float GRAVITY = 1800.0f;
         static constexpr float AIRBORNE_HIT_SPEED = 560.0f;
         static constexpr float AIR_HIT_FALL_SPEED = 500.0f;
@@ -193,6 +199,7 @@ namespace ActionRPG
         Vector2 groundPosition{};
         float height{};
         float verticalVelocity{};
+        float jumpSpeed{};
         bool facingLeft{};
         bool isMoving{};
         AttackPhase attackPhase{ AttackPhase::None };
@@ -232,6 +239,9 @@ namespace ActionRPG
         SpriteAnimation getUpAnimation;
         std::optional<CombatPlayerState> combatState;
         CombatRules combatRules;
+        std::uint32_t predictedAttackFacingSequence{};
+        bool predictedAttackFacingLeft{};
+        float predictedAttackFacingSeconds{};
         bool bufferedPresentation{}, combatAnimationChanged{true};
         const SpriteAnimation* lastCombatAnimation{};
         float lastCombatAnimationSeconds{}, movementAnimationScale{1.0f};

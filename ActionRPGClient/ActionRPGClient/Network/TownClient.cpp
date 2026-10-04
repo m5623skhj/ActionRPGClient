@@ -119,6 +119,17 @@ namespace ActionRPG
         });
     }
 
+    void TownClient::RequestSkillState()
+    {
+        asio::post(strand,[this,packet=TownProtocol::Encode(TownProtocol::SkillStateRequest{})]() mutable
+        { if (connected.load()) QueuePacket(std::move(packet)); });
+    }
+    void TownClient::LearnSkill(std::string inSkillId,std::uint32_t inExpectedSkillLevel)
+    {
+        asio::post(strand,[this,packet=TownProtocol::Encode(TownProtocol::LearnSkillRequest{std::move(inSkillId),inExpectedSkillLevel})]() mutable
+        { if (connected.load()) QueuePacket(std::move(packet)); });
+    }
+
     void TownClient::ConfirmDungeonJoin(
         const std::uint64_t inRoomId,
         const std::uint64_t inChallenge)
@@ -227,6 +238,33 @@ namespace ActionRPG
             {
                 QueuePacket(std::move(packet));
             }
+        });
+    }
+
+    void TownClient::RequestPartyDetail(const std::uint64_t inPartyId)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyDetailRequest{ inPartyId })]() mutable
+        {
+            if (connected.load()) QueuePacket(std::move(packet));
+        });
+    }
+
+    void TownClient::RequestPartyJoin(const std::uint64_t inPartyId)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyJoinRequest{ inPartyId })]() mutable
+        {
+            if (connected.load()) QueuePacket(std::move(packet));
+        });
+    }
+
+    void TownClient::AnswerPartyJoin(const std::uint64_t inRequestId, const bool inAccepted)
+    {
+        asio::post(strand, [this, packet = TownProtocol::Encode(
+            TownProtocol::PartyJoinAnswer{ inRequestId, inAccepted })]() mutable
+        {
+            if (connected.load()) QueuePacket(std::move(packet));
         });
     }
 
@@ -341,6 +379,10 @@ namespace ActionRPG
 
         switch (*type)
         {
+        case TownProtocol::PacketType::SkillStateResponse:
+            if (auto packet=TownProtocol::DecodeSkillStateResponse(receiveBody)) PushEvent(SkillStateEvent{std::move(packet->payload)});
+            else HandleDisconnect();
+            break;
         case TownProtocol::PacketType::EnterTownResponse:
             if (auto packet = TownProtocol::DecodeEnterTownResponse(receiveBody)) PushEvent(std::move(*packet));
             else HandleDisconnect();
@@ -387,6 +429,18 @@ namespace ActionRPG
             break;
         case TownProtocol::PacketType::PartyDirectoryPage:
             if (auto packet = TownProtocol::DecodePartyDirectoryPage(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartyDetailResponse:
+            if (auto packet = TownProtocol::DecodePartyDetailResponse(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartyJoinRequestUpdate:
+            if (auto packet = TownProtocol::DecodePartyJoinRequestUpdate(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::PartyKicked:
+            if (auto packet = TownProtocol::DecodePartyKicked(receiveBody)) PushEvent(std::move(*packet));
             else HandleDisconnect();
             break;
         case TownProtocol::PacketType::PartyDirectoryChanged:

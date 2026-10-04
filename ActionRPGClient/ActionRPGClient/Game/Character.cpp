@@ -56,6 +56,8 @@ namespace ActionRPG
         , knockdownAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.knockdown)
         , getUpAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.getUp)
     {
+        const IniDocument characterDefinitions(inAssetCatalog.GetDataPath("Characters"));
+        ConfigureJumpSpeed(characterDefinitions, 0);
         attackEventFrame = ParseOneBasedFrame(*animationDefinitions, inAnimations.attackFire, "event_frame");
         if (attackEventFrame >= attackFireAnimation.GetFrameCount())
         {
@@ -80,6 +82,7 @@ namespace ActionRPG
         }
         runningRequested = runningEnabled && inActions.run;
         Vector2 direction = inActions.moveDirection;
+        if (direction.x != 0 || direction.y != 0 || inActions.jump) CancelAttackRecovery();
         shotInputRemainingSeconds = std::max(0.0f, shotInputRemainingSeconds - inDeltaSeconds);
         for (auto& action : bufferedActions) action.remainingSeconds -= inDeltaSeconds;
         if (inActions.jump && bufferedActions.size() < MAX_ATTACK_SHOTS + 1)
@@ -126,7 +129,7 @@ namespace ActionRPG
         const float lengthSquared = direction.x * direction.x + direction.y * direction.y;
         if (lengthSquared > 0.0f)
         {
-            if (direction.x != 0.0f)
+            if (direction.x != 0.0f && !IsAttackFacingLocked())
             {
                 facingLeft = direction.x < 0.0f;
             }
@@ -135,8 +138,7 @@ namespace ActionRPG
             direction.x *= inverseLength;
             direction.y *= inverseLength;
 
-            if (!IsAttacking()
-                && (jumpPhase == JumpPhase::Grounded || jumpPhase == JumpPhase::Airborne))
+            if (!IsAttacking())
             {
                 const float movementSpeed = IsRunning() ? runSpeed : walkSpeed;
                 groundPosition.x += direction.x * movementSpeed * inDeltaSeconds;
@@ -333,6 +335,29 @@ namespace ActionRPG
         }
     }
 
+    bool Character::CanStartCommandSkill() const
+    {
+        return !IsHitReacting() && (jumpPhase == JumpPhase::Grounded || jumpPhase == JumpPhase::Airborne)
+            && (!IsAttacking() || (attackPhase == AttackPhase::End && pendingAttackShots == 0));
+    }
+
+    void Character::PrepareCommandSkill()
+    {
+        CancelAttack(); // Explicit skill interruption ends the basic-shot combo and its facing hold.
+        bufferedActions.clear();
+        pendingProjectileRequests.clear();
+    }
+
+    // Leave only the recovery pose; preserve combo grace and the jump-wide shot limit.
+    void Character::CancelAttackRecovery()
+    {
+        if (attackPhase == AttackPhase::End && pendingAttackShots == 0)
+        {
+            attackPhase = AttackPhase::None;
+            attackProjectileQueued = false;
+        }
+    }
+
     void Character::BeginJump()
     {
         CancelAttack();
@@ -356,7 +381,7 @@ namespace ActionRPG
                 return 0.0f;
             }
             jumpPhase = JumpPhase::Airborne;
-            verticalVelocity = JUMP_SPEED;
+            verticalVelocity = jumpSpeed;
         }
 
         if (jumpPhase == JumpPhase::Airborne)
@@ -398,6 +423,7 @@ namespace ActionRPG
 
     void Character::CancelAttack()
     {
+        ClearPredictedAttackFacing();
         // airShotCount belongs to the whole jump and is cleared only by BeginJump.
         attackPhase = AttackPhase::None;
         pendingAttackShots = 0;
@@ -503,6 +529,56 @@ namespace ActionRPG
         }
     }
 
+    void Character::ConfigureJumpSpeed(const IniDocument& inDefinitions, const std::uint32_t inCharacterId)
+    {
+        const auto text = inDefinitions.GetOptionalValue("Character" + std::to_string(inCharacterId),
+            "jump_speed", inDefinitions.GetValue("Default", "jump_speed"));
+        std::size_t parsedCharacters{};
+        const float value = std::stof(text, &parsedCharacters);
+        if (parsedCharacters != text.size() || !std::isfinite(value) || value <= 0.0f || value > 2000.0f)
+            throw std::runtime_error("Invalid character jump_speed.");
+        jumpSpeed = value; // Authored initial velocity, already adjusted; do not scale at runtime.
+    }
+
+    bool Character::IsAttackFacingLocked() const
+    {
+        if (predictedAttackFacingSequence != 0) return true;
+        if (combatState)
+            return combatState->hp != 0 && combatState->reaction == CombatReaction::None
+                && (combatState->shotPhase != CombatShotPhase::None
+                    || (combatState->shotCount > 0 && combatState->shotCount < combatRules.maxShots));
+        return IsAttacking() || (attackShotCount > 0 && attackShotCount < MAX_ATTACK_SHOTS
+            && shotInputRemainingSeconds > 0.0f);
+    }
+
+    /** Hold only facing while a dungeon attack/skill awaits a pose; never predict firing/damage. */
+    void Character::PredictAttackFacing(const std::uint32_t inSequence, const bool inSkill)
+    {
+        if (!combatState || inSequence == 0 || (!inSkill && IsAttackFacingLocked()) || combatState->hp == 0
+            || combatState->reaction != CombatReaction::None || combatState->skillActive) return;
+        const bool alreadyPredicted = predictedAttackFacingSequence != 0;
+        predictedAttackFacingSequence = inSequence;
+        predictedAttackFacingLeft = facingLeft;
+        // Server key buffer + existing pose prediction horizon + one server tick.
+        if (!alreadyPredicted) predictedAttackFacingSeconds = ACTION_BUFFER_SECONDS + 0.25f
+            + static_cast<float>(combatRules.tickIntervalSeconds);
+    }
+
+    void Character::ResolvePredictedAttackFacing(const std::uint32_t inSequence, const bool inAccepted)
+    {
+        if (!inAccepted && inSequence == predictedAttackFacingSequence)
+        {
+            ClearPredictedAttackFacing();
+            if (combatState) facingLeft = combatState->facingLeft;
+        }
+    }
+
+    void Character::ClearPredictedAttackFacing()
+    {
+        predictedAttackFacingSequence = 0;
+        predictedAttackFacingSeconds = 0.0f;
+    }
+
     void Character::ConfigureMovementSpeeds(const float inWalkSpeed, const float inRunSpeed)
     {
         walkSpeed = inWalkSpeed;
@@ -541,12 +617,20 @@ namespace ActionRPG
             || combatState->shotCount != inState.shotCount || combatState->airShotCount != inState.airShotCount;
         bufferedPresentation = false;
         const bool wasDead = combatState && combatState->hp == 0;
+        const bool landed = combatState && combatState->jumpPhase == CombatJumpPhase::Airborne
+            && inState.jumpPhase == CombatJumpPhase::Grounded;
         isMoving = combatState && (std::abs(inState.position.x - combatState->position.x) > 0.5f
             || std::abs(inState.position.y - combatState->position.y) > 0.5f);
         if (inSetPosition) groundPosition = inState.position;
         combatState = inState; combatRules = inRules; combatPresentationSeconds = 0.0f;
         if (!wasDead && inState.hp == 0) deathPresentationSeconds = 0.0f;
-        height = inState.height; facingLeft = inState.facingLeft;
+        if (inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive
+            || landed
+            || (predictedAttackFacingSequence != 0 && inState.actionSequence >= predictedAttackFacingSequence
+                && (inState.shotPhase != CombatShotPhase::None || inState.shotCount > 0)))
+            ClearPredictedAttackFacing();
+        height = inState.height;
+        facingLeft = predictedAttackFacingSequence != 0 ? predictedAttackFacingLeft : inState.facingLeft;
         ConfigureMovementSpeeds(inRules.walkSpeed * inState.movementMultiplier, inRules.runSpeed * inState.movementMultiplier);
         pendingProjectileRequests.clear();
     }
@@ -571,6 +655,8 @@ namespace ActionRPG
             return state.verticalSpeed > 0.0f ? airHitStartAnimation : airHitFallAnimation;
         if (state.reaction == CombatReaction::Rising) return getUpAnimation;
         if (state.jumpPhase == CombatJumpPhase::Prepare) return jumpStartAnimation;
+        if (state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
+            return IsRunning() ? runAnimation : walkAnimation;
         if (state.shotPhase != CombatShotPhase::None)
         {
             if (state.airAttack)
@@ -588,12 +674,21 @@ namespace ActionRPG
         return const_cast<SpriteAnimation&>(std::as_const(*this).GetCombatAnimation());
     }
 
-    // Predict only ground movement; server snapshots decide combat phases, height and damage.
+    // Predict movement on the ground plane during jumps too; server owns height, phases and damage.
     void Character::UpdateCombatPresentation(const float inDeltaSeconds, const GameplayMap& inMap,
         const Vector2* inLocalDirection, const bool inRun)
     {
         if (!combatState) return;
         const auto& state = *combatState;
+        if (predictedAttackFacingSequence != 0)
+        {
+            predictedAttackFacingSeconds = std::max(0.0f, predictedAttackFacingSeconds - inDeltaSeconds);
+            if (predictedAttackFacingSeconds == 0.0f)
+            {
+                ClearPredictedAttackFacing();
+                facingLeft = state.facingLeft;
+            }
+        }
         combatPresentationSeconds = bufferedPresentation ? 0.0f : std::min(0.25f, combatPresentationSeconds + inDeltaSeconds);
         if (state.hp == 0) deathPresentationSeconds += inDeltaSeconds;
         if (inLocalDirection)
@@ -602,7 +697,7 @@ namespace ActionRPG
             Vector2 direction = *inLocalDirection;
             const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
             const bool allowed = state.hp != 0 && state.reaction == CombatReaction::None
-                && !state.skillActive && state.shotPhase == CombatShotPhase::None && state.jumpPhase == CombatJumpPhase::Grounded;
+                && !state.skillActive && (state.shotPhase == CombatShotPhase::None || state.shotPhase == CombatShotPhase::Recover);
             runningRequested = allowed && inRun;
             isMoving = allowed && length > 0.0f;
             if (isMoving)
@@ -610,7 +705,7 @@ namespace ActionRPG
                 const float speed = IsRunning() ? runSpeed : walkSpeed;
                 groundPosition.x += direction.x / length * speed * inDeltaSeconds;
                 groundPosition.y += direction.y / length * speed * inDeltaSeconds;
-                if (direction.x != 0.0f) facingLeft = direction.x < 0.0f;
+                if (direction.x != 0.0f && !IsAttackFacingLocked()) facingLeft = direction.x < 0.0f;
                 groundPosition = inMap.ConstrainGroundMovement(previous, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
             }
         }
@@ -625,6 +720,11 @@ namespace ActionRPG
             height = std::max(0.0f, height + state.verticalSpeed * combatPresentationSeconds
                 - 0.5f * combatRules.gravity * combatPresentationSeconds * combatPresentationSeconds);
         auto& animation = GetCombatAnimation();
+        if (state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
+        {
+            animation.Update(inDeltaSeconds * (bufferedPresentation ? movementAnimationScale : 1.0f));
+            return;
+        }
         float elapsed = combatPresentationSeconds;
         float duration = animation.GetDuration();
         bool loop = false;

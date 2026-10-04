@@ -120,16 +120,22 @@ namespace ActionRPG
     {
         Contract::Require(inCatalog.source == catalog.source, "Server/client skill catalogs differ. Install the same package on both ends.");
     }
-    std::string PlayerSkillPresentation::TryCommand(InputCommandQueue& inQueue, std::uint32_t inCharacterId, bool inAirborne) const
+    std::string PlayerSkillPresentation::TryCommand(InputCommandQueue& inQueue, std::uint32_t inCharacterId,
+        const std::unordered_map<std::string,std::uint32_t>& inSkillLevels,bool& outMatched) const
     {
+        outMatched=false;
         for (const auto& id : commandOrder)
         {
             const auto& skill = catalog.skills.at(id);
-            if (catalog.characterIds.at(skill.at("characterId").get<std::string>()) != inCharacterId
-                || skill.at(inAirborne ? "air" : "ground").is_null()) continue;
+            if (catalog.characterIds.at(skill.at("characterId").get<std::string>()) != inCharacterId) continue;
             std::vector<InputKey> keys;
             for (const auto& key : skill.at("input").at("command")) keys.push_back(Key(key.get<std::string>()));
-            if (inQueue.TryConsume(keys, skill.at("input").at("maxStepSeconds").get<double>())) return id;
+            if (inQueue.TryConsume(keys, skill.at("input").at("maxStepSeconds").get<double>()))
+            {
+                outMatched=true; // Always consume a matched command, even if it cannot be used now.
+                const auto learned=inSkillLevels.find(id);
+                return learned!=inSkillLevels.end() && learned->second>0 ? id : std::string{};
+            }
         }
         return {};
     }

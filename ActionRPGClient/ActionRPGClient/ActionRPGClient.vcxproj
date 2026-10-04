@@ -115,6 +115,7 @@
     <ClCompile Include="Game\RunState.cpp" />
     <ClCompile Include="Game\SkillCommandSystem.cpp" />
     <ClCompile Include="Game\PlayerSkillPresentation.cpp" />
+    <ClCompile Include="Game\SkillUi.cpp" />
     <ClCompile Include="Graphics\D2DRenderer.cpp" />
     <ClCompile Include="Graphics\GraphicsDevice.cpp" />
     <ClCompile Include="Main.cpp" />
@@ -148,6 +149,9 @@
     <ClInclude Include="Game\SkillCommandSystem.h" />
     <ClInclude Include="Game\PlayerSkillCatalog.h" />
     <ClInclude Include="Game\PlayerSkillPresentation.h" />
+    <ClInclude Include="Game\SkillUi.h" />
+    <ClInclude Include="Game\CharacterProgression.h" />
+    <ClInclude Include="Game\SkillTreeCatalog.h" />
     <ClInclude Include="Game\Vector2.h" />
     <ClInclude Include="Graphics\D2DRenderer.h" />
     <ClInclude Include="Graphics\GraphicsDevice.h" />
@@ -171,6 +175,9 @@
     <None Include="..\Assets\Data\PlayerSkills.json" />
     <None Include="..\Assets\Data\PlayerSkillVisuals.json" />
     <None Include="..\Assets\Data\system_menu.ini" />
+    <None Include="..\Assets\Data\SkillUi.json" />
+    <None Include="..\Assets\Images\UI\system_menu_skills.png" />
+    <None Include="..\Assets\Images\UI\Skills\character1_front_kick.png" />
     <None Include="ClientOptionFile\CoreOption.txt" />
     <None Include="..\Assets\README.md" />
     <None Include="..\Assets\Images\Monsters\dummy.png" />

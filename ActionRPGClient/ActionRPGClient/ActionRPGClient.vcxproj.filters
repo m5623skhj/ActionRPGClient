@@ -110,4 +110,13 @@
     <None Include="..\Assets\Data\PlayerSkills.json"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Data\PlayerSkillVisuals.json"><Filter>Assets</Filter></None>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Game\SkillUi.cpp"><Filter>Game</Filter></ClCompile>
+    <ClInclude Include="Game\SkillUi.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\CharacterProgression.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\SkillTreeCatalog.h"><Filter>Game</Filter></ClInclude>
+    <None Include="..\Assets\Data\SkillUi.json"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\UI\system_menu_skills.png"><Filter>Assets</Filter></None>
+    <None Include="..\Assets\Images\UI\Skills\character1_front_kick.png"><Filter>Assets</Filter></None>
+  </ItemGroup>
 </Project>

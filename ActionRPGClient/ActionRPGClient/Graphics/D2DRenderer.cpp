@@ -1,6 +1,8 @@
 #include "Graphics/D2DRenderer.h"
 
 #include <d2d1_1helper.h>
+#include <initguid.h>
+#include <d2d1effects_2.h>
 
 #include <iomanip>
 #include <sstream>
@@ -181,6 +183,50 @@ namespace ActionRPG
         {
             d2dContext->SetTransform(originalTransform);
         }
+    }
+
+    void D2DRenderer::SetUiFontFamily(std::wstring_view inFamily)
+    { uiFontFamily=inFamily; uiTextFormats.clear(); }
+
+    void D2DRenderer::DrawUiText(std::wstring_view inText,const D2D1_RECT_F& inRect,const D2D1_COLOR_F& inColor,
+        float inSize,bool inWrap,bool inCentered)
+    {
+        const auto key=std::make_tuple(inSize,inWrap,inCentered);
+        auto found=uiTextFormats.find(key);
+        if (found==uiTextFormats.end())
+        {
+            Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
+            ThrowIfFailed(graphicsDevice.GetDWriteFactory()->CreateTextFormat(uiFontFamily.c_str(),nullptr,
+                DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,inSize,L"ko-KR",&format),"Create UI text format");
+            format->SetWordWrapping(inWrap ? DWRITE_WORD_WRAPPING_EMERGENCY_BREAK:DWRITE_WORD_WRAPPING_NO_WRAP);
+            format->SetTextAlignment(inCentered ? DWRITE_TEXT_ALIGNMENT_CENTER:DWRITE_TEXT_ALIGNMENT_LEADING);
+            format->SetParagraphAlignment(inCentered ? DWRITE_PARAGRAPH_ALIGNMENT_CENTER:DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            found=uiTextFormats.emplace(key,std::move(format)).first;
+        }
+        solidColorBrush->SetColor(inColor);
+        d2dContext->DrawTextW(inText.data(),static_cast<UINT32>(inText.size()),found->second.Get(),inRect,
+            solidColorBrush.Get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
+    // One reusable grayscale effect; sprites continue using the original nearest-neighbor renderer.
+    void D2DRenderer::DrawUiIcon(ID2D1Bitmap1* inBitmap,const D2D1_RECT_F& inRect,bool inGray)
+    {
+        if (!inBitmap || inRect.right<=inRect.left || inRect.bottom<=inRect.top) return;
+        const auto size=inBitmap->GetSize();
+        if (!inGray)
+        {
+            const auto source=D2D1::RectF(0,0,size.width,size.height);
+            d2dContext->DrawBitmap(inBitmap,&inRect,1.0f,D2D1_INTERPOLATION_MODE_LINEAR,&source,nullptr);
+            return;
+        }
+        if (!grayscaleEffect) ThrowIfFailed(d2dContext->CreateEffect(CLSID_D2D1Grayscale,&grayscaleEffect),"Create grayscale UI effect");
+        grayscaleEffect->SetInput(0,inBitmap);
+        D2D1_MATRIX_3X2_F previous; d2dContext->GetTransform(&previous);
+        d2dContext->SetTransform(D2D1::Matrix3x2F::Scale((inRect.right-inRect.left)/size.width,(inRect.bottom-inRect.top)/size.height)
+            *D2D1::Matrix3x2F::Translation(inRect.left,inRect.top)*previous);
+        d2dContext->DrawImage(grayscaleEffect.Get(),nullptr,nullptr,D2D1_INTERPOLATION_MODE_LINEAR);
+        d2dContext->SetTransform(previous);
+        grayscaleEffect->SetInput(0,nullptr);
     }
 
     void D2DRenderer::DrawText(const std::wstring_view inText, const float inLeft, const float inTop,

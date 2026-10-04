@@ -1,0 +1,13 @@
+{
+  "format": "SkillUi", "schemaVersion": 1,
+  "layout": {"referenceWidth":1280,"referenceHeight":720,"minimumWidth":640,"minimumHeight":360,"compactWidth":1100,"compactHeight":640,"stackedWidth":960,"dragThreshold":6,"learnTimeoutSeconds":10},
+  "normalBar": {"slotWidth":64,"slotHeight":80,"iconLeft":4,"iconTop":4,"iconSize":56,"keyLeft":4,"keyTop":60,"keyWidth":56,"keyHeight":16,"cooldownLeft":4,"cooldownTop":20,"cooldownWidth":56,"cooldownHeight":24,"gap":8,"padding":8,"bottomMargin":16,"keyFontSize":14,"cooldownFontSize":18},
+  "compactBar": {"slotWidth":56,"slotHeight":72,"iconLeft":4,"iconTop":4,"iconSize":48,"keyLeft":4,"keyTop":52,"keyWidth":48,"keyHeight":16,"cooldownLeft":4,"cooldownTop":18,"cooldownWidth":48,"cooldownHeight":22,"gap":6,"padding":8,"bottomMargin":12,"keyFontSize":14,"cooldownFontSize":16},
+  "normalWindow": {"width":960,"height":552,"margin":32,"barGap":24,"padding":20,"headerHeight":40,"footerHeight":32,"contentGap":16,"columnGap":24,"treeRatio":0.6,"tabHeight":28,"detailIconSize":96,"learnButtonHeight":32},
+  "compactWindow": {"width":960,"height":552,"margin":12,"barGap":12,"padding":12,"headerHeight":36,"footerHeight":28,"contentGap":12,"columnGap":20,"treeRatio":0.6,"tabHeight":28,"detailIconSize":96,"learnButtonHeight":32},
+  "node": {"width":96,"height":96,"iconLeft":20,"iconTop":8,"iconSize":56,"nameLeft":8,"nameTop":68,"nameWidth":80,"nameHeight":24,"columnGap":24,"rowGap":24},
+  "compactNode": {"width":80,"height":80,"iconLeft":16,"iconTop":4,"iconSize":48,"nameLeft":4,"nameTop":56,"nameWidth":72,"nameHeight":20,"columnGap":16,"rowGap":16},
+  "fonts": {"family":"Segoe UI","title":20,"body":16,"small":14,"lineHeight":1.4},
+  "colors": {"panel":[0.045,0.055,0.075,0.96],"border":[0.48,0.54,0.62,1],"selected":[1,0.76,0.28,1],"text":[0.94,0.94,0.92,1],"cooldownText":[1,1,1,1],"cooldownBacking":[0.02,0.025,0.035,0.85],"locked":[0.36,0.38,0.42,1]},
+  "art": {"sourceWidth":128,"sourceHeight":128,"safeMargin":8,"filter":"linear"}
+}

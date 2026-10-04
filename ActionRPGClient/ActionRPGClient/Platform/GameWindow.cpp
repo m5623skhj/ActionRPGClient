@@ -55,12 +55,14 @@ namespace ActionRPG
             throw std::runtime_error("Failed to create the Win32 window.");
         }
 
+        activeWindow = this;
         ShowWindow(windowHandle, SW_SHOWDEFAULT);
         UpdateWindow(windowHandle);
     }
 
     GameWindow::~GameWindow()
     {
+        if (activeWindow == this) activeWindow = nullptr;
         if (windowHandle != nullptr)
         {
             DestroyWindow(windowHandle);
@@ -99,6 +101,22 @@ namespace ActionRPG
         return true;
     }
 
+    void GameWindow::SetMinimumClientSize(std::uint32_t inWidth,std::uint32_t inHeight)
+    { if (activeWindow) { activeWindow->minimumWidth=inWidth; activeWindow->minimumHeight=inHeight; } }
+
+    // Window dispatch and GameWorld run on the same thread. Consume once per game tick.
+    void GameWindow::ConsumeUiPointer(InputState& input)
+    {
+        if (!activeWindow) { input.cancelDrag=true; return; }
+        auto& window=*activeWindow;
+        input.mouseX=window.mouseX; input.mouseY=window.mouseY;
+        input.leftMouseDown=window.leftMouseDown; input.leftMouseReleased=window.pendingLeftMouseReleased;
+        input.rightMousePressed=window.pendingRightMousePressed; input.cancelDrag=window.pendingCancelDrag;
+        input.rightClickX=window.pendingRightClickX; input.rightClickY=window.pendingRightClickY;
+        input.shiftHeld=window.IsKeyDown(VK_SHIFT);
+        window.pendingLeftMouseReleased=window.pendingRightMousePressed=window.pendingCancelDrag=false;
+    }
+
     InputState GameWindow::ConsumeInputState()
     {
         const InputState inputState{
@@ -112,6 +130,9 @@ namespace ActionRPG
             .clickY = pendingClickY,
             .mouseWheelDelta = pendingMouseWheelDelta,
             .leftMousePressed = pendingLeftMousePressed,
+            .leftMouseDown = leftMouseDown, .leftMouseReleased = pendingLeftMouseReleased,
+            .rightMousePressed = pendingRightMousePressed, .cancelDrag = pendingCancelDrag,
+            .shiftHeld = IsKeyDown(VK_SHIFT), .rightClickX = pendingRightClickX, .rightClickY = pendingRightClickY,
             .textInput = std::move(pendingTextInput),
             .pressedKeys = std::move(pendingPressedKeys)
         };
@@ -151,6 +172,21 @@ namespace ActionRPG
         case WM_ERASEBKGND:
             return 1;
 
+        case WM_GETMINMAXINFO:
+            if (minimumWidth && minimumHeight)
+            {
+                RECT rect{0,0,static_cast<LONG>(minimumWidth),static_cast<LONG>(minimumHeight)};
+                if (AdjustWindowRectEx(&rect,static_cast<DWORD>(GetWindowLongPtrW(windowHandle,GWL_STYLE)),FALSE,
+                    static_cast<DWORD>(GetWindowLongPtrW(windowHandle,GWL_EXSTYLE))))
+                {
+                    auto* info = reinterpret_cast<MINMAXINFO*>(inLParam);
+                    info->ptMinTrackSize.x = rect.right-rect.left;
+                    info->ptMinTrackSize.y = rect.bottom-rect.top;
+                    return 0;
+                }
+            }
+            return DefWindowProcW(windowHandle,inMessage,inWParam,inLParam);
+
         case WM_SIZE:
             clientWidth = static_cast<std::uint32_t>(LOWORD(inLParam));
             clientHeight = static_cast<std::uint32_t>(HIWORD(inLParam));
@@ -166,7 +202,7 @@ namespace ActionRPG
             {
                 const bool wasKeyDown = keyStates[inWParam];
                 keyStates[inWParam] = true;
-                if (!wasKeyDown)
+                if (!wasKeyDown && (inLParam & (static_cast<LPARAM>(1) << 30)) == 0)
                 {
                     RecordPressedKey(inWParam);
                 }
@@ -194,6 +230,25 @@ namespace ActionRPG
                 pendingClickY = mouseY;
             }
             pendingLeftMousePressed = true;
+            leftMouseDown = true;
+            SetCapture(windowHandle);
+            return 0;
+
+        case WM_LBUTTONUP:
+            mouseX = static_cast<float>(GET_X_LPARAM(inLParam));
+            mouseY = static_cast<float>(GET_Y_LPARAM(inLParam));
+            leftMouseDown = false; pendingLeftMouseReleased = true;
+            if (GetCapture() == windowHandle) ReleaseCapture();
+            return 0;
+
+        case WM_RBUTTONDOWN:
+            mouseX = pendingRightClickX = static_cast<float>(GET_X_LPARAM(inLParam));
+            mouseY = pendingRightClickY = static_cast<float>(GET_Y_LPARAM(inLParam));
+            pendingRightMousePressed = true;
+            return 0;
+
+        case WM_CAPTURECHANGED:
+            if (leftMouseDown) { leftMouseDown = false; pendingCancelDrag = true; pendingLeftMousePressed = false; }
             return 0;
 
         case WM_MOUSEWHEEL:
@@ -208,6 +263,9 @@ namespace ActionRPG
             return 0;
 
         case WM_KILLFOCUS:
+            leftMouseDown = false; pendingCancelDrag = true;
+            pendingLeftMouseReleased = pendingRightMousePressed = false;
+            if (GetCapture() == windowHandle) ReleaseCapture();
             keyStates.fill(false);
             pendingPressedKeys.clear();
             pendingMouseWheelDelta = 0;
@@ -228,6 +286,7 @@ namespace ActionRPG
             const HWND destroyedWindowHandle = windowHandle;
             SetWindowLongPtrW(destroyedWindowHandle, GWLP_USERDATA, 0);
             windowHandle = nullptr;
+            if (activeWindow == this) activeWindow = nullptr;
             return DefWindowProcW(destroyedWindowHandle, inMessage, inWParam, inLParam);
         }
 
@@ -264,6 +323,12 @@ namespace ActionRPG
         case 'V':
             pendingPressedKeys.push_back(InputKey::ActionV);
             break;
+        case 'A': pendingPressedKeys.push_back(InputKey::SkillA); break;
+        case 'S': pendingPressedKeys.push_back(InputKey::SkillS); break;
+        case 'D': pendingPressedKeys.push_back(InputKey::SkillD); break;
+        case 'F': pendingPressedKeys.push_back(InputKey::SkillF); break;
+        case 'G': pendingPressedKeys.push_back(InputKey::SkillG); break;
+        case 'H': pendingPressedKeys.push_back(InputKey::SkillH); break;
         case VK_RETURN:
             pendingPressedKeys.push_back(InputKey::ConfirmSelection);
             break;

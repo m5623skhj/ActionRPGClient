@@ -9,7 +9,7 @@
 #include "Game/MapBackground.h"
 #include "Game/Player.h"
 #include "Game/ProjectileSystem.h"
-#include "Game/SkillCommandSystem.h"
+#include "Game/SkillUi.h"
 #include "Game/PlayerSkillPresentation.h"
 #include "Input/InputState.h"
 #include "Network/TownClient.h"
@@ -20,6 +20,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
+#include <deque>
 #include <mutex>
 #include <memory>
 #include <optional>
@@ -85,14 +87,17 @@ namespace ActionRPG
             Menu,
             Party,
             PartyDirectory,
+            PartyDetails,
             PartyCreate,
-            ExitConfirmation
+            ExitConfirmation,
+            Skills
         };
 
         enum class SystemMenuAction
         {
             Party,
-            Exit
+            Exit,
+            Skills
         };
 
         struct SystemMenuEntry
@@ -117,8 +122,19 @@ namespace ActionRPG
         void UpdateDungeonSelection(const InputState& inInput);
         void UpdateSystemInterface(const InputState& inInput);
         void UpdatePartyInterface(const InputState& inInput);
+        [[nodiscard]] bool IsDungeonUiRestricted() const noexcept
+        { return dungeonEntryState != DungeonEntryState::Idle; }
+        [[nodiscard]] static bool IsPartyUiPage(SystemUiPage inPage) noexcept
+        { return inPage==SystemUiPage::Party || inPage==SystemUiPage::PartyDirectory || inPage==SystemUiPage::PartyCreate || inPage==SystemUiPage::PartyDetails; }
         void SetSystemUiPage(SystemUiPage inPage);
         void RequestPartyDirectoryPage(std::uint32_t inPage);
+        void RequestSelectedPartyDetail();
+        void ResetPartyRequestUi();
+        void UpdatePartyNotifications(const InputState& inInput);
+        void RenderPartyNotifications(D2DRenderer& inRenderer) const;
+        void RenderPartyDetails(D2DRenderer& inRenderer) const;
+        [[nodiscard]] bool CanRequestPartyJoin() const noexcept;
+        [[nodiscard]] bool IsPartyJoinNoticeVisible() const noexcept;
         void SubmitPartyTitle();
         void SubmitPartyCreation();
         void RequestDungeon(std::uint32_t inDungeonId);
@@ -144,8 +160,13 @@ namespace ActionRPG
         std::vector<CharacterHitType> pendingPlayerHits;
         ProjectileSystem projectileSystem;
         InputCommandQueue commandQueue;
-        SkillCommandSystem skillCommandSystem;
+
         PlayerSkillPresentation playerSkillPresentation;
+        SkillUi skillUi;
+        std::unordered_map<std::uint32_t,std::string> skillActionIds;
+        std::uint64_t lastSkillStateTick{};
+        std::uint32_t lastAcceptedSkillSequence{};
+        bool hasSkillStateTick{};
         const AssetCatalog& assetCatalog;
         D2DRenderer& renderer;
         TownClient& townClient;
@@ -170,8 +191,20 @@ namespace ActionRPG
         std::unordered_map<std::uint64_t, RemotePlayerState> remotePlayers;
         std::vector<TownProtocol::TransitionZone> transitionZones;
         std::uint64_t localPlayerId{};
+        std::uint32_t localCharacterId{};
         std::uint32_t movementSequence{};
         float movementSendAccumulator{};
+        struct TownMovementSend
+        {
+            std::uint32_t sequence{};
+            std::chrono::steady_clock::time_point sentTime{};
+        };
+        // Bounded, game-thread-only timestamps for first acknowledgements of older heartbeats.
+        std::deque<TownMovementSend> townMovementSends;
+        std::uint32_t townMovementStateSequence{};
+        std::uint32_t lastTownAcknowledgedSequence{}, lastTownMovementTick{};
+        float townSnapshotDelaySeconds{};
+        bool hasTownMovementTick{}, hasTownDelaySample{};
         std::int8_t lastSentDirectionX{};
         std::int8_t lastSentDirectionY{};
         bool hasSentMovementInput{};
@@ -202,6 +235,15 @@ namespace ActionRPG
         TownProtocol::PartySnapshot partySnapshot;
         TownProtocol::PartyDirectoryPage partyDirectoryPage;
         bool directoryPageRequestPending{};
+        std::uint64_t wantedPartyDirectoryRevision{};
+        std::uint64_t selectedDirectoryPartyId{};
+        std::optional<TownProtocol::PartyDetailResponse> partyDetails;
+        bool partyDetailRequestPending{}, partyDetailRefreshNeeded{}, partyJoinSendPending{};
+        // Mutated only by Update/ProcessNetworkEvents on the game thread.
+        std::vector<TownProtocol::PartyJoinRequestUpdate> partyJoinRequests;
+        std::optional<TownProtocol::PartyJoinRequestUpdate> ownPartyJoinRequest;
+        std::uint64_t answeringPartyJoinRequestId{};
+        bool partyKickedNotice{};
         std::wstring partyTitleDraft;
         std::wstring newPartyTitleDraft;
         bool newPartyIsPublic{};

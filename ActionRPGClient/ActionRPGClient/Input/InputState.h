@@ -15,6 +15,7 @@ namespace ActionRPG
         ActionC,
         ActionX,
         ActionV,
+        SkillA, SkillS, SkillD, SkillF, SkillG, SkillH,
         ConfirmSelection,
         ToggleSystemMenu
     };
@@ -31,6 +32,8 @@ namespace ActionRPG
         float clickY{};
         int mouseWheelDelta{};
         bool leftMousePressed{};
+        bool leftMouseDown{}, leftMouseReleased{}, rightMousePressed{}, cancelDrag{}, shiftHeld{};
+        float rightClickX{}, rightClickY{};
         std::wstring textInput;
         std::vector<InputKey> pressedKeys;
 

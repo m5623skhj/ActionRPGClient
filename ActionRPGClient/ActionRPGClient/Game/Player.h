@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 namespace ActionRPG
 {
@@ -22,11 +23,23 @@ namespace ActionRPG
         void ResetActionState() override;
         void SetRunningEnabled(bool inEnabled) override;
         void ActivateCommandSkill(const SkillEffectDefinition& inEffect);
+        [[nodiscard]] bool ActivateCatalogSkill(const std::string& inId, const std::unordered_map<std::string,std::uint32_t>& inSkillLevels);
+        [[nodiscard]] const std::unordered_map<std::string,float>& GetTownSkillCooldowns() const { return townSkillCooldowns; }
+        [[nodiscard]] bool IsLocallyCasting() const { return townSkill.has_value(); }
         void SetSkillPresentation(const PlayerSkillPresentation* inPresentation) { skillPresentation = inPresentation; }
         void ReconcileGroundPosition(Vector2 inAuthoritativePosition);
+        void ClearTownPositionCorrection() { pendingTownCorrection = {}; }
+        void ReconcileTownGroundPosition(Vector2 inAuthoritativePosition, Vector2 inVelocity,
+            float inSnapshotDelaySeconds, const GameplayMap& inGameplayMap);
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const override;
 
     private:
+        void UpdateTownPositionCorrection(float inDeltaSeconds, const GameplayMap& inGameplayMap);
+        Vector2 pendingTownCorrection{};
+        // Local town preview only. Dungeon damage and cooldowns remain server authoritative.
+        std::optional<CombatPlayerState> townSkill;
+        float townSkillDuration{};
+        std::unordered_map<std::string, float> townSkillCooldowns;
         float skillEffectRemainingSeconds{};
         std::optional<SkillEffectDefinition> activeSkillEffect;
         double movementTimeSeconds{};

@@ -216,7 +216,7 @@ namespace ActionRPG
         worldJson.clear(); worldBytes = 0; receivingWorld = false;
         combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
         lastCompletedCombatId = 0;
-        combatPolling = combatRequestPending = false;
+        combatPolling = combatRequestPending = combatRefreshRequested = false;
     }
 
     // Game-thread API: only the worker touches impl while this future is active.
@@ -224,7 +224,7 @@ namespace ActionRPG
     {
         if (stopTask.valid()) return;
         ResetRealtime();
-        combatPolling = combatRequestPending = receivingWorld = false;
+        combatPolling = combatRequestPending = combatRefreshRequested = receivingWorld = false;
         stopTask = std::async(std::launch::async, [this]() { impl->StopClient(); });
     }
 
@@ -255,9 +255,15 @@ namespace ActionRPG
     {
         combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;
         lastCompletedCombatId = 0;
-        combatPolling = true; combatRequestPending = false;
+        combatPolling = true; combatRequestPending = combatRefreshRequested = false;
         combatNextRequest = std::chrono::steady_clock::now();
         combatProgressDeadline = combatNextRequest + std::chrono::seconds(30);
+    }
+
+    void DungeonClient::RequestCombatRefresh()
+    {
+        // This flag is game-thread-owned and coalesces requests; never start a second transfer.
+        if (!stopTask.valid() && combatPolling) combatRefreshRequested=true;
     }
 
     void DungeonClient::ResetRealtime()
@@ -381,6 +387,8 @@ namespace ActionRPG
             if (now < combatResponseDeadline) return;
             combatRequestPending = false;
         }
+        if (combatRefreshRequested && combatSnapshotId==0 && !combatRequestPending)
+        { combatNextRequest=std::min(combatNextRequest,now); combatRefreshRequested=false; }
         if (!HasFreshRealtime() && realtimeFallbackPending && !combatRequestPending)
         {
             combatNextRequest = std::min(combatNextRequest, now);

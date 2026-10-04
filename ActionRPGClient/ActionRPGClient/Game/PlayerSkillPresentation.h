@@ -21,8 +21,10 @@ namespace ActionRPG
     {
     public:
         PlayerSkillPresentation(const AssetCatalog& inAssets, D2DRenderer& inRenderer);
+        [[nodiscard]] const nlohmann::json& GetDefinition(const std::string& inId) const { return catalog.skills.at(inId); }
         void ValidateServer(const PlayerSkills::Catalog& inCatalog) const;
-        [[nodiscard]] std::string TryCommand(InputCommandQueue& inQueue, std::uint32_t inCharacterId, bool inAirborne) const;
+        [[nodiscard]] std::string TryCommand(InputCommandQueue& inQueue, std::uint32_t inCharacterId,
+            const std::unordered_map<std::string,std::uint32_t>& inSkillLevels, bool& outMatched) const;
         [[nodiscard]] bool Render(const CombatPlayerState& inState, Vector2 inGround, float inHeight,
             float inSeconds, D2DRenderer& inRenderer, const Camera& inCamera) const;
     private:

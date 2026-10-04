@@ -1,5 +1,152 @@
 {
   "format": "PlayerSkillVisuals",
   "schemaVersion": 1,
-  "skills": []
+  "skills": [
+    {
+      "id": "Character1.FrontKick",
+      "characterId": "Character1",
+      "ground": {
+        "motion": {
+          "image": "Images/Characters/player_front_kick.png",
+          "width": 1774,
+          "height": 887,
+          "frameCount": 8,
+          "fps": 16,
+          "durationSeconds": 0.5,
+          "loop": false,
+          "holdLastFrame": true,
+          "renderSize": {
+            "width": 210.01037432249322,
+            "height": 210.01037432249322
+          },
+          "scaleToMovement": 0.6233062330623306,
+          "worldUnitsPerSourcePixel": 0.4918275745257452,
+          "frames": [
+            {
+              "index": 0,
+              "sourceRect": {
+                "x": 16,
+                "y": 16,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 137,
+                "y": 403
+              },
+              "phase": "prepare",
+              "pose": "weight shift"
+            },
+            {
+              "index": 1,
+              "sourceRect": {
+                "x": 459,
+                "y": 16,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 183,
+                "y": 403
+              },
+              "phase": "prepare",
+              "pose": "support knee flex/right heel rise"
+            },
+            {
+              "index": 2,
+              "sourceRect": {
+                "x": 903,
+                "y": 16,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 206,
+                "y": 401
+              },
+              "phase": "prepare",
+              "pose": "right knee lift"
+            },
+            {
+              "index": 3,
+              "sourceRect": {
+                "x": 1346,
+                "y": 16,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 202,
+                "y": 401
+              },
+              "phase": "strike",
+              "pose": "strike extension"
+            },
+            {
+              "index": 4,
+              "sourceRect": {
+                "x": 16,
+                "y": 459,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 210,
+                "y": 392
+              },
+              "phase": "strike",
+              "pose": "peak strike"
+            },
+            {
+              "index": 5,
+              "sourceRect": {
+                "x": 459,
+                "y": 459,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 223,
+                "y": 393
+              },
+              "phase": "recover",
+              "pose": "knee retraction"
+            },
+            {
+              "index": 6,
+              "sourceRect": {
+                "x": 903,
+                "y": 459,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 207,
+                "y": 392
+              },
+              "phase": "recover",
+              "pose": "right foot descent"
+            },
+            {
+              "index": 7,
+              "sourceRect": {
+                "x": 1346,
+                "y": 459,
+                "width": 427,
+                "height": 427
+              },
+              "pivot": {
+                "x": 136,
+                "y": 391
+              },
+              "phase": "recover",
+              "pose": "recovered neutral"
+            }
+          ]
+        },
+        "effect": null
+      },
+      "air": null
+    }
+  ]
 }

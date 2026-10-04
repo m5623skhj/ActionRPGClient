@@ -65,6 +65,7 @@ namespace ActionRPG
         [[nodiscard]] bool IsStopComplete();
         void RequestWorld();
         void StartCombatPolling();
+        void RequestCombatRefresh();
         void StartRealtime(std::uint64_t inRoomId);
         [[nodiscard]] bool HasFreshRealtime() const;
         void SendAction(std::uint32_t inSequence, std::uint8_t inAction, bool inFacingLeft);
@@ -100,7 +101,7 @@ namespace ActionRPG
         void UpdateCombatPolling();
         std::string combatJson;
         std::uint32_t combatSnapshotId{}, combatBytes{}, combatOffset{}, lastCompletedCombatId{};
-        bool combatPolling{}, combatRequestPending{};
+        bool combatPolling{}, combatRequestPending{}, combatRefreshRequested{};
         std::chrono::steady_clock::time_point combatNextRequest{}, combatResponseDeadline{}, combatProgressDeadline{};
     };
 }
