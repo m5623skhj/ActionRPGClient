@@ -79,6 +79,8 @@ namespace ActionRPG
             resolver.cancel();
             socket.close(ignoredError);
             workGuard.reset();
+            // Do not let pending connect/read handlers keep the shutdown join alive.
+            ioContext.stop();
         });
         if (networkThread.joinable())
         {
@@ -291,6 +293,7 @@ namespace ActionRPG
         resolver.async_resolve(host, port, [this](const asio::error_code& inError,
             const asio::ip::tcp::resolver::results_type& inResults)
         {
+            if (stopping) return;
             if (inError)
             {
                 ScheduleReconnect();
@@ -300,6 +303,7 @@ namespace ActionRPG
             asio::async_connect(socket, inResults, [this](const asio::error_code& inConnectError,
                 const asio::ip::tcp::endpoint&)
             {
+                if (stopping) return;
                 if (inConnectError)
                 {
                     HandleDisconnect();

@@ -105,8 +105,8 @@ namespace ActionRPG
             state.store(DungeonConnectionState::Connecting, std::memory_order_release);
             try
             {
-                connectionThread = std::thread(
-                    [this, address = std::move(inSessionBrokerAddress), inSessionBrokerPort]()
+                connectionThread = std::jthread(
+                    [this, address = std::move(inSessionBrokerAddress), inSessionBrokerPort](std::stop_token inStopToken)
                     {
                         std::optional<std::filesystem::path> brokerOptions;
                         bool started = false;
@@ -119,7 +119,7 @@ namespace ActionRPG
                             if (!executableDirectory.empty() && brokerOptions.has_value())
                             {
                                 started = RUDPClientCore::Start(
-                                    coreOptions.wstring(), brokerOptions->wstring(), false);
+                                    coreOptions.wstring(), brokerOptions->wstring(), false, inStopToken);
                             }
                         }
                         catch (...)
@@ -149,8 +149,10 @@ namespace ActionRPG
 
         void StopClient()
         {
+            // Cancel broker waits before joining the connection worker.
             if (connectionThread.joinable())
             {
+                connectionThread.request_stop();
                 connectionThread.join();
             }
             RUDPClientCore::Stop();
@@ -178,7 +180,7 @@ namespace ActionRPG
         }
 
     private:
-        std::thread connectionThread;
+        std::jthread connectionThread;
         std::atomic<DungeonConnectionState> state = DungeonConnectionState::Stopped;
         std::atomic_bool startCompleted{};
     };
