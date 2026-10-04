@@ -35,7 +35,7 @@ namespace ActionRPG
         [[nodiscard]] static std::size_t ToIndex(RunDirection inDirection);
 
     private:
-        static constexpr double DOUBLE_TAP_SECONDS = 0.25;
+        static constexpr double DOUBLE_TAP_SECONDS = 0.4;
 
         RunDirection runningDirection{ RunDirection::None };
         std::array<double, 4> lastPressedTimes{ -1000.0, -1000.0, -1000.0, -1000.0 };

@@ -158,7 +158,7 @@ namespace ActionRPG
         [[nodiscard]] bool IsAttacking() const { return attackPhase != AttackPhase::None; }
         void BeginJump();
         float UpdateJump(float inDeltaSeconds);
-        void BeginAttack(bool inAirAttack);
+        void BeginAttack(bool inAirAttack, bool inContinueCombo = false);
         void CancelAttack();
         [[nodiscard]] SpriteAnimation& GetAttackAnimation();
         [[nodiscard]] const SpriteAnimation& GetAttackAnimation() const;
@@ -172,12 +172,20 @@ namespace ActionRPG
     private:
         static constexpr float HORIZONTAL_RADIUS = WIDTH * 0.5f;
         static constexpr float DEPTH_RADIUS = 18.0f;
-        static constexpr float JUMP_SPEED = 700.0f;
+        // Approximately 1.5 times the 192-unit standing sprite, including frame integration.
+        static constexpr float JUMP_SPEED = 1035.0f;
         static constexpr float GRAVITY = 1800.0f;
         static constexpr float AIRBORNE_HIT_SPEED = 560.0f;
         static constexpr float AIR_HIT_FALL_SPEED = 500.0f;
         static constexpr float KNOCKDOWN_HOLD_SECONDS = 0.25f;
         static constexpr std::uint32_t MAX_ATTACK_SHOTS = 5;
+        static constexpr float SHOT_INPUT_SECONDS = 0.4f;
+        static constexpr float ACTION_BUFFER_SECONDS = 0.25f;
+        struct BufferedAction
+        {
+            bool jump{};
+            float remainingSeconds{};
+        };
         static constexpr float AIR_SHOT_RECOIL_LIFT = 3.0f;
         static constexpr float AIR_SHOT_RECOIL_SPEED = 35.0f;
         static constexpr float AIR_SHOT_RECOIL_BACKWARD = 4.0f;
@@ -199,6 +207,8 @@ namespace ActionRPG
         std::uint32_t airShotCount{};
         std::uint32_t attackShotCount{};
         std::uint32_t pendingAttackShots{};
+        float shotInputRemainingSeconds{};
+        std::deque<BufferedAction> bufferedActions;
         float walkSpeed = DEFAULT_WALK_SPEED;
         float runSpeed = DEFAULT_RUN_SPEED;
         bool runningRequested{};

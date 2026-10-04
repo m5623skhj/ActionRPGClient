@@ -80,32 +80,47 @@ namespace ActionRPG
         }
         runningRequested = runningEnabled && inActions.run;
         Vector2 direction = inActions.moveDirection;
+        shotInputRemainingSeconds = std::max(0.0f, shotInputRemainingSeconds - inDeltaSeconds);
+        for (auto& action : bufferedActions) action.remainingSeconds -= inDeltaSeconds;
+        if (inActions.jump && bufferedActions.size() < MAX_ATTACK_SHOTS + 1)
+            bufferedActions.push_back({ true, ACTION_BUFFER_SECONDS });
+        for (std::uint32_t index = 0; index < inActions.attackPressCount
+            && bufferedActions.size() < MAX_ATTACK_SHOTS + 1; ++index)
+            bufferedActions.push_back({ false, ACTION_BUFFER_SECONDS });
 
-        if (inActions.jump && jumpPhase == JumpPhase::Grounded)
+        // Keep early keys for 250 ms, without extending landing or attack movement locks.
+        while (!bufferedActions.empty())
         {
-            BeginJump();
-        }
-
-        // Attacks requested during preparation begin aiming immediately after takeoff.
-        for (std::uint32_t attackIndex = 0; attackIndex < inActions.attackPressCount; ++attackIndex)
-        {
-            if (jumpPhase == JumpPhase::Landing)
+            const auto action = bufferedActions.front();
+            if (action.remainingSeconds <= 0) { bufferedActions.pop_front(); continue; }
+            if (action.jump)
             {
-                continue;
+                if (jumpPhase != JumpPhase::Grounded || IsAttacking()) break;
+                BeginJump();
             }
-
-            if (!IsAttacking())
+            else
             {
-                const bool wantsAirAttack = jumpPhase != JumpPhase::Grounded;
-                if (!wantsAirAttack || airShotCount < MAX_ATTACK_SHOTS)
+                if (jumpPhase == JumpPhase::Landing) break;
+                if (!IsAttacking())
                 {
-                    BeginAttack(wantsAirAttack);
+                    const bool wantsAirAttack = jumpPhase != JumpPhase::Grounded;
+                    const bool continuing = shotInputRemainingSeconds > 0 && airAttack == wantsAirAttack;
+                    if ((!wantsAirAttack || airShotCount < MAX_ATTACK_SHOTS)
+                        && (!continuing || attackShotCount < MAX_ATTACK_SHOTS))
+                        BeginAttack(wantsAirAttack, continuing);
+                }
+                else if ((airAttack ? airShotCount : attackShotCount) + pendingAttackShots < MAX_ATTACK_SHOTS)
+                {
+                    ++pendingAttackShots;
+                    if (attackPhase == AttackPhase::End)
+                    {
+                        attackPhase = AttackPhase::Fire;
+                        attackProjectileQueued = false;
+                        GetAttackAnimation().Reset();
+                    }
                 }
             }
-            else if ((airAttack ? airShotCount : attackShotCount) + pendingAttackShots < MAX_ATTACK_SHOTS)
-            {
-                ++pendingAttackShots;
-            }
+            bufferedActions.pop_front();
         }
 
         const float lengthSquared = direction.x * direction.x + direction.y * direction.y;
@@ -177,6 +192,7 @@ namespace ActionRPG
         const bool wasAirborne = height > 0.0f || jumpPhase == JumpPhase::Airborne
             || hitPhase == HitPhase::Launch || hitPhase == HitPhase::Falling;
         CancelAttack();
+        bufferedActions.clear();
         pendingProjectileRequests.clear();
         runningRequested = false;
         isMoving = false;
@@ -221,6 +237,7 @@ namespace ActionRPG
         bufferedPresentation = false; combatAnimationChanged = true; lastCombatAnimation = nullptr; lastCombatAnimationSeconds = 0;
         combatState.reset(); combatPresentationSeconds = deathPresentationSeconds = 0.0f;
         CancelAttack();
+        bufferedActions.clear();
         pendingProjectileRequests.clear();
         jumpPhase = JumpPhase::Grounded;
         hitPhase = HitPhase::None;
@@ -369,11 +386,12 @@ namespace ActionRPG
         return 0.0f;
     }
 
-    void Character::BeginAttack(const bool inAirAttack)
+    void Character::BeginAttack(const bool inAirAttack, const bool inContinueCombo)
     {
         airAttack = inAirAttack;
-        attackPhase = AttackPhase::Start;
-        attackShotCount = 0;
+        attackPhase = inContinueCombo ? AttackPhase::Fire : AttackPhase::Start;
+        if (!inContinueCombo) { attackShotCount = 0; shotInputRemainingSeconds = 0; }
+        attackProjectileQueued = false;
         pendingAttackShots = 1;
         GetAttackAnimation().Reset();
     }
@@ -384,6 +402,7 @@ namespace ActionRPG
         attackPhase = AttackPhase::None;
         pendingAttackShots = 0;
         attackShotCount = 0;
+        shotInputRemainingSeconds = 0;
         attackProjectileQueued = false;
         airAttack = false;
     }
@@ -437,6 +456,7 @@ namespace ActionRPG
                     attackProjectileQueued = true;
                     --pendingAttackShots;
                     ++attackShotCount;
+                    shotInputRemainingSeconds = SHOT_INPUT_SECONDS;
                     if (airAttack)
                     {
                         ++airShotCount;
@@ -467,13 +487,18 @@ namespace ActionRPG
             }
             else if (pendingAttackShots > 0)
             {
-                // A late press during lowering starts with preparation, within the same five-shot limit.
-                attackPhase = AttackPhase::Start;
+                // Continue the same five-shot sequence without replaying preparation.
+                attackPhase = AttackPhase::Fire;
+                attackProjectileQueued = false;
                 GetAttackAnimation().Reset();
             }
             else
             {
-                CancelAttack();
+                // Preserve only combo grace; animation and movement locks end here.
+                if (attackShotCount >= MAX_ATTACK_SHOTS) shotInputRemainingSeconds = 0;
+                attackPhase = AttackPhase::None;
+                pendingAttackShots = 0;
+                attackProjectileQueued = false;
             }
         }
     }
