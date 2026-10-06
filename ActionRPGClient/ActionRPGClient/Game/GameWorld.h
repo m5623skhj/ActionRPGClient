@@ -2,6 +2,7 @@
 
 #include "Core/IniDocument.h"
 #include "Game/Camera.h"
+#include "Game/SessionMenuAction.h"
 #include "Game/DungeonCombatBuffer.h"
 #include "Game/DungeonWorld.h"
 #include "Game/GameplayMap.h"
@@ -50,6 +51,12 @@ namespace ActionRPG
         void QueuePlayerHit(CharacterHitType inType);
         [[nodiscard]] std::wstring_view GetDungeonStatusText() const;
         [[nodiscard]] bool ConsumeExitRequested() noexcept;
+        [[nodiscard]] SessionMenuAction ConsumeSessionAction() noexcept
+        {
+            const auto action = pendingSessionAction;
+            pendingSessionAction = SessionMenuAction::None;
+            return action;
+        }
         [[nodiscard]] bool IsUiOverlayVisible() const noexcept;
 
     private:
@@ -97,7 +104,10 @@ namespace ActionRPG
         {
             Party,
             Exit,
-            Skills
+            Skills,
+            Logout,
+            SwitchAccount,
+            SelectTown
         };
 
         struct SystemMenuEntry
@@ -149,6 +159,7 @@ namespace ActionRPG
         void RenderPartyInterface(D2DRenderer& inRenderer) const;
         [[nodiscard]] bool IsPartyLeader() const noexcept;
 
+        SessionMenuAction pendingSessionAction{ SessionMenuAction::None };
         GameplayMap gameplayMap;
         MapBackground mapBackground;
         Camera camera;

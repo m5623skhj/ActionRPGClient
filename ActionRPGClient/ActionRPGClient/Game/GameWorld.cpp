@@ -371,6 +371,9 @@ namespace ActionRPG
                 action = SystemMenuAction::Party;
             }
             else if (actionName == "Skills") action = SystemMenuAction::Skills;
+            else if (actionName == "Logout") action = SystemMenuAction::Logout;
+            else if (actionName == "SwitchAccount") action = SystemMenuAction::SwitchAccount;
+            else if (actionName == "SelectTown") action = SystemMenuAction::SelectTown;
             else if (actionName == "Exit")
             {
                 action = SystemMenuAction::Exit;
@@ -1761,6 +1764,16 @@ namespace ActionRPG
             const auto action=systemMenuEntries[index].action;
             if (action==SystemMenuAction::Party && IsDungeonUiRestricted())
             { uiClickConsumed=true; return; }
+            if (action == SystemMenuAction::Logout || action == SystemMenuAction::SwitchAccount
+                || action == SystemMenuAction::SelectTown)
+            {
+                pendingSessionAction = action == SystemMenuAction::Logout ? SessionMenuAction::Logout
+                    : action == SystemMenuAction::SwitchAccount ? SessionMenuAction::SwitchAccount
+                    : SessionMenuAction::SelectTown;
+                SetSystemUiPage(SystemUiPage::Closed);
+                uiClickConsumed = true;
+                return;
+            }
             SetSystemUiPage(action==SystemMenuAction::Party ? SystemUiPage::Party
                 : action==SystemMenuAction::Skills ? SystemUiPage::Skills:SystemUiPage::ExitConfirmation);
             uiClickConsumed = true;

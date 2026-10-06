@@ -3,6 +3,88 @@
 이 문서는 ActionRPGClient에서 TownServer 콘텐츠 패킷을 보내고 결과를 게임 스레드에
 전달하는 방법을 설명한다.
 
+## 0. Google 인증과 타운 TLS 입장
+
+클라이언트는 로그인 화면으로 시작한다. 시스템 브라우저의 Google Desktop OAuth
+Authorization Code/PKCE(S256)·loopback 콜백으로 ID 토큰을 얻으며, 매 시도 새 state를 검증한다.
+Auth가 발급한 nonce를 Google 인증 요청에 그대로 전달하고 실제 ID 토큰 검증은 Auth가 수행한다.
+Google access token을 게임 인증에 사용하지 않는다. 로그인 입력과 캐릭터 이름/종류 선택은 별개다.
+
+순서는 /v1/challenges → Google ID 토큰 → /v1/login → /v1/tickets →
+타운 TLS → AdmissionTicketRequest=36 → 성공 AdmissionResult=37(result=0) →
+EnterTownRequest=1 → EnterTownResponse=2다. 응답 2를 받기 전에는 Game을 생성하지 않는다.
+패킷 36의 body는 ID 2바이트 + 문자열 길이 2바이트 + 티켓 64바이트이며,
+패킷 37의 body는 ID 2바이트 + 결과 1바이트다. 기존 1~35 정의는 유지한다.
+기준 계약은 서버 커밋 665e459955a80a9fa923cccf5d0fab9fa1eba483이며,
+검토한 서버 e4f0569a6f30b7e914eee77abef5250b0b1cea23에서도 이 wire 계약은 같다.
+
+### 연결 설정
+
+실제 클라이언트 Assets/Data/AuthClient.json을 사용한다. 빌드의 기존 CopyRuntimeAssets가
+실행 파일 옆 Assets에 배포한다. 설정은 기동 시 읽으며 바꾼 뒤 재기동해야 한다.
+기본 파일은 미설정 상태다. 임의 서버를 목록에 채우거나 인증을 우회하지 않는다.
+
+| 필드 | 실제 설정 |
+|---|---|
+| authUrl | HTTPS origin, 경로/쿼리/사용자 정보 없음. 실제 Auth 인증서의 호스트명과 포트 |
+| googleClientId | Google **Desktop app** client ID. Auth의 ACTIONRPG_GOOGLE_CLIENT_ID와 동일 |
+| townCaFile | 타운 인증서의 신뢰 CA PEM 파일. 절대 경로 또는 Assets 기준 상대 경로 |
+| playerName | 기본 게임 이름, 빈 값은 기존 Player-PID. 입장 이름은 UTF-8 1~32바이트 |
+| characterId | 기존 캐릭터 1~3 중 기본 선택 |
+| servers | 실제 타운 객체 배열. 각 객체는 serverId, name, hostname, port |
+| servers[].serverId | Auth 등록 ID 및 해당 타운 ACTIONRPG_TOWN_ID와 일치 |
+| servers[].hostname | DNS 호스트명 또는 IP. 타운 인증서 SAN과 일치 |
+| servers[].port | 실제 TLS 리스너 포트, 1~65535 |
+
+Auth·Google HTTPS는 WinHTTP의 **Windows 인증서 저장소**로 체인과 호스트명을 검증한다.
+사설 Auth CA를 쓰면 운영 환경에서 Windows 신뢰 배포가 별도로 필요하다.
+타운 TLS는 OpenSSL/Asio가 townCaFile의 CA를 사용해 체인·호스트명을 검증하며 TLS 1.2 이상만 허용한다.
+CA 파일만 설정해도 Windows HTTPS 신뢰가 바뀌지는 않는다. 인증서 검사 무시 옵션은 없다.
+서버 개인 키, 타운 비밀 키, DB 연결 문자열은 이 설정이나 클라이언트에 넣지 않는다.
+OpenSSL 의존성은 vcpkg manifest와 Debug/Release 링크에 선언했다. 2026-10-06에
+OpenSSL 3.6.1#3 설치와 클라이언트 Debug x64 컴파일·링크 성공을 확인했다.
+
+### 상태·취소·세션 정리
+
+인증 작업은 전용 worker에서 수행하고 mutex 큐로 결과를 UI 스레드에 전달한다.
+HTTPS는 요청별 15초 한도, Google 브라우저 대기는 challenge 300초 한도,
+타운 TLS/승인/EnterTown 전체는 티켓 잔여 시간과 15초 중 작은 한도를 사용한다.
+취소는 기다리는 UI를 즉시 빠져나온다. 완료 여부가 불확실해도 HTTP를 자동 재시도하지 않는다.
+ready=false에는 티켓을 타운에 보내지 않고 기존 접속 종료 대기를 표시한다.
+사용자가 다시 입장을 누르면 새 티켓을 발급한다. 평문 TCP나 기존 자동 재접속은 사용하지 않는다.
+
+Google ID 토큰·게임 토큰·티켓은 메모리에만 두고 로그/URL/설정에 쓰지 않는다.
+게임 토큰은 최대 8시간이며 자동 갱신·영구 저장·재기동 자동 로그인은 없다.
+로그아웃·계정 전환 시 타운/던전 연결과 기존 Game을 정리하고 로컬 토큰을 제거한다.
+서버 로그아웃 실패/불확실한 결과도 화면에 표시하며 로컬 로그아웃을 되돌리지 않는다.
+계정 전환 후 다음 Google 로그인에는 계정 선택을 요청한다.
+타운 변경은 게임 토큰만 유지하고 Game/연결을 정리한 뒤 목적 타운의 새 티켓을 발급한다.
+타운 간 캐릭터·스킬·진행 상태 보존은 서버 계약에 포함되지 않는다.
+503은 서버 준비 중으로, 403은 거절로 안내한다. TCP 종료만으로 중복 로그인/정지 등 원인을 단정하지 않는다.
+
+Auth 결과, 타운 수신 이벤트와 송신 예약은 시도 ID를 확인한다.
+이전 시도의 콜백/입력이 새 Game에 섞이지 않게 큐를 비우고 타운 stream·읽기·쓰기 버퍼를
+연결별 shared_ptr 수명으로 보호한다. WinHTTP callback 상태는 HANDLE_CLOSING까지 보존한다.
+UI는 RequestStop으로 연결 종료를 요청하며 던전 종료 future를 기다리지 않고 매 tick 확인한다.
+프로세스 종료에서는 worker를 정리하고 join한다.
+
+### 검증 상태
+
+서버/클라이언트 패킷 정의, API 경로·입력·응답·수명, UI 전환과 취소 후 수명을 정적으로 검토했다.
+2026-10-06에 NASM 3.01 실행 및 CMake 검색을 확인하고 OpenSSL을 vcpkg 바이너리 캐시에서 설치했다.
+Debug x64 빌드가 성공했으며, 임시 NASM PATH와 manifest 강제 옵션 없이 일반 빌드도 통과했다.
+첫 컴파일에서는 기존 RUDP 공용 헤더 NetServerSerializeBuffer.h의 C4828 인코딩 경고가 남았다.
+최초 NASM 검색 실패 원인은 재현하지 못했으며 전역 PATH와 vcpkg 도구 스크립트는 변경하지 않았다.
+Release 빌드·기능 테스트·클라이언트/서버 실행·Google/Auth/Town 실제 왕복은 수행하지 않았다.
+실제 HTTPS 주소, 타운 ID/호스트/포트, CA 배포 및 Google Desktop 등록/동의 화면/테스트 계정은
+운영 설정이 필요하다. 서버 문서상 실제 DB 마이그레이션 적용과 인증 왕복도 아직 미검증 상태다.
+실행 검증에서는 로그인/거절/503/ready=false, 각 단계 취소, 역순 완료, TLS 거절,
+로그아웃 실패, 마을·던전에서 계정 전환/타운 변경 및 대기 중 창 닫기를 확인해야 한다.
+
+근거: [Google Desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
+[Google OIDC nonce](https://developers.google.com/identity/openid-connect/openid-connect),
+[WinHTTP 종료와 callback 수명](https://learn.microsoft.com/en-us/windows/win32/api/winhttp/nf-winhttp-winhttpclosehandle).
+
 ## 1. 현재 데이터 흐름
 
 ```text
@@ -13,7 +95,7 @@
   Protocol::Encode → QueuePacket → async_write
 
 네트워크 스레드
-  async_read → TownClient::HandlePacket → Protocol::Decode
+  TLS async_read → TownClient::Impl::Session::HandlePacket → Protocol::Decode
     ↓ PushEvent (mutex 보호)
 게임 스레드
   ConsumeEvents → GameWorld::ProcessNetworkEvents
@@ -92,9 +174,10 @@ void SendTradeRequest(const TownProtocol::TradeRequest& inRequest);
 ```cpp
 void TownClient::SendTradeRequest(const TownProtocol::TradeRequest& inRequest)
 {
-    asio::post(strand, [this, packet = TownProtocol::Encode(inRequest)]() mutable
+    asio::post(impl->strand, [this, attempt = impl->attempt.load(),
+        packet = TownProtocol::Encode(inRequest)]() mutable
     {
-        if (connected.load())
+        if (impl->connected.load() && attempt == impl->attempt.load())
         {
             QueuePacket(std::move(packet));
         }

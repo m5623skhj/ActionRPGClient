@@ -2,15 +2,12 @@
 
 #include "Network/TownProtocol.h"
 
-#include <asio.hpp>
+#include "Network/AuthSettings.h"
+#include <chrono>
+#include <memory>
 
-#include <array>
-#include <atomic>
 #include <cstdint>
-#include <deque>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <variant>
 #include <vector>
 
@@ -27,6 +24,14 @@ namespace ActionRPG
         TownProtocol::DungeonCompletionResponse, TownProtocol::PartyDetailResponse,
         TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent>;
 
+    enum class TownConnectionState { Disconnected, Connecting, AdmissionPending, EnteringTown, Ready, Failed };
+    struct TownConnectionInfo
+    {
+        std::uint64_t attemptId{};
+        TownConnectionState state{ TownConnectionState::Disconnected };
+        std::wstring message;
+    };
+
     class TownClient final
     {
     public:
@@ -36,8 +41,11 @@ namespace ActionRPG
         TownClient(const TownClient&) = delete;
         TownClient& operator=(const TownClient&) = delete;
 
-        void Start(std::string inHost, std::uint16_t inPort, std::string inPlayerName,
-            std::uint32_t inCharacterId);
+        void Start(std::uint64_t inAttempt, TownServerSettings inServer, std::filesystem::path inCa,
+            std::string inTicket, std::string inName, std::uint32_t inCharacter,
+            std::chrono::steady_clock::time_point inExpiry);
+        void RequestStop();
+        [[nodiscard]] TownConnectionInfo GetConnectionInfo() const;
         void Stop();
         void SendMovement(const TownProtocol::MoveInput& inInput);
         void RequestDungeon(std::string inZoneId, std::uint32_t inDungeonId);
@@ -60,34 +68,8 @@ namespace ActionRPG
         [[nodiscard]] bool IsConnected() const noexcept;
 
     private:
-        void Connect();
-        void ScheduleReconnect();
-        void ReadHeader();
-        void ReadBody(std::uint32_t inBodySize);
-        void HandlePacket();
-        void QueuePacket(std::vector<std::uint8_t> inPacketBody);
-        void WriteNext();
-        void HandleDisconnect();
-        void PushEvent(TownEvent inEvent);
-
-        asio::io_context ioContext;
-        asio::strand<asio::io_context::executor_type> strand;
-        asio::executor_work_guard<asio::io_context::executor_type> workGuard;
-        asio::ip::tcp::resolver resolver;
-        asio::ip::tcp::socket socket;
-        asio::steady_timer reconnectTimer;
-        std::thread networkThread;
-        std::string host;
-        std::string port;
-        std::string playerName;
-        std::uint32_t characterId{ 1 };
-        std::array<std::uint8_t, 4> receiveHeader{};
-        std::vector<std::uint8_t> receiveBody;
-        std::deque<std::vector<std::uint8_t>> sendQueue;
-        std::mutex eventMutex;
-        std::vector<TownEvent> events;
-        std::atomic_bool connected = false;
-        bool started = false;
-        bool stopping = false;
+        void QueuePacket(std::vector<std::uint8_t> inBody);
+        struct Impl;
+        std::unique_ptr<Impl> impl;
     };
 }

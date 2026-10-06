@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Game/Game.h"
+#include "App/LoginFlow.h"
+#include <memory>
 #include "Graphics/D2DRenderer.h"
 #include "Graphics/GraphicsDevice.h"
 #include "Network/DungeonClient.h"
@@ -33,6 +35,7 @@ namespace ActionRPG
         AssetCatalog assetCatalog;
         TownClient townClient;
         DungeonClient dungeonClient;
-        Game game;
+        LoginFlow loginFlow;
+        std::unique_ptr<Game> game;
     };
 }

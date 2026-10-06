@@ -20,6 +20,7 @@ namespace ActionRPG
         void Render(D2DRenderer& inRenderer) const;
         void Resize(float inViewportWidth, float inViewportHeight);
         [[nodiscard]] bool ConsumeExitRequested() noexcept;
+        [[nodiscard]] SessionMenuAction ConsumeSessionAction() noexcept { return world.ConsumeSessionAction(); }
 
     private:
         GameWorld world;

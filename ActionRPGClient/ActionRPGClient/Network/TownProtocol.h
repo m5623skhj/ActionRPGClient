@@ -134,6 +134,9 @@ namespace TownProtocol
 
 namespace TownProtocol
 {
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const AdmissionTicketRequest& inPacket);
+    [[nodiscard]] std::optional<AdmissionResult> DecodeAdmissionResult(const std::vector<std::uint8_t>& inPacket);
+
     [[nodiscard]] std::vector<std::uint8_t> Encode(const PartyDetailRequest& inPacket);
     [[nodiscard]] std::vector<std::uint8_t> Encode(const PartyDetailResponse& inPacket);
     [[nodiscard]] std::vector<std::uint8_t> Encode(const PartyJoinRequest& inPacket);

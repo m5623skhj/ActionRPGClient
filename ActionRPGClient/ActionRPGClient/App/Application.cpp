@@ -13,11 +13,10 @@ namespace ActionRPG
         : window(inInstance, L"Action RPG Client", INITIAL_WIDTH, INITIAL_HEIGHT)
         , graphicsDevice(window.GetHandle(), window.GetClientWidth(), window.GetClientHeight())
         , renderer(graphicsDevice)
-        , game(static_cast<float>(window.GetClientWidth()), static_cast<float>(window.GetClientHeight()),
-            assetCatalog, renderer, townClient, dungeonClient)
+        , loginFlow(assetCatalog, townClient, dungeonClient)
     {
-        townClient.Start("127.0.0.1", 7777,
-            "Player-" + std::to_string(GetCurrentProcessId()), 1);
+        renderer.SetUiFontFamily(L"Segoe UI");
+        GameWindow::SetMinimumClientSize(640, 360);
     }
 
     int Application::Run()
@@ -40,7 +39,7 @@ namespace ActionRPG
             if (window.ConsumeResize(resizedWidth, resizedHeight))
             {
                 graphicsDevice.Resize(resizedWidth, resizedHeight);
-                game.Resize(static_cast<float>(resizedWidth), static_cast<float>(resizedHeight));
+                if (game) game->Resize(static_cast<float>(resizedWidth), static_cast<float>(resizedHeight));
             }
 
             if (window.IsMinimized())
@@ -79,7 +78,24 @@ namespace ActionRPG
                 updateInput.leftMousePressed = pendingLeftMousePressed;
                 updateInput.clickX = pendingClickX;
                 updateInput.clickY = pendingClickY;
-                game.Update(static_cast<float>(FIXED_UPDATE_SECONDS), updateInput);
+                loginFlow.Update(updateInput, static_cast<float>(window.GetClientWidth()),
+                    static_cast<float>(window.GetClientHeight()));
+                if (!loginFlow.IsPlaying()) game.reset();
+                else
+                {
+                    const bool created = !game;
+                    if (created)
+                        game = std::make_unique<Game>(static_cast<float>(window.GetClientWidth()),
+                            static_cast<float>(window.GetClientHeight()), assetCatalog, renderer, townClient, dungeonClient);
+                    // The Enter/click that completed admission must not become a gameplay command.
+                    game->Update(static_cast<float>(FIXED_UPDATE_SECONDS), created ? InputState{} : updateInput);
+                    const auto action = game->ConsumeSessionAction();
+                    if (action != SessionMenuAction::None)
+                    {
+                        loginFlow.BeginLeave(action);
+                        game.reset();
+                    }
+                }
                 pendingPressedKeys.clear();
                 pendingTextInput.clear();
                 pendingMouseWheelDelta = 0;
@@ -87,13 +103,15 @@ namespace ActionRPG
                 accumulatedSeconds -= FIXED_UPDATE_SECONDS;
             }
 
-            if (game.ConsumeExitRequested())
+            if ((game && game->ConsumeExitRequested()) || loginFlow.ConsumeExitRequested())
             {
                 return 0;
             }
 
             renderer.BeginFrame(D2D1::ColorF(0.04f, 0.05f, 0.07f));
-            game.Render(renderer);
+            if (game) game->Render(renderer);
+            else loginFlow.Render(renderer, static_cast<float>(window.GetClientWidth()),
+                static_cast<float>(window.GetClientHeight()));
             renderer.EndFrame();
         }
 

@@ -63,7 +63,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>MultiSocketRUDPClient.lib;Logger.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>MultiSocketRUDPClient.lib;Logger.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;winhttp.lib;bcrypt.lib;shell32.lib;ole32.lib;libssl.lib;libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(RudpOutputDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
@@ -89,7 +89,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>MultiSocketRUDPClient.lib;Logger.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>MultiSocketRUDPClient.lib;Logger.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;winhttp.lib;bcrypt.lib;shell32.lib;ole32.lib;libssl.lib;libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(RudpOutputDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
@@ -98,6 +98,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="App\Application.cpp" />
+    <ClCompile Include="App\LoginFlow.cpp" />
+    <ClCompile Include="Network\AuthSettings.cpp" />
+    <ClCompile Include="Network\AuthHttps.cpp" />
+    <ClCompile Include="Network\AuthClient.cpp" />
     <ClCompile Include="Core\IniDocument.cpp" />
     <ClCompile Include="Game\Game.cpp" />
     <ClCompile Include="Game\GameplayMap.cpp" />
@@ -129,9 +133,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="App\Application.h" />
+    <ClInclude Include="App\LoginFlow.h" />
+    <ClInclude Include="Network\AuthSettings.h" />
+    <ClInclude Include="Network\AuthHttps.h" />
+    <ClInclude Include="Network\AuthClient.h" />
     <ClInclude Include="Core\IniDocument.h" />
     <ClInclude Include="Game\Camera.h" />
     <ClInclude Include="Game\Game.h" />
+    <ClInclude Include="Game\SessionMenuAction.h" />
     <ClInclude Include="Game\GameplayMap.h" />
     <ClInclude Include="Game\Monster.h" />
     <ClInclude Include="Game\DungeonWorld.h" />
@@ -175,6 +184,7 @@
     <None Include="..\Assets\Data\PlayerSkills.json" />
     <None Include="..\Assets\Data\PlayerSkillVisuals.json" />
     <None Include="..\Assets\Data\system_menu.ini" />
+    <None Include="..\Assets\Data\AuthClient.json" />
     <None Include="..\Assets\Data\SkillUi.json" />
     <None Include="..\Assets\Images\UI\system_menu_skills.png" />
     <None Include="..\Assets\Images\UI\Skills\character1_front_kick.png" />

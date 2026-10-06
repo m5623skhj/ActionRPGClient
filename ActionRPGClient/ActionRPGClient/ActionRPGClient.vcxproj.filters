@@ -15,6 +15,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App\Application.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="App\LoginFlow.cpp"><Filter>App</Filter></ClCompile>
+    <ClCompile Include="Network\AuthSettings.cpp"><Filter>Network</Filter></ClCompile>
+    <ClCompile Include="Network\AuthHttps.cpp"><Filter>Network</Filter></ClCompile>
+    <ClCompile Include="Network\AuthClient.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Core\IniDocument.cpp"><Filter>Core</Filter></ClCompile>
     <ClCompile Include="Game\Game.cpp"><Filter>Game</Filter></ClCompile>
     <ClCompile Include="Game\GameplayMap.cpp"><Filter>Game</Filter></ClCompile>
@@ -43,9 +47,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="App\Application.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="App\LoginFlow.h"><Filter>App</Filter></ClInclude>
+    <ClInclude Include="Network\AuthSettings.h"><Filter>Network</Filter></ClInclude>
+    <ClInclude Include="Network\AuthHttps.h"><Filter>Network</Filter></ClInclude>
+    <ClInclude Include="Network\AuthClient.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Core\IniDocument.h"><Filter>Core</Filter></ClInclude>
     <ClInclude Include="Game\Camera.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\Game.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\SessionMenuAction.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\GameplayMap.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\Monster.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\DungeonCombatBuffer.h"><Filter>Game</Filter></ClInclude>
@@ -118,5 +127,8 @@
     <None Include="..\Assets\Data\SkillUi.json"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\UI\system_menu_skills.png"><Filter>Assets</Filter></None>
     <None Include="..\Assets\Images\UI\Skills\character1_front_kick.png"><Filter>Assets</Filter></None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Assets\Data\AuthClient.json"><Filter>Assets</Filter></None>
   </ItemGroup>
 </Project>

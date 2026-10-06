@@ -1,99 +1,340 @@
 #include "Network/TownClient.h"
-
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <openssl/ssl.h>
 #include <algorithm>
-#include <chrono>
+#include <array>
+#include <atomic>
+#include <deque>
+#include <fstream>
+#include <future>
+#include <iterator>
+#include <mutex>
 #include <optional>
+#include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace
 {
     constexpr std::uint32_t MAX_PACKET_BODY_SIZE = 1024 * 1024;
     constexpr std::size_t MAX_QUEUED_SEND_BYTES = 1024 * 1024;
+    using Clock = std::chrono::steady_clock;
 
     std::uint32_t DecodeBodySize(const std::array<std::uint8_t, 4>& inHeader)
     {
         return (static_cast<std::uint32_t>(inHeader[0]) << 24)
             | (static_cast<std::uint32_t>(inHeader[1]) << 16)
-            | (static_cast<std::uint32_t>(inHeader[2]) << 8)
-            | static_cast<std::uint32_t>(inHeader[3]);
+            | (static_cast<std::uint32_t>(inHeader[2]) << 8) | inHeader[3];
     }
-
     std::vector<std::uint8_t> FramePacket(std::vector<std::uint8_t> inBody)
     {
-        const std::uint32_t size = static_cast<std::uint32_t>(inBody.size());
+        const auto size = static_cast<std::uint32_t>(inBody.size());
         std::vector<std::uint8_t> result(4 + inBody.size());
-        result[0] = static_cast<std::uint8_t>((size >> 24) & 0xFF);
-        result[1] = static_cast<std::uint8_t>((size >> 16) & 0xFF);
-        result[2] = static_cast<std::uint8_t>((size >> 8) & 0xFF);
-        result[3] = static_cast<std::uint8_t>(size & 0xFF);
+        result[0] = static_cast<std::uint8_t>(size >> 24);
+        result[1] = static_cast<std::uint8_t>(size >> 16);
+        result[2] = static_cast<std::uint8_t>(size >> 8);
+        result[3] = static_cast<std::uint8_t>(size);
         std::copy(inBody.begin(), inBody.end(), result.begin() + 4);
         return result;
+    }
+    asio::ssl::context MakeTlsContext(const std::filesystem::path& inCa)
+    {
+        asio::ssl::context context(asio::ssl::context::tls_client);
+        if (SSL_CTX_set_min_proto_version(context.native_handle(), TLS1_2_VERSION) != 1)
+            throw std::runtime_error("TLS configuration failed.");
+        if (!std::filesystem::is_regular_file(inCa) || std::filesystem::file_size(inCa) > MAX_PACKET_BODY_SIZE)
+            throw std::runtime_error("CA file unavailable.");
+        std::ifstream input(inCa, std::ios::binary);
+        if (!input) throw std::runtime_error("CA file unavailable.");
+        const std::string certificates((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+        if (certificates.empty()) throw std::runtime_error("Empty CA file.");
+        context.add_certificate_authority(asio::buffer(certificates));
+        context.set_verify_mode(asio::ssl::verify_peer);
+        return context;
     }
 }
 
 namespace ActionRPG
 {
-    TownClient::TownClient()
-        : strand(asio::make_strand(ioContext)),
-          workGuard(asio::make_work_guard(ioContext)),
-          resolver(strand),
-          socket(strand),
-          reconnectTimer(strand)
+    struct TownClient::Impl
     {
-    }
+        struct Session;
+        asio::io_context ioContext;
+        asio::strand<asio::io_context::executor_type> strand{ asio::make_strand(ioContext) };
+        asio::executor_work_guard<asio::io_context::executor_type> workGuard{ asio::make_work_guard(ioContext) };
+        std::shared_ptr<Session> session; // Only the strand accesses the active session.
+        std::atomic_uint64_t attempt{};
+        std::atomic_bool connected{};
+        mutable std::mutex mutex;
+        TownConnectionInfo status;
+        std::vector<TownEvent> events;
+        std::thread worker;
+        Impl() : worker([this] { ioContext.run(); }) {}
+        ~Impl();
+        void SetStatus(std::uint64_t inAttempt, TownConnectionState inState, std::wstring inMessage);
+        void PushEvent(std::uint64_t inAttempt, TownEvent inEvent);
+    };
 
-    TownClient::~TownClient()
+    // Each attempt owns its stream and buffers until its final callbacks have returned.
+    struct TownClient::Impl::Session : std::enable_shared_from_this<Session>
     {
-        Stop();
-    }
+        Impl& owner;
+        std::uint64_t attemptId;
+        asio::ssl::context tlsContext;
+        asio::ssl::stream<asio::ip::tcp::socket> socket;
+        asio::ip::tcp::resolver resolver;
+        asio::steady_timer deadline;
+        TownServerSettings server;
+        std::string ticket, playerName;
+        std::uint32_t characterId;
+        TownConnectionState state{ TownConnectionState::Connecting };
+        bool closed{};
+        std::array<std::uint8_t, 4> receiveHeader{};
+        std::vector<std::uint8_t> receiveBody;
+        std::deque<std::shared_ptr<std::vector<std::uint8_t>>> sendQueue;
 
-    void TownClient::Start(std::string inHost, const std::uint16_t inPort,
-        std::string inPlayerName, const std::uint32_t inCharacterId)
-    {
-        if (started)
+        Session(Impl& inOwner, const std::uint64_t inAttempt, TownServerSettings inServer,
+            const std::filesystem::path& inCa, std::string inTicket, std::string inName,
+            const std::uint32_t inCharacter)
+            : owner(inOwner), attemptId(inAttempt), tlsContext(MakeTlsContext(inCa)),
+              socket(owner.strand, tlsContext), resolver(owner.strand), deadline(owner.strand),
+              server(std::move(inServer)), ticket(std::move(inTicket)), playerName(std::move(inName)),
+              characterId(inCharacter) {}
+
+        bool IsCurrent() const { return !closed && owner.attempt.load() == attemptId; }
+        void SetState(const TownConnectionState inState, std::wstring inMessage)
         {
-            return;
+            state = inState;
+            owner.SetStatus(attemptId, state, std::move(inMessage));
         }
-        started = true;
-        host = std::move(inHost);
-        port = std::to_string(inPort);
-        playerName = std::move(inPlayerName);
-        characterId = inCharacterId;
-        networkThread = std::thread([this]() { ioContext.run(); });
-        asio::post(strand, [this]() { Connect(); });
-    }
-
-    void TownClient::Stop()
-    {
-        if (!started)
+        void Close()
         {
-            return;
-        }
-
-        asio::post(strand, [this]()
-        {
-            stopping = true;
-            connected.store(false);
-            asio::error_code ignoredError;
-            reconnectTimer.cancel(ignoredError);
+            if (closed) return;
+            closed = true;
+            asio::error_code ignored;
+            deadline.cancel();
             resolver.cancel();
-            socket.close(ignoredError);
+            socket.lowest_layer().cancel(ignored);
+            socket.lowest_layer().close(ignored);
+            ticket.clear();
+            sendQueue.clear();
+        }
+        void HandleDisconnect()
+        {
+            if (!IsCurrent()) { Close(); return; }
+            SetState(TownConnectionState::Failed,
+                L"타운 연결이 종료되거나 입장이 완료되지 않았습니다. 새 티켓으로 다시 시도해 주세요.");
+            Close();
+        }
+        void Start(const Clock::time_point inExpiry)
+        {
+            if (!IsCurrent() || Clock::now() >= inExpiry || ticket.size() != 64
+                || !std::all_of(ticket.begin(), ticket.end(), [](char value)
+                    { return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'); })
+                || playerName.empty() || playerName.size() > 32 || characterId < 1 || characterId > 3)
+                { HandleDisconnect(); return; }
+            socket.set_verify_callback(asio::ssl::host_name_verification(server.hostname));
+            if (SSL_set_tlsext_host_name(socket.native_handle(), server.hostname.c_str()) != 1)
+                { HandleDisconnect(); return; }
+            deadline.expires_at(std::min(inExpiry, Clock::now() + std::chrono::seconds(15)));
+            deadline.async_wait([self = shared_from_this()](const asio::error_code& inError)
+                { if (!inError) self->HandleDisconnect(); });
+            resolver.async_resolve(server.hostname, std::to_string(server.port),
+                [self = shared_from_this()](const asio::error_code& inError,
+                    const asio::ip::tcp::resolver::results_type& inResults)
+            {
+                if (!self->IsCurrent()) return;
+                if (inError) { self->HandleDisconnect(); return; }
+                asio::async_connect(self->socket.next_layer(), inResults,
+                    [self](const asio::error_code& inConnectError, const asio::ip::tcp::endpoint&)
+                {
+                    if (!self->IsCurrent()) return;
+                    if (inConnectError) { self->HandleDisconnect(); return; }
+                    asio::error_code error;
+                    self->socket.next_layer().set_option(asio::ip::tcp::no_delay(true), error);
+                    if (error) { self->HandleDisconnect(); return; }
+                    self->socket.async_handshake(asio::ssl::stream_base::client,
+                        [self](const asio::error_code& inHandshakeError)
+                    {
+                        if (!self->IsCurrent()) return;
+                        if (inHandshakeError) { self->HandleDisconnect(); return; }
+                        self->SetState(TownConnectionState::AdmissionPending, L"타운 입장: 티켓 승인 대기");
+                        self->QueuePacket(TownProtocol::Encode(TownProtocol::AdmissionTicketRequest{ self->ticket }));
+                        self->ticket.clear();
+                        self->ReadHeader();
+                    });
+                });
+            });
+        }
+        void ReadHeader()
+        {
+            if (!IsCurrent()) return;
+            asio::async_read(socket, asio::buffer(receiveHeader),
+                [self = shared_from_this()](const asio::error_code& inError, std::size_t)
+            {
+                if (!self->IsCurrent()) return;
+                if (inError) { self->HandleDisconnect(); return; }
+                const auto size = DecodeBodySize(self->receiveHeader);
+                if (size < 2 || size > MAX_PACKET_BODY_SIZE) { self->HandleDisconnect(); return; }
+                self->ReadBody(size);
+            });
+        }
+        void ReadBody(const std::uint32_t inSize)
+        {
+            receiveBody.resize(inSize);
+            asio::async_read(socket, asio::buffer(receiveBody),
+                [self = shared_from_this()](const asio::error_code& inError, std::size_t)
+            {
+                if (!self->IsCurrent()) return;
+                if (inError) { self->HandleDisconnect(); return; }
+                self->HandlePacket();
+                self->ReadHeader();
+            });
+        }
+        void HandlePacket();
+        void PushEvent(TownEvent inEvent) { owner.PushEvent(attemptId, std::move(inEvent)); }
+        void QueuePacket(std::vector<std::uint8_t> inBody)
+        {
+            if (!IsCurrent()) return;
+            auto packet = std::make_shared<std::vector<std::uint8_t>>(FramePacket(std::move(inBody)));
+            std::size_t queuedBytes{};
+            for (const auto& queued : sendQueue) queuedBytes += queued->size();
+            if (queuedBytes + packet->size() > MAX_QUEUED_SEND_BYTES) { HandleDisconnect(); return; }
+            const bool writing = !sendQueue.empty();
+            sendQueue.push_back(std::move(packet));
+            if (!writing) WriteNext();
+        }
+        void WriteNext()
+        {
+            if (!IsCurrent() || sendQueue.empty()) return;
+            const auto packet = sendQueue.front();
+            asio::async_write(socket, asio::buffer(*packet),
+                [self = shared_from_this(), packet](const asio::error_code& inError, std::size_t)
+            {
+                if (!self->IsCurrent()) return;
+                if (inError) { self->HandleDisconnect(); return; }
+                self->sendQueue.pop_front();
+                self->WriteNext();
+            });
+        }
+    };
+
+    TownClient::Impl::~Impl()
+    {
+        attempt.store(0);
+        connected.store(false);
+        asio::post(strand, [this]
+        {
+            if (session) session->Close();
+            session.reset();
             workGuard.reset();
-            // Do not let pending connect/read handlers keep the shutdown join alive.
             ioContext.stop();
         });
-        if (networkThread.joinable())
-        {
-            networkThread.join();
-        }
-        started = false;
+        if (worker.joinable()) worker.join();
     }
+    void TownClient::Impl::SetStatus(const std::uint64_t inAttempt,
+        const TownConnectionState inState, std::wstring inMessage)
+    {
+        std::scoped_lock lock(mutex);
+        if (attempt.load() != inAttempt) return;
+        status = { inAttempt, inState, std::move(inMessage) };
+        connected.store(inState == TownConnectionState::Ready);
+    }
+    void TownClient::Impl::PushEvent(const std::uint64_t inAttempt, TownEvent inEvent)
+    {
+        std::scoped_lock lock(mutex);
+        if (attempt.load() != inAttempt) return;
+        if (events.size() >= 4096)
+        {
+            // Bounded queue; fail the connection rather than silently dropping authority events.
+            asio::post(strand, [this, inAttempt]
+            {
+                if (session && attempt.load() == inAttempt) session->HandleDisconnect();
+            });
+            return;
+        }
+        events.push_back(std::move(inEvent));
+    }
+    TownClient::TownClient() : impl(std::make_unique<Impl>()) {}
+    TownClient::~TownClient() = default;
 
+    void TownClient::Start(const std::uint64_t inAttempt, TownServerSettings inServer,
+        std::filesystem::path inCa, std::string inTicket, std::string inName,
+        const std::uint32_t inCharacter, const Clock::time_point inExpiry)
+    {
+        {
+            std::scoped_lock lock(impl->mutex);
+            impl->attempt.store(inAttempt);
+            impl->connected.store(false);
+            impl->events.clear();
+            impl->status = { inAttempt, TownConnectionState::Connecting, L"타운 입장: TLS 연결 중" };
+        }
+        asio::post(impl->strand, [this, inAttempt, server = std::move(inServer), ca = std::move(inCa),
+            ticket = std::move(inTicket), name = std::move(inName), inCharacter, inExpiry]() mutable
+        {
+            if (impl->session) impl->session->Close();
+            impl->session.reset();
+            if (impl->attempt.load() != inAttempt) return;
+            try
+            {
+                impl->session = std::make_shared<Impl::Session>(*impl, inAttempt, std::move(server), ca,
+                    std::move(ticket), std::move(name), inCharacter);
+                impl->session->Start(inExpiry);
+            }
+            catch (...)
+            {
+                impl->SetStatus(inAttempt, TownConnectionState::Failed,
+                    L"타운 TLS 설정을 확인해 주세요. 신뢰 CA와 인증서 호스트명이 필요합니다.");
+            }
+        });
+    }
+    void TownClient::RequestStop()
+    {
+        {
+            std::scoped_lock lock(impl->mutex);
+            impl->attempt.store(0);
+            impl->connected.store(false);
+            impl->events.clear();
+            impl->status = {};
+        }
+        asio::post(impl->strand, [this]
+        {
+            if (impl->session) impl->session->Close();
+            impl->session.reset();
+        });
+    }
+    void TownClient::Stop()
+    {
+        RequestStop();
+        auto stopped = std::make_shared<std::promise<void>>();
+        auto completion = stopped->get_future();
+        asio::post(impl->strand, [stopped] { stopped->set_value(); });
+        completion.get();
+    }
+    TownConnectionInfo TownClient::GetConnectionInfo() const
+    {
+        std::scoped_lock lock(impl->mutex);
+        return impl->status;
+    }
+    std::vector<TownEvent> TownClient::ConsumeEvents()
+    {
+        std::scoped_lock lock(impl->mutex);
+        std::vector<TownEvent> result;
+        result.swap(impl->events);
+        return result;
+    }
+    bool TownClient::IsConnected() const noexcept { return impl->connected.load(); }
+    void TownClient::QueuePacket(std::vector<std::uint8_t> inBody)
+    {
+        if (impl->session && impl->session->state == TownConnectionState::Ready)
+            impl->session->QueuePacket(std::move(inBody));
+    }
     void TownClient::SendMovement(const TownProtocol::MoveInput& inInput)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(inInput)]() mutable
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(inInput)]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -102,10 +343,10 @@ namespace ActionRPG
 
     void TownClient::RequestDungeon(std::string inZoneId, const std::uint32_t inDungeonId)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::EnterDungeonRequest{ std::move(inZoneId), inDungeonId })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -114,32 +355,32 @@ namespace ActionRPG
 
     void TownClient::RequestDungeonCompletion(const std::uint64_t inRoomId, const bool inRetry)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::DungeonCompletionRequest{inRoomId, inRetry})]() mutable
         {
-            if (connected.load()) QueuePacket(std::move(packet));
+            if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
         });
     }
 
     void TownClient::RequestSkillState()
     {
-        asio::post(strand,[this,packet=TownProtocol::Encode(TownProtocol::SkillStateRequest{})]() mutable
-        { if (connected.load()) QueuePacket(std::move(packet)); });
+        asio::post(impl->strand,[this, attempt = impl->attempt.load(), packet=TownProtocol::Encode(TownProtocol::SkillStateRequest{})]() mutable
+        { if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet)); });
     }
     void TownClient::LearnSkill(std::string inSkillId,std::uint32_t inExpectedSkillLevel)
     {
-        asio::post(strand,[this,packet=TownProtocol::Encode(TownProtocol::LearnSkillRequest{std::move(inSkillId),inExpectedSkillLevel})]() mutable
-        { if (connected.load()) QueuePacket(std::move(packet)); });
+        asio::post(impl->strand,[this, attempt = impl->attempt.load(), packet=TownProtocol::Encode(TownProtocol::LearnSkillRequest{std::move(inSkillId),inExpectedSkillLevel})]() mutable
+        { if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet)); });
     }
 
     void TownClient::ConfirmDungeonJoin(
         const std::uint64_t inRoomId,
         const std::uint64_t inChallenge)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::ConfirmDungeonJoin{ inRoomId, inChallenge })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -148,10 +389,10 @@ namespace ActionRPG
 
     void TownClient::InviteToParty(const std::uint64_t inTargetPlayerId)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyInviteRequest{ inTargetPlayerId })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -161,10 +402,10 @@ namespace ActionRPG
     void TownClient::AnswerPartyInvitation(const std::uint64_t inInvitationId,
         const bool inAccepted)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyInviteAnswer{ inInvitationId, inAccepted })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -173,10 +414,10 @@ namespace ActionRPG
 
     void TownClient::LeaveParty()
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyLeaveRequest{})]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -185,10 +426,10 @@ namespace ActionRPG
 
     void TownClient::KickPartyMember(const std::uint64_t inTargetPlayerId)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyKickRequest{ inTargetPlayerId })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -197,10 +438,10 @@ namespace ActionRPG
 
     void TownClient::UpdatePartySettings(std::string inTitle, const bool inIsPublic)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartySettingsRequest{ std::move(inTitle), inIsPublic })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -209,10 +450,10 @@ namespace ActionRPG
 
     void TownClient::CreateParty(std::string inTitle, const bool inIsPublic)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyCreateRequest{ std::move(inTitle), inIsPublic })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -221,10 +462,10 @@ namespace ActionRPG
 
     void TownClient::RequestPartyDirectoryPage(const std::uint32_t inPage)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyDirectoryPageRequest{ inPage })]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -233,10 +474,10 @@ namespace ActionRPG
 
     void TownClient::UnsubscribePartyDirectory()
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyDirectoryUnsubscribe{})]() mutable
         {
-            if (connected.load())
+            if (impl->connected.load() && attempt == impl->attempt.load())
             {
                 QueuePacket(std::move(packet));
             }
@@ -245,134 +486,32 @@ namespace ActionRPG
 
     void TownClient::RequestPartyDetail(const std::uint64_t inPartyId)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyDetailRequest{ inPartyId })]() mutable
         {
-            if (connected.load()) QueuePacket(std::move(packet));
+            if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
         });
     }
 
     void TownClient::RequestPartyJoin(const std::uint64_t inPartyId)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyJoinRequest{ inPartyId })]() mutable
         {
-            if (connected.load()) QueuePacket(std::move(packet));
+            if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
         });
     }
 
     void TownClient::AnswerPartyJoin(const std::uint64_t inRequestId, const bool inAccepted)
     {
-        asio::post(strand, [this, packet = TownProtocol::Encode(
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
             TownProtocol::PartyJoinAnswer{ inRequestId, inAccepted })]() mutable
         {
-            if (connected.load()) QueuePacket(std::move(packet));
+            if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
         });
     }
 
-    std::vector<TownEvent> TownClient::ConsumeEvents()
-    {
-        std::scoped_lock lock(eventMutex);
-        std::vector<TownEvent> result;
-        result.swap(events);
-        return result;
-    }
-
-    bool TownClient::IsConnected() const noexcept
-    {
-        return connected.load();
-    }
-
-    void TownClient::Connect()
-    {
-        if (stopping)
-        {
-            return;
-        }
-
-        resolver.async_resolve(host, port, [this](const asio::error_code& inError,
-            const asio::ip::tcp::resolver::results_type& inResults)
-        {
-            if (stopping) return;
-            if (inError)
-            {
-                ScheduleReconnect();
-                return;
-            }
-
-            asio::async_connect(socket, inResults, [this](const asio::error_code& inConnectError,
-                const asio::ip::tcp::endpoint&)
-            {
-                if (stopping) return;
-                if (inConnectError)
-                {
-                    HandleDisconnect();
-                    return;
-                }
-
-                socket.set_option(asio::ip::tcp::no_delay(true));
-                connected.store(true);
-                QueuePacket(TownProtocol::Encode(TownProtocol::EnterTownRequest{
-                    playerName, characterId }));
-                ReadHeader();
-            });
-        });
-    }
-
-    void TownClient::ScheduleReconnect()
-    {
-        if (stopping)
-        {
-            return;
-        }
-        reconnectTimer.expires_after(std::chrono::seconds(2));
-        reconnectTimer.async_wait([this](const asio::error_code& inError)
-        {
-            if (!inError)
-            {
-                Connect();
-            }
-        });
-    }
-
-    void TownClient::ReadHeader()
-    {
-        asio::async_read(socket, asio::buffer(receiveHeader), [this](const asio::error_code& inError, const std::size_t)
-        {
-            if (inError)
-            {
-                HandleDisconnect();
-                return;
-            }
-            const std::uint32_t bodySize = DecodeBodySize(receiveHeader);
-            if (bodySize == 0 || bodySize > MAX_PACKET_BODY_SIZE)
-            {
-                HandleDisconnect();
-                return;
-            }
-            ReadBody(bodySize);
-        });
-    }
-
-    void TownClient::ReadBody(const std::uint32_t inBodySize)
-    {
-        receiveBody.resize(inBodySize);
-        asio::async_read(socket, asio::buffer(receiveBody), [this](const asio::error_code& inError, const std::size_t)
-        {
-            if (inError)
-            {
-                HandleDisconnect();
-                return;
-            }
-            HandlePacket();
-            if (connected.load())
-            {
-                ReadHeader();
-            }
-        });
-    }
-
-    void TownClient::HandlePacket()
+    void TownClient::Impl::Session::HandlePacket()
     {
         const std::optional<TownProtocol::PacketType> type = TownProtocol::ReadPacketType(receiveBody);
         if (!type.has_value())
@@ -381,6 +520,19 @@ namespace ActionRPG
             return;
         }
 
+        if (state == TownConnectionState::AdmissionPending)
+        {
+            const auto result = TownProtocol::DecodeAdmissionResult(receiveBody);
+            if (!result || result->result != 0) { HandleDisconnect(); return; }
+            SetState(TownConnectionState::EnteringTown, L"타운 입장: 캐릭터 생성 대기");
+            QueuePacket(TownProtocol::Encode(TownProtocol::EnterTownRequest{ playerName, characterId }));
+            return;
+        }
+        if (state == TownConnectionState::EnteringTown && *type != TownProtocol::PacketType::EnterTownResponse)
+            { HandleDisconnect(); return; }
+        if (state == TownConnectionState::Ready && *type == TownProtocol::PacketType::EnterTownResponse)
+            { HandleDisconnect(); return; }
+
         switch (*type)
         {
         case TownProtocol::PacketType::SkillStateResponse:
@@ -388,7 +540,12 @@ namespace ActionRPG
             else HandleDisconnect();
             break;
         case TownProtocol::PacketType::EnterTownResponse:
-            if (auto packet = TownProtocol::DecodeEnterTownResponse(receiveBody)) PushEvent(std::move(*packet));
+            if (auto packet = TownProtocol::DecodeEnterTownResponse(receiveBody))
+            {
+                PushEvent(std::move(*packet));
+                deadline.cancel();
+                SetState(TownConnectionState::Ready, L"타운 입장 완료");
+            }
             else HandleDisconnect();
             break;
         case TownProtocol::PacketType::PlayerAppear:
@@ -457,53 +614,4 @@ namespace ActionRPG
         }
     }
 
-    void TownClient::QueuePacket(std::vector<std::uint8_t> inPacketBody)
-    {
-        std::vector<std::uint8_t> framedPacket = FramePacket(std::move(inPacketBody));
-        std::size_t queuedBytes{};
-        for (const auto& packet : sendQueue) queuedBytes += packet.size();
-        if (queuedBytes + framedPacket.size() > MAX_QUEUED_SEND_BYTES)
-        {
-            HandleDisconnect();
-            return;
-        }
-
-        const bool writeInProgress = !sendQueue.empty();
-        sendQueue.push_back(std::move(framedPacket));
-        if (!writeInProgress) WriteNext();
-    }
-
-    void TownClient::WriteNext()
-    {
-        if (sendQueue.empty() || !connected.load()) return;
-        asio::async_write(socket, asio::buffer(sendQueue.front()), [this](const asio::error_code& inError, const std::size_t)
-        {
-            if (inError)
-            {
-                HandleDisconnect();
-                return;
-            }
-            sendQueue.pop_front();
-            WriteNext();
-        });
-    }
-
-    void TownClient::HandleDisconnect()
-    {
-        connected.store(false);
-        sendQueue.clear();
-        asio::error_code ignoredError;
-        socket.close(ignoredError);
-        if (!stopping)
-        {
-            socket = asio::ip::tcp::socket(strand);
-            ScheduleReconnect();
-        }
-    }
-
-    void TownClient::PushEvent(TownEvent inEvent)
-    {
-        std::scoped_lock lock(eventMutex);
-        events.push_back(std::move(inEvent));
-    }
 }
