@@ -40,9 +40,9 @@ effect는 null 또는 `{motion,eventFrame,offset:{x,y,height},loop}`입니다. P
 
 ## 네트워크
 
-Tool/PacketDefine.yml에 ID 14 DungeonSkillInput을 추가합니다: sequence:uint32, skillId:string, facingLeft:uint8.
+Tool/PacketDefine.yml의 ID 14 DungeonSkillInput: sequence:uint32, skillId:string, facingLeft:uint8.
 기존 액션과 같은 sequence 및 DungeonActionResult를 사용하고 세션의 20회/초 제한을 공유합니다.
-서버는 스킬 소유 캐릭터와 지상/공중 조건, 반응·사망·쿨다운을 검사합니다. 마을→룸 ConfirmJoin에 characterId:uint32를 추가하여 신원을 전달합니다.
+서버는 스킬 소유 캐릭터와 습득 레벨, 지상/공중 조건, 반응·사망·쿨다운을 검사합니다. 마을→룸 ConfirmJoin에 characterId:uint32를 추가하여 신원을 전달합니다.
 TownServer와 룸 서버 모두 해당 소스로 다시 빌드해야 합니다. 구버전 바이너리와 새 ConfirmJoin을 혼합하지 않습니다.
 
 기존 실시간 v1의 actor/projectile 레코드 순서는 유지합니다. 스킬 카탈로그가 비어 있지 않으면 다음 tail을 덧붙입니다.
@@ -62,3 +62,40 @@ projectileCount:uint16
 JSON 복구 스냅샷에도 동일한 캐릭터·스킬·버프·투사체 필드를 추가합니다.
 skillId/skillSequence/seconds는 마지막 시전 정보를 보존하며 active만 현재 실행 여부입니다. 짧은 시전 종료 뒤에도 일회성 이펙트를 남은 시간 동안 표시할 수 있습니다.
 이 버전의 클라이언트는 tail 유무를 모두 읽습니다. 스킬을 설치한 서버에 구버전 클라이언트로 접속하면 확장을 읽을 수 없으므로 양쪽 바이너리도 함께 갱신해야 합니다.
+
+## 별도 성장 계약: SkillTrees v1
+
+PlayerSkills는 레벨 1의 실행 정의이며 편집기 출력에 성장·습득 정보를 추가하지 않습니다.
+현재 서버 Shared/SkillTreeCatalog.h는 별도 `format=SkillTrees`, `schemaVersion=1`,
+`skillLevelInterval`(1~1,000,000), `nodes`(최대 256개)를 읽습니다. 파일은 필수이고 최대 1MB입니다.
+
+| 노드 필드 | 계약 |
+|---|---|
+| skillId | PlayerSkills에 존재하는 고유 ID; 모든 스킬에 정확히 하나의 노드 필요 |
+| requiredLevel / spCost | 1~1,000,000 정수; 첫 습득 레벨 / 매 습득 SP 비용 |
+| maxSkillLevel | null 또는 1~1,000,000 정수; null이어도 내부 학습 레벨 상한은 1,000,000 |
+| prerequisites | `{skillId,skillLevel}` 배열; 같은 캐릭터의 등록 스킬·양수 레벨, 중복·자기 참조·순환 금지 |
+| description / icon | 비어 있지 않은 설명(UTF-8 최대 2048바이트) / Images/로 시작하는 PNG Assets 상대 경로 |
+| column / row | 0~255 정수; 같은 캐릭터의 같은 칸 중복 금지 |
+| damagePerLevel | 0~1,000,000 정수; 공격 스킬의 레벨당 추가 피해 |
+
+```text
+필요 캐릭터 레벨 = requiredLevel + (새 스킬 레벨 - 1) * skillLevelInterval
+공격 피해 = PlayerSkills.execution.damage + (습득 스킬 레벨 - 1) * damagePerLevel
+```
+
+서버는 이 공격 피해에 활성 버프의 피해 배율을 적용합니다. 버프의 multiplier/duration은
+현재 스킬 레벨별로 자동 증가하지 않습니다. 습득은 요구 레벨·SP·선행 스킬·최대 레벨·현재 레벨을 검증합니다.
+클라이언트는 서버의 성장 상태와 트리를 수신하므로 이 편집기 출력에 임의의 level/prerequisites 필드를 넣지 않습니다.
+캐릭터의 저장된 성장 상태와 정의의 소유 캐릭터·레벨·선행 조건도 일치해야 합니다.
+
+## 작업 저장과 런타임 출력
+
+PlayerSkillEditorProject schemaVersion 1은 characters/animations/skills/hurtRects/images를 갖는 편집용 스냅샷입니다.
+이미지 data URL과 미완성 설정을 저장할 수 있으나 Build가 실패하면 런타임 ZIP은 출력하지 않습니다.
+PlayerSkills와 PlayerSkillVisuals는 작업 열기 형식이 아니며 별도 원본 모션과 작업 파일을 보존해야 합니다.
+PNG 시전 이펙트는 클라이언트 전용이고, 타격 피해·버프와 이미지 재생은 서로 다른 실행 정보입니다.
+습득 노드·아이콘 및 실행 디렉터리 설치는 ZIP의 범위 밖입니다.
+
+확인 근거: [model.js](model.js), [editor.js](editor.js), 서버 Shared/PlayerSkillCatalog.h,
+Shared/SkillTreeCatalog.h와 GameRoomSkills.cpp. 소스 대조일은 2026-10-06이며 게임 실행 검증은 하지 않았습니다.

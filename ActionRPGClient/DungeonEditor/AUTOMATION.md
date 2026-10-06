@@ -138,10 +138,31 @@ node $dungeonTool --restore $transactionDirectory --server-repo $serverRepo --cl
 항상 `playableVerified=false`, `gameBuildOrPlayTestPerformed=false`입니다.
 원본 설치와 실행 데이터 설치는 runtimeInstallationRequested, INSTALL_PLAN의 루트/파일로 구분합니다.
 던전 설치 완료가 신규 몬스터 렌더링, 서버 AI·전투·드랍·보상, 상태/프레임 동기화 구현을 뜻하지 않습니다.
-현재 FallenCitadel 신규 몬스터 정의는 HP 100과 Wait 반복인 초안입니다.
+현재 ID 2·3 정의에는 임시 HP 100과 감지·추적·공격·회복·귀환 AI가 연결되어 있습니다.
+설치 도구의 REPORT.runtimeIntegration 문구는 별도 연동 작업을 포괄적으로 안내하는 고정 문자열이므로
+현재 게임 소스의 구현 여부를 자동 탐지한 결과로 해석하지 마세요.
 이전 버전 작업 파일의 패키지 생성은 기존 모델의 변환 규칙을 따르지만, 설치는 UI에서 Data ID와 변환 결과를 확인해 schemaVersion 3으로 저장한 후 허용합니다.
 서버는 시작할 때 데이터를 읽으므로 설치 후 다시 시작해야 실제 로딩을 확인할 수 있습니다. 이번 도구는 서버를 실행해 확인하지 않습니다.
 
 큰 base64 작업 파일, 이미지 해석과 PNG 변환에는 메모리·시간이 필요합니다.
 기존 105MB 작업 파일, 15MB 이미지, 8192px 한 변, 3.5MB 런타임 JSON, 128MB ZIP 제한을 유지합니다.
 구현을 실행해 검증하지 않았으므로 최초 사용 시에는 설치 옵션 없이 출력·계획을 먼저 확인하는 것이 적절합니다.
+
+## 현재 실행 환경에서 함께 확인할 데이터
+
+이 명령행 도구가 설치하는 파일은 INSTALL_PLAN에 열거한 대상뿐입니다.
+현재 게임이 요구하는 서버 `Data/Combat.json`, `PlayerSkills.json`, `SkillTrees.json`이나
+클라이언트 `Assets/Data/monsters.json`, `PlayerSkills.json`, `PlayerSkillVisuals.json`, `SkillUi.json`을 모두 동기화하는 범용 배포 도구는 아닙니다.
+해당 원본과 실행 데이터는 서버·클라이언트의 정상 빌드/배포 흐름에서 이미 준비되어 있어야 합니다.
+신규 몬스터 등록·전투 프로필·스킬 트리 계약을 던전 ZIP 설치로 자동 생성하지 않습니다.
+TownMap이나 DB 마이그레이션도 이 도구의 대상이 아닙니다.
+
+흐름을 구분하세요: UI에서 생성·편집 → 작업 JSON 저장 → CLI의 공용 검사·패키지/계획 출력 →
+목록 확인과 승인 → 별도 --install 실행 → 대상 데이터 로딩과 플레이 확인.
+`--restore`는 기록된 설치 대상 복원이며 원본 던전 작업을 이전 편집 상태로 되돌리는 기능이 아닙니다.
+카탈로그 미등록, 현재 출력 폴더 존재, 실행 루트 일부 누락, EXE 실행 중, 경로/등록 충돌은 설치 전 오류입니다.
+해당 원인을 해소하고 새 출력 폴더로 계획을 확인하세요. 동작 중인 서버를 이 도구가 종료하지 않습니다.
+
+2026-10-06 소스 대조: [package.js](package.js), [dungeon-package.cjs](tools/dungeon-package.cjs)의
+Arguments/Dependencies/Plan/RuntimeRoots와 [install.cjs](tools/install.cjs)의 저널·잠금·복원 처리.
+이 문서 갱신에서 명령행 출력·설치·복원이나 게임 실행은 수행하지 않았습니다.

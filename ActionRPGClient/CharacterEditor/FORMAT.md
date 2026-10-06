@@ -100,3 +100,23 @@ preview.html의 보스 1.65배나 도구의 확대 슬라이더는 판정 배율
 작업 파일의 images base64는 편집 재개용이며 서버에 설치하는 형식이 아닙니다.
 이미지와 animation JSON 자체를 갱신했다면 피격 파일도 다시 확인하고 출력해야 합니다.
 문자열 ID가 같다는 이유만으로 원본이 다른 영역을 재사용하지 않습니다.
+
+## 입력·작업 파일과 소비자 구분
+
+| 파일 | 버전·역할 | 이미지 포함 |
+|---|---|---|
+| animations.json | version 1; 캐릭터·모션·프레임의 원본 좌표·재생 정보 | 경로만 |
+| Character.character-project.json | CharacterEditorProject schemaVersion 1; animations/hurtRects/images 작업 스냅샷 | data URL 포함 |
+| Character.hurtrects.json | CharacterHurtRects schemaVersion 1; 서버·클라이언트 공용 피격 정의 | 없음 |
+
+현재 클라이언트 `Assets/Data/monsters.json`은 숫자 dataId와 monsterId를 연결하고,
+`renderHeight / referenceStandingHeight`를 기준 배율로 사용합니다. 모션의 scaleToMovement는 그 배율에 곱합니다.
+예를 들어 현재 등록된 녹슨 갑옷병의 renderHeight는 200, 수호자는 330입니다. 이 값은 편집기 줌과 별개입니다.
+이 외형 로딩 경로가 CharacterHurtRects의 런타임 판정 로더를 의미하지는 않습니다.
+현재 서버 직접 공격은 bodyHeight/hitRadius를 사용하며 피격 JSON의 프레임 사각형으로 대체하지 않습니다.
+
+공격 사각형의 월드 X/높이 계약은 [스킬 FORMAT](../SkillEditor/FORMAT.md)을 따릅니다.
+sourcePixels인 hurtRect를 변환 없이 PlayerSkills.attackRects에 복사하지 마세요.
+작업 저장, 공용 출력, 양쪽 데이터 설치, 로더 연결, 플레이 확인은 각각 다른 완료 단계입니다.
+근거는 [model.js](model.js)의 Export/ReadProject/ReadHurtRects 및
+[Monster.cpp](../ActionRPGClient/Game/Monster.cpp)의 MonsterCatalog입니다. 실행 검증은 이번 문서 작업에서 수행하지 않았습니다.

@@ -1,171 +1,92 @@
 # ActionRPGClient
 
-마을 TCP 통신과 2D 액션 기능을 함께 개발하는 Windows 클라이언트입니다.
-Win32 게임 루프 위에 D3D11/DXGI 장치와 Direct2D 렌더링을 구성했습니다.
+[저장소 진입 안내](../README.md)에서 전체 경로와 문서를 찾을 수 있습니다.
 
-문서 안내:
+Windows용 2D 액션 RPG 클라이언트입니다. Win32 메시지 루프, D3D11/DXGI 장치와 Direct2D 렌더링을 사용합니다. Google 로그인 뒤 Auth의 입장 티켓으로 TownServer에 TLS 접속하며, 던전에서는 MultiSocketRUDP로 GameRoomServer와 통신합니다.
 
-- [클라이언트 개발 가이드](DEVELOPMENT.md): 구조, 실행 흐름, 기능과 에셋을 추가할 위치
-- [마을 패킷 개발 가이드](TOWN_NETWORK.md): TownServer와 주고받는 패킷 추가 절차
-- [마을 맵 에디터 설명서](TOWN_MAP_EDITOR.md): 이미지 배치, 이동 영역, 저장과 적용
-- [몬스터 AI 편집기](MonsterEditor/README.md): 순환 상태 그래프, 스킬·동작 정의, JSON 저장과 정적 승인
-- [캐릭터 피격 영역 편집기](CharacterEditor/README.md): animations.json 불러오기, 플레이어 INI 변환, 프레임별 사각형 편집과 공용 JSON 출력
-- [에셋 디렉터리 설명](Assets/README.md): INI와 이미지·오디오 경로 규칙
+이 문서는 2026-10-06의 클라이언트 `1d153cf`와 현재 데이터·서버 계약을 기준으로 작성했습니다. 코드 구현과 실제 서비스 동작 확인은 구분합니다.
 
-## 현재 기능
+## 문서 안내
 
-- 방향키 이동과 달리기 판정(현재 마을에서는 걷기만 허용)
-- `C` 키 점프
-- 방향 입력과 `Z` 키를 조합하는 스킬 커맨드 큐
-- 대기, 달리기, 사격 스프라이트 애니메이션
-- 직선형 총알과 포물선형 투척물
-- 플레이 영역과 상단 배경 영역을 분리한 맵
-- INI 파일을 이용한 애니메이션, 스킬, 이펙트 및 투사체 설정
-- TownServer TCP 자동 연결과 재연결
-- 서버 권위 위치 보정과 원격 플레이어 데드레커닝
-- 섹터 기반 Appear/Disappear 처리
+| 문서 | 내용 |
+| --- | --- |
+| [개발 가이드](DEVELOPMENT.md) | 실행·스레드 흐름, 월드·UI 책임, 확장 위치 |
+| [인증 및 타운 네트워크](TOWN_NETWORK.md) | 로그인 설정, TLS 입장, 패킷·이벤트·세션 수명 |
+| [던전 전투](COMBAT_CLIENT.md) | 던전 입장·클리어, 입력, 실시간 상태 보간과 복구 |
+| [에셋 안내](Assets/README.md) | 데이터 ID, 이미지·애니메이션, 원본과 실행 폴더 동기화 |
 
-## 조작법
+## 현재 구현
+
+- Google Desktop OAuth/PKCE 로그인, 타운·캐릭터 종류·이름 선택, 로그아웃·계정 전환·타운 변경.
+- 마을 로컬 이동 예측·서버 위치 보정, 섹터별 다른 플레이어 등장·이동·퇴장.
+- 던전 선택, 인증·월드 수신, 방 이동, 몬스터·플레이어·탄환·HP·피격·사망 표시.
+- 던전 원격 플레이어와 몬스터의 서버 시간 기반 보간, reliable JSON 복구.
+- 서버 스킬 트리·레벨·SP 표시, 습득·강화 요청, 6개 단축키 슬롯과 쿨타임.
+- 공개 파티 목록·상세·생성·가입 요청 승인·초대·탈퇴·추방 알림.
+- 보스 클리어 후 마을 이동·재도전 선택 창. 파티에서는 파티장이 선택합니다.
+
+인증 계정과 캐릭터의 영속 데이터 저장은 서버·DB의 책임입니다. 클라이언트의 캐릭터 종류 선택을 계정별 저장 캐릭터 목록 조회로 해석하지 않습니다. 현재 선택은 데이터 ID 1~3이고, 실제 저장·복원 범위는 [타운 네트워크 문서](TOWN_NETWORK.md)의 책임 구분을 참고합니다.
+
+## 조작
 
 | 입력 | 동작 |
 | --- | --- |
-| 방향키 | 이동 |
-| 같은 방향키 빠르게 두 번 | 달리기 |
+| 방향키 | 지면 이동 |
+| 같은 방향키 빠르게 두 번 | 던전 달리기. 마을은 걷기만 허용 |
 | `C` | 점프 |
-| `X` | 사격 및 직선형 총알 발사 |
-| `V` | 포물선형 돌 투척 |
-| `→`, `→`, `Z` | 오른쪽 방향 스킬 |
-| `←`, `←`, `Z` | 왼쪽 방향 스킬 |
+| `X` 누르기 | 기본 사격 한 발 예약. 길게 누르기만으로 연사하지 않음 |
+| `V` | 마을 로컬 투척 표시. 던전 기본 행동 패킷으로 전송하지 않음 |
+| `↑` 다음 `Z` | Character1 앞차기. 입력 간격 최대 0.35초, 지상·습득·쿨타임 조건 필요 |
+| `A/S/D/F/G/H` | 등록한 6개 스킬 사용 |
+| `Esc` | 전체 메뉴 열기·닫기, 하위 UI에서 메뉴로 돌아가기 |
+| 던전 목록 `↑/↓`, `Enter`, `C` | 선택, 입장 요청, 취소 |
+| 클리어 창 방향키·`Enter` 또는 클릭 | 마을 이동·재도전 선택 |
 
-달리기 판정은 스킬 커맨드 큐와 별도로 관리하지만 현재 마을에서는 비활성화되어 있습니다.
+메뉴의 스킬 창에서 습득한 아이콘을 슬롯으로 드래그해 등록합니다. 휠은 세로, Shift+휠은 가로 스크롤입니다. 던전 입장 처리 중부터 파티 UI와 스킬 습득·강화를 제한하며, 던전 스킬 조회·단축키 등록은 허용합니다. 메뉴·선택창·초대창·클리어창·피격 상태는 게임 입력을 차단합니다.
 
-## 프로젝트 구조
+앞차기 정의는 [PlayerSkills.json](Assets/Data/PlayerSkills.json)에 있습니다. 과거 `skills.ini`의 `→→Z/←←Z` 예시는 현재 플레이어 스킬 실행 경로가 아닙니다. 서버의 현재 초기값은 레벨 1·SP 0, 앞차기 습득 비용은 20 SP입니다. 캐릭터 레벨/SP 갱신은 서버가 결정하며 클라이언트에 임의 지급 기능은 없습니다.
 
-```text
-ActionRPGClient/       C++ 소스 프로젝트
-  App/                 프로그램 실행과 게임 루프
-  Core/                INI 문서 처리 등 공통 기능
-  Game/                플레이어, 맵, 스킬, 투사체
-  Graphics/            D3D11/DXGI 장치와 Direct2D 렌더러
-  Input/               입력 상태
-  Network/             TownServer TCP 통신과 패킷 직렬화
-  Platform/            Win32 창과 메시지 처리
-  Resources/           에셋 카탈로그와 스프라이트 애니메이션
-Assets/
-  Data/                게임 데이터 INI 파일
-  Images/              이미지와 스프라이트 시트
-  Audio/               음악과 효과음 배치 위치
-TownMapEditor/          마을 맵 JSON을 작성하는 별도 프로젝트
-MonsterEditor/          몬스터 AI 그래프 편집기와 Windows 실행 프로젝트
-```
+## 빌드와 실행
 
-`TownMapEditor/`는 마을 배경 이미지, 이동 영역, 시작 위치를 배치하는 도구입니다.
+필요한 환경은 Windows x64, C++20, MSVC v143와 Windows SDK, `.slnx`를 지원하는 Visual Studio/MSBuild입니다. 저장소의 `External/MultiSocketRUDP`와 그 하위 의존성을 준비하고, 루트 [vcpkg.json](../vcpkg.json)의 Asio·OpenSSL·nlohmann-json을 사용합니다. 클라이언트 프로젝트에서 manifest를 활성화합니다.
 
-주요 데이터 파일은 다음과 같습니다.
-
-- `Assets/Data/assets.ini`: 논리적 에셋 이름과 파일 경로
-- `Assets/Data/animations.ini`: 스프라이트 프레임과 재생 속도
-- `Assets/Data/skills.ini`: 스킬 커맨드와 입력 제한 시간
-- `Assets/Data/effects.ini`: 스킬 이펙트 정보
-- `Assets/Data/projectiles.ini`: 투사체 이동 및 표시 정보
-
-빌드할 때 `Assets` 디렉터리가 실행 파일 옆으로 복사됩니다. 실행 중에는 작업 디렉터리가 아니라 실행 파일 위치를 기준으로 에셋을 찾습니다. 마을 배경은 `assets.ini` 등록 대신 서버 맵 JSON의 `asset` 상대 경로를 사용합니다.
-
-## 빌드 및 실행
-
-Visual Studio 2022에서 `ActionRPGClient.slnx`를 열고 다음 구성을 선택합니다.
-
-- 구성: `Debug` 또는 `Release`
-- 플랫폼: `x64`
-
-명령줄에서는 Visual Studio Developer PowerShell에서 다음과 같이 빌드할 수 있습니다.
+아래 명령의 작업 위치는 **이 README가 있는 폴더**입니다. 게임 실행 인자는 현재 해석하지 않습니다.
 
 ```powershell
-msbuild .\ActionRPGClient\ActionRPGClient.vcxproj /p:Configuration=Debug /p:Platform=x64
+Set-Location C:/Users/KimHyeongJin/source/repos/ActionRPGClient/ActionRPGClient
+msbuild ./ActionRPGClient/ActionRPGClient.vcxproj /p:Configuration=Debug /p:Platform=x64
+./artifacts/bin/x64/Debug/ActionRPGClient.exe
 ```
 
-Debug 실행 파일은 `artifacts/bin/x64/Debug/ActionRPGClient.exe`에 생성됩니다.
+Visual Studio에서는 이 폴더의 [ActionRPGClient.slnx](ActionRPGClient.slnx)를 열고 `Debug | x64` 또는 `Release | x64`를 선택합니다. 클라이언트 실행 파일은 `ActionRPGClient/artifacts/bin/x64/<Configuration>/ActionRPGClient.exe`에 생성됩니다. RUDP·Logger 라이브러리는 저장소 루트의 `artifacts` 경로를 사용하므로 두 출력 위치를 혼동하지 않습니다.
 
-### 빌드 없이 에셋 반영
+실행 파일 옆에 `Assets/`, `ClientOptionFile/CoreOption.txt`, OpenSSL 런타임 DLL이 필요합니다. 빌드 대상의 `CopyRuntimeAssets`·`CopyClientOptions`가 데이터를 복사합니다. 로그인 전에 [AuthClient.json](Assets/Data/AuthClient.json)에 실제 Auth 주소·Google Desktop ID·타운 목록·타운 CA를 설정하고 서버의 인증/TLS 설정과 맞춰야 합니다. 기본 파일은 미설정 상태이며 고정 localhost에 자동 접속하지 않습니다. 서버 기동·DB 준비 절차는 [AuthServer 문서](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md)를 참고합니다.
 
-클라이언트를 한 번 이상 빌드한 상태라면 `SyncClientAssets.bat`으로 C++ 빌드 없이
-프로젝트의 `Assets`를 실행 파일 옆에 즉시 동기화할 수 있습니다.
+## 에셋 반영
 
-```bat
-SyncClientAssets.bat
-SyncClientAssets.bat Release
-```
-
-인자를 생략하면 `Debug | x64`에 반영합니다. `Release`를 지정하면
-`Release | x64` 실행 폴더에 반영합니다. 원본에서 삭제한 에셋은 실행 폴더에서도
-삭제되므로 프로젝트의 `Assets`를 원본으로 관리해야 합니다. 실행 중인 클라이언트는
-이미지와 데이터를 캐시할 수 있으므로 동기화 후 재시작합니다.
-
-클라이언트는 기본적으로 `127.0.0.1:7777`의 TownServer에 연결합니다. 서버를 먼저
-실행한 뒤 클라이언트를 여러 번 실행하면 원격 플레이어의 Appear, 이동,
-Disappear를 확인할 수 있습니다.
-입장 시 맵의 좌표와 이동 영역은 서버에서 받지만 배경 이미지 파일은 클라이언트의
-`Assets/Images/Towns`에 있어야 합니다. 서버 또는 클라이언트의 입장 패킷 형식을
-변경했다면 양쪽 프로젝트를 함께 다시 빌드합니다.
-
-## Town Map Editor
-
-전체 사용법은 [`TOWN_MAP_EDITOR.md`](TOWN_MAP_EDITOR.md)를 참고합니다.
+원본은 이 폴더의 `Assets/`입니다. 빌드 없이 이미 빌드한 실행 폴더에 반영하려면 다음을 사용합니다.
 
 ```powershell
-artifacts/bin/x64/Debug/TownMapEditor.exe `
-  ..\..\ActionRPGServer\ActionRPGServer\TownServer\Data\TownMap.json `
-  .\Assets
+./SyncClientAssets.bat
+./SyncClientAssets.bat Release
 ```
 
-- `Add at X/Y`: 입력한 월드 좌표에 이미지 추가
-- `Add Right`: 선택 이미지의 오른쪽 끝에 간격 없이 이미지 추가
-- `Add Bottom`: 선택 이미지의 아래쪽 끝에 간격 없이 이미지 추가
-- `Add Top`: 선택 이미지의 위쪽 끝에 간격 없이 이미지 추가
-- `Add Left`: 선택 이미지의 왼쪽 끝에 간격 없이 이미지 추가
-- `O`: 기존 TownMap JSON 불러오기
-- `V`: 이미지 선택. 드래그 또는 X/Y 입력으로 위치 수정
-- `W`: 이동 가능 다각형 작성. 좌클릭으로 점을 추가하고 `Enter`로 완성
-- `B`: 진입 금지 다각형 작성
-- `P` 또는 우클릭: 플레이어 시작 위치 배치
-- `R`: 드래그로 실제 표시 영역 지정. 영역 밖 배경은 클라이언트에서 잘림
-- `Clear Mode Areas`: 현재 W/B 모드의 영역을 모두 제거
-- 가운데 버튼 드래그 또는 `Space+좌클릭`: 캔버스 이동
-- 마우스 휠: 커서 위치를 중심으로 확대·축소
-- `F`: 전체 맵 맞춤, `S`: 현재 JSON 저장, `Shift+S`: 다른 이름으로 저장
+생략 시 Debug x64, Release 지정 시 Release x64에 반영합니다. 이 도구는 원본에서 삭제한 파일도 실행 폴더에서 삭제하는 미러 동기화입니다. 실행 폴더만 수정하지 말고 원본을 관리하며, 캐시된 데이터·이미지와 기동 시 설정을 다시 읽도록 클라이언트를 재시작합니다. C++나 wire 계약 변경은 양쪽 소스 빌드·배포가 필요합니다.
 
-추가한 이미지는 `Assets/Images/Towns`로 복사됩니다. 너비가 100인 이미지가
-X=0에 있을 때 `Add Right`로 추가한 다음 이미지는 X=100에 배치됩니다.
-두 번째 실행 인자를 생략하면 편집기는 프로젝트의 `Assets` 디렉터리를 자동으로 찾습니다.
+## 편집 도구
 
-맵을 수정한 후 TownServer를 다시 빌드·실행하면 서버가 새 영역을 로드합니다.
-이미지를 새로 추가했다면 ActionRPGClient도 다시 빌드하여 해당 이미지를 실행 폴더의
-`Assets`로 복사해야 합니다.
+각 도구의 사용법·입출력 형식은 해당 문서에서 관리합니다.
 
-## Monster AI Editor
+- [마을 맵 에디터](TOWN_MAP_EDITOR.md): 마을 배경·이동 영역·진입 위치.
+- [던전 에디터](DungeonEditor/README.md): 방·워프·미니맵과 던전 출력.
+- [몬스터 에디터](MonsterEditor/README.md): AI 그래프·스킬·동작 정의.
+- [캐릭터 에디터](CharacterEditor/README.md): 프레임·pivot·피격 영역.
+- [스킬 에디터](SkillEditor/README.md): 공유 스킬 계약·표시 데이터.
 
-`MonsterEditor/index.html`을 브라우저에서 열거나, `MonsterEditor` 프로젝트를 빌드한 뒤
-`artifacts/bin/x64/Debug/MonsterEditor.exe`를 실행합니다. 로컬 파일로 동작하며
-외부 서버나 npm 설치가 필요하지 않습니다.
+서버가 맵·몬스터·전투를 실행하고 클라이언트가 표시하는 연동은 구현되어 있습니다. 편집기의 출력 성공만으로 서버 데이터 설치와 실제 플레이 검증이 완료되는 것은 아닙니다.
 
-상태와 전환을 그래프로 편집하고, 스킬·동작 정의를 추가해 노드에서 선택할 수 있습니다.
-JSON 불러오기·저장과 문서 전체의 정적 검사, **AI 승인 · 저장**을 제공합니다.
-정상적인 순환은 허용하고 시간 소모 없이 즉시 반복될 수 있는 순환은 승인 오류로 처리합니다.
-승인 후 내용이 바뀌거나 파일을 다시 불러오면 재승인이 필요합니다.
+## 확인 범위와 한계
 
-전체 사용법과 JSON 실행 규칙은 [MonsterEditor/README.md](MonsterEditor/README.md)를 참고합니다.
-현재 도구는 정의 편집과 정적 검사까지 담당하며, 서버의 몬스터 AI 실행·전투·드랍 연동은
-아직 구현하지 않았습니다.
+2026-10-06 이전 작업에서 Debug x64 컴파일·링크와 일반 재빌드 성공을 확인했습니다. 이번 문서 작업은 코드·설정·패킷·경로의 정적 대조만 수행했으며 빌드나 프로그램 실행을 추가로 하지 않았습니다. Release, 실제 Google/Auth/Town 왕복, 다중 클라이언트 파티·던전·종료 흐름은 별도 실행 검증이 필요합니다.
 
-## Dungeon Map Editor
-
-`DungeonEditor/index.html`을 Edge 또는 Chrome에서 열거나, `DungeonEditor` 프로젝트를
-빌드한 뒤 `artifacts/bin/x64/Debug/DungeonEditor.exe`를 실행합니다.
-빈 던전에서 여러 방을 추가하고 배경 이미지, 이동 가능·불가 영역, 파티 입장 위치와 워프존을 편집합니다.
-방 배치·연결에 따라 자동 미니맵을 표시하며, 작업 JSON 저장·불러오기와 출력 전 정적 검사를 지원합니다.
-
-**던전 · 미니맵 출력**은 이동 속도를 포함하지 않는 방별 version 4 던전 JSON,
-배경·게이트·발판·특수 오브젝트 이미지, `Dungeon.json`과 간소화된 미니맵 PNG·SVG를 ZIP으로 묶습니다.
-일반 방·보스 방 아이콘을 구분하며 게이트 방향과 미니맵 연결, 목적지 도착 방향을 출력 전에 검사합니다.
-서버 던전 맵 로딩·방 전환과 게임 미니맵 HUD 연동은 아직 구현하지 않았습니다.
-사용법과 출력 형식은 [DungeonEditor/README.md](DungeonEditor/README.md)를 참고합니다.
+토큰 영구 저장·자동 갱신·기동 시 자동 로그인·타운 자동 재접속은 구현하지 않았습니다. 미니맵 파일은 편집기 출력과 구분되며 현재 게임 미니맵 HUD는 연결되지 않았습니다. 화면 조작 안내의 과거 커맨드 문자열도 실제 PlayerSkills 입력과 다르므로 위 조작표를 기준으로 확인합니다. 현재 서버 계약의 드랍·인벤토리·보상 지급·부활·전멸 처리 범위는 [서버 전투 문서](../../ActionRPGServer/ActionRPGServer/GameRoomServer/COMBAT_PROTOCOL.md)에서 확인합니다. 표시 보간은 서버의 피해·충돌 판정을 바꾸지 않습니다.

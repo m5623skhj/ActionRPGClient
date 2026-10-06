@@ -5,7 +5,8 @@ Town Map Editor는 여러 장의 마을 배경 이미지를 월드에 배치하�
 
 ## 1. 빌드
 
-Visual Studio 2022에서 `ActionRPGClient.slnx`를 열고 다음 프로젝트를 빌드합니다.
+프로젝트의 도구 체인과 .slnx를 지원하는 Visual Studio에서 `ActionRPGClient.slnx`를 열고 다음 프로젝트를 빌드합니다.
+이 편집기는 HTML 런처가 아닌 Windows 네이티브 도구이며 GDI+와 Windows 파일 대화상자를 사용합니다.
 
 - 프로젝트: `TownMapEditor`
 - 구성: `Debug` 또는 `Release`
@@ -198,7 +199,10 @@ Blocked, Spawn은 표시 영역 안에 있어야 합니다. 표시 영역은 서
 - 완성된 이동 가능 다각형이 하나 이상 있어야 합니다.
 - 모든 이동 영역의 꼭짓점이 표시 영역 안에 있어야 합니다.
 - 시작 위치와 캐릭터 충돌 범위가 유효한 이동 영역 안에 있어야 합니다.
-- 이동 가능 영역과 진입 금지 영역의 전체 꼭짓점 수가 32,768개 이하여야 합니다.
+- 이동 가능·진입 금지·Transition Zone의 전체 꼭짓점 수가 32,768개 이하여야 합니다.
+- Entry Point와 Transition Zone의 ID는 각 목록 안에서 고유하며 비어 있지 않아야 합니다.
+- Entry Point 중심이 이동 가능하고, Transition Zone의 모든 점이 표시 영역 안에 있어야 합니다.
+- 맵 이동의 대상 mapId/Entry Point 또는 던전 그룹 필드가 입력되어 있어야 합니다.
 
 저장에 성공하면 창 제목에 저장된 파일 경로가 표시됩니다.
 
@@ -299,3 +303,37 @@ Walkable 또는 Blocked 꼭짓점이 표시 영역 밖에 있습니다. 표시 �
 
 JSON에 기록된 이미지 경로를 Assets 디렉터리에서 찾지 못했거나 지원하지 않는 이미지
 파일입니다. `Assets/Images/Towns`의 파일 존재 여부와 파일 형식을 확인합니다.
+
+## 15. 파일 계약과 저장·설치 구분
+
+이 도구는 편집용 작업 JSON과 런타임 JSON을 따로 만들지 않고 같은 맵 파일을 저장합니다.
+입력은 version 1/2/3이고 출력은 version 3입니다. TownServer는 현재 version 2/3을 읽으므로
+구형 version 1을 사용하려면 편집기에서 변환·저장한 결과를 서버에 반영합니다.
+
+| 주요 필드 | 의미 |
+|---|---|
+| mapId | 다른 맵이 참조하는 문자열 ID; 파일명과 동일하다고 추측하지 않음 |
+| world | left/top/right/bottom 표시·최외곽 이동 범위 |
+| images[] | asset(Assets 상대 경로), x/y/width/height; 이미지 바이트는 JSON에 없음 |
+| walkablePolygons / blockedPolygons | 월드 X/Y의 다각형 목록 |
+| spawn / entryPoints[] | 기본 시작 위치 / id와 position을 가진 맵 이동 도착점 |
+| transitionZones[] | id/polygon/action; MapTransfer 또는 DungeonSelection |
+| sectorWidth/sectorHeight, walkSpeed/runSpeed | 불러온 값을 보존하는 서버 맵 설정; UI에서 속도·섹터를 편집하지 않음 |
+
+예를 들어 대상 맵의 `mapId=town_02`, Entry Point ID가 `FromTown01`이면 출발 맵의 Map Transfer에
+각각 `town_02`와 `FromTown01`을 입력합니다. 대상 TownMap*.json도 TownServer Data에 있어야 합니다.
+편집기의 Save는 대상 맵·던전 카탈로그 전체를 읽어 교차 검증하지 않습니다. 서버 시작 시 존재·참조를 다시 검사합니다.
+같은 mapId인 별도 파일을 추가하지 말고 기존 맵 등록과 맞춥니다.
+
+이미지 추가는 Save보다 먼저 Assets/Images/Towns에 실제 파일을 복사합니다.
+이미지를 화면에서 삭제하거나 문서를 저장하지 않아도 그 복사 파일이 자동으로 삭제되지는 않습니다.
+이미지와 맵 JSON을 함께 관리하되 다른 맵에서 사용하는 파일을 임의로 지우지 마세요.
+Save As로 다른 디렉터리에 저장해도 asset 경로의 기준은 지정한 Assets이며 맵 JSON의 폴더로 바뀌지 않습니다.
+
+다각형·Spawn·참조 필드 검사를 통과한 Save는 서버 적용이나 플레이 성공 확인이 아닙니다.
+원본 맵 저장 → 실행 서버 Data의 같은 맵 반영 → 클라이언트 실행 Assets 반영 → 서버 재시작 후 확인을 구분합니다.
+ZIP 출력·자동 설치·서버 실행·상태 동기화 검증·AI/드랍/스킬 편집은 이 도구의 기능이 아닙니다.
+
+2026-10-06 근거: [TownMapEditor/Main.cpp](TownMapEditor/Main.cpp)의 Load/Save/AddImage와 인자 처리,
+[TownMapEditor.vcxproj](TownMapEditor/TownMapEditor.vcxproj)의 출력 경로, 서버 TownMap.cpp의 버전·참조 검사.
+이번 문서 갱신에서는 편집기 실행·빌드·테스트·서버 적용을 하지 않았습니다.

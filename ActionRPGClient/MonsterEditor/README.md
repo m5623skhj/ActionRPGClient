@@ -3,6 +3,23 @@
 몬스터별 상태·행동·조건을 그래프로 편집하고 JSON으로 저장하는 로컬 도구입니다.
 편집기 데이터, 정적 검사기, 화면 코드를 분리했습니다.
 
+## 빠른 시작과 문서 안내
+
+아래 프로젝트·실행 파일 경로는 `ActionRPGClient.slnx`가 있는 클라이언트 프로젝트 폴더 기준입니다.
+
+| 항목 | 안내 |
+|---|---|
+| 바로 열기 | [index.html](index.html)을 Edge/Chrome에서 열기; 서버·npm 설치 불필요 |
+| Windows 런처 | [MonsterEditor.vcxproj](MonsterEditor.vcxproj), `artifacts/bin/x64/Debug/MonsterEditor.exe` (Release도 같은 구조) |
+| 시작 예제 | [Example.ai.json](Example.ai.json)을 직접 불러오기; 새 문서는 빈 그래프로 시작 |
+| 작업 흐름 | 생성·불러오기 → 몬스터/상태/연결/스킬·동작 편집 → 작업 저장 → 정적 검사 → AI 승인·별도 스냅샷 저장 → 별도 등록·설치 |
+| 상세 안내 | 아래 데이터 형식·행동/조건·정적 승인·서버/클라이언트 등록 절에서 schemaVersion 1과 연동 범위 설명 |
+
+일반 작업 저장과 승인 스냅샷은 별개입니다. 승인 버튼은 게임 AI나 타격을 실행하지 않고 정적 검사 결과를 기록합니다.
+이미지·전투 프로필·카탈로그 등록과 설치는 자동 처리하지 않습니다.
+플레이어 스킬 제작은 별도 [SkillEditor 안내](../SkillEditor/README.md)를 따릅니다.
+
+
 ## 열기
 
 - 이 폴더의 `index.html`을 브라우저에서 엽니다.
@@ -147,9 +164,10 @@ HP ≤ 0이면 공통 사망 처리에서 AI를 종료합니다.
 수정하면 승인 기록을 해제합니다. 승인된 파일을 다시 불러와도 기존 기록을 신뢰하지 않고
 현재 데이터로 다시 검사·승인하도록 합니다.
 
-서버 로더 역시 승인 문자열만 믿지 말고 데이터와 실행 계약을 다시 검증해야 합니다.
-서버의 정적 검사기와 스키마가 아직 구현되지 않았으므로 현재 승인 파일을
-서버에서 자동 실행하는 기능은 없습니다.
+현재 GameRoomServer의 MonsterDefinition 로더는 schemaVersion 1 문서와 그래프를 다시 검사합니다.
+approval.status만으로 로딩 여부를 결정하지 않으며, 내용이 유효한 초안도 로딩할 수 있습니다.
+AI 실행은 GameRoomCombat.cpp에서 개체별로 처리하며 한 틱의 전환을 최대 64회로 제한합니다.
+편집기의 승인 버튼은 이 실행 결과나 게임 플레이를 확인하지 않습니다.
 
 ## 확장과 제한
 
@@ -165,7 +183,8 @@ HP ≤ 0이면 공통 사망 처리에서 AI를 종료합니다.
 
 편집과 검사는 브라우저의 단일 이벤트 루프에서 수행하고 파일 처리 중에는 편집을 잠급니다.
 이 도구는 서버의 살아 있는 몬스터 상태나 공유 메모리를 변경하지 않습니다.
-몬스터 AI 실행기, 실제 공격·피격·드랍 처리, 아이템 드랍 편집, 움직임 시뮬레이션은 현재 범위에 포함하지 않습니다.
+편집기에는 움직임·전투 시뮬레이터와 아이템 드랍 편집 UI가 없습니다.
+서버에는 AI 실행과 기본 공격·피격 처리가 연결되어 있지만 드랍·보상 지급은 아직 구현하지 않았습니다.
 
 ## 파일 구성
 
@@ -178,3 +197,33 @@ HP ≤ 0이면 공통 사망 처리에서 AI를 종료합니다.
 
 브라우저 파일 처리 구현의 참고 문서는
 [Chrome File System Access API](https://developer.chrome.com/docs/capabilities/web-apis/file-system-access)입니다.
+
+## 순환 예제와 오류 해결
+
+`Example.ai.json`을 열어 대기 → 추적 → 공격 → 추적, 추적 → 복귀 → 대기 연결을 확인합니다.
+`Wait.seconds`를 양수로 두고, 추적의 거리 조건과 공격의 SkillReady를 지정합니다.
+공격은 UseSkill이 완료된 뒤 AfterAction으로 추적 또는 회복 상태로 돌아가도록 편집합니다.
+**정적 검사**에서 오류를 해소하고 일반 작업 JSON을 저장한 뒤 **AI 승인 · 저장**으로 별도 스냅샷을 출력합니다.
+승인은 문서의 정적 계약 확인이며 실행·이미지 재생·타격 성공 확인이 아닙니다.
+
+즉시 순환 오류는 Immediate 연결만 반복되는지 확인하고 실제 Wait/StateTimeAtLeast 또는 OnUpdate로 시간 진행을 확보합니다.
+참조 오류는 스킬·동작 정의와 행동/조건의 ID를 맞추고, 도달 불가 오류는 initialNodeId에서 모든 노드까지 연결되는지 확인합니다.
+새 스킬·드랍 필드를 임의로 JSON에 추가하면 지원하지 않는 필드로 거절됩니다. 확장에는 모델·검사기·서버 계약 변경이 필요합니다.
+
+## 서버·클라이언트 등록
+
+1. AI 문서를 서버 `ActionRPGServer/GameRoomServer/Data/Monsters/`에 두고 MonsterCatalog.json의
+   `{dataId, definitionFile, monsterId}`로 숫자 배치 ID와 문서의 문자열 몬스터 ID를 연결합니다.
+2. 스킬의 damage/hitSeconds/reachHeight와 이동·감지·피격 크기는 서버 `Data/Combat.json`에 별도로 정의합니다.
+   MonsterEditor의 minRange/maxRange/cooldown/duration만으로 실제 피해량이 완성되지 않습니다.
+3. 클라이언트 `Assets/Data/monsters.json`의 같은 dataId/monsterId, 모션 메타데이터·PNG·renderHeight를 맞춥니다.
+   `animationId`는 외형 모션 참조이며 AI 노드 ID와 별개입니다.
+4. 원본 저장은 실행 파일 옆 데이터 설치와 다릅니다. 서버 시작 시 로딩하는 데이터와 클라이언트 Assets를 갱신해야 합니다.
+
+현재 ID 1 Dummy는 대기하고, ID 2 녹슨 갑옷병·ID 3 수호자는 감지·추적·공격·회복·귀환 패턴이 연결되어 있습니다.
+신규 등록은 편집기가 자동으로 수행하지 않습니다. DungeonEditor 팔레트도 현재 Data ID 1/2/3만 지원합니다.
+편집기 불러오기 상한은 5MB지만 서버 AI 정의 파일은 4MB 이하, 참조 정의 합계는 64MB 이하입니다.
+
+2026-10-06 근거: [model.js](model.js)의 validateDocument, [editor.js](editor.js)의 승인·저장 처리,
+서버 MonsterDefinition.cpp/CombatDefinition.cpp/GameRoomCombat.cpp 및 클라이언트
+[Monster.cpp](../ActionRPGClient/Game/Monster.cpp)를 읽어 대조했습니다. 이번 갱신은 문서만 수정했으며 실행 검증은 하지 않았습니다.

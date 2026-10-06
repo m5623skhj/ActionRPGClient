@@ -4,6 +4,22 @@
 HTML/CSS/JavaScript와 Windows 브라우저 런처 프로젝트로 구성됩니다. 인터넷, npm, CDN, 외부 서버가 필요하지 않습니다.
 빈 문서로 시작하며 캐릭터 ID, 상태/모션, 프레임은 불러온 데이터에서만 가져옵니다.
 
+## 빠른 시작과 문서 안내
+
+아래 프로젝트·실행 파일 경로는 `ActionRPGClient.slnx`가 있는 클라이언트 프로젝트 폴더 기준입니다.
+
+| 항목 | 안내 |
+|---|---|
+| 바로 열기 | [index.html](index.html)을 Edge/Chrome에서 열기; 서버·npm 설치 불필요 |
+| Windows 런처 | [CharacterEditor.vcxproj](CharacterEditor.vcxproj), `artifacts/bin/x64/Debug/CharacterEditor.exe` (Release도 같은 구조) |
+| 입력 | animations.json과 참조 이미지, 또는 플레이어 INI·이미지; 편집 재개는 CharacterEditorProject 작업 JSON |
+| 작업 흐름 | 원본 불러오기 → 캐릭터/모션/프레임 선택 → 피격 사각형 편집 → 작업 저장·불러오기 → 정적 검사 → 게임용 JSON 출력 |
+| 상세 계약 | [FORMAT.md](FORMAT.md): sourceRect/pivot/배율, CharacterHurtRects v1, 로더·등록 경계 |
+
+작업 저장은 편집 재개용이며 피격 JSON 출력과 다릅니다. 출력에는 별도 승인 기록이나 자동 설치가 없습니다.
+런타임 로더 연결·실행 데이터 설치·플레이 확인은 별도 단계입니다. 아래에 실제 편집·오류 해결 방법을 설명합니다.
+
+
 ## 열기
 
 `index.html`을 Edge 또는 Chrome에서 직접 엽니다. HTML이 텍스트 편집기에 연결되어 있으면 브라우저에서 여세요.
@@ -112,3 +128,26 @@ Visual Studio 솔루션에는 `CharacterEditor` 프로젝트가 추가됩니다.
 몬스터의 숫자 Data ID는 기존 카탈로그와 문자열 캐릭터 ID를 연결해야 합니다.
 제작 몬스터의 최종 게임 크기, 서버의 현재 모션/프레임/점프 높이 관리도 런타임 담당과 연결해야 합니다.
 파일을 출력했다고 즉시 게임 피격 판정에 적용되는 것은 아닙니다.
+
+## 사용 예와 오류 해결
+
+점프 중 피격 영역을 줄이려면 플레이어 INI를 변환한 뒤 해당 캐릭터의 `jumpHold`를 선택합니다.
+프레임 0에 사각형을 그려 좌표 적용을 확인하고, 모든 프레임의 잘라낸 크기에 들어갈 때만 **현재 모션 전체에 복사**합니다.
+필요한 다른 모션·프레임의 영역도 모두 지정하고 **정적 검사** → **작업 저장** → **게임용 JSON 출력** 순서로 진행합니다.
+이 과정은 피격 정의 제작 예이며 실제 게임의 무적·점프 판정을 변경하는 명령은 아닙니다.
+
+| 오류·상황 | 확인할 내용 |
+|---|---|
+| 이미지 누락·후보 중복 | motion.image와 폴더 내 상대 경로를 맞추고 같은 경로로 검색되는 파일을 하나로 정리 |
+| 실제 크기와 선언 불일치 | 이미지를 바꿨다면 animations.json의 width/height/sourceRect를 함께 재작성 |
+| 미지정 프레임 | 문서의 모든 캐릭터·모션·프레임을 확인; 일부만 완성해도 전체 출력은 차단 |
+| PLAYER_ANIMATIONS 불일치 | C++ 연결표와 변환기 계약을 검토; Assets만 선택해 검사를 우회했다고 일치가 증명되지는 않음 |
+| 같은 캐릭터 ID 재불러오기 | 다른 캐릭터 추가와 원본 교체를 구분; 교체는 저장 후 새 문서에서 수행 |
+
+픽셀 기준점과 프레임 크기는 원본에서 읽으며 이 도구가 새 모션·PNG·숫자 Data ID를 제작하지 않습니다.
+공용 피격 JSON을 출력해도 런타임 설치·등록·판정 연결을 자동 수행하지 않습니다.
+직접 공격의 공격 영역과 시전 데이터는 별도 [SkillEditor](../SkillEditor/README.md)에서 편집합니다.
+
+2026-10-06 소스 확인 기준: [model.js](model.js)의 ConvertPlayer/Check/Export/ReadHurtRects와
+[editor.js](editor.js)의 파일·드래그 처리, [CharacterEditor.vcxproj](CharacterEditor.vcxproj)의 출력 경로를 대조했습니다.
+이번 문서 갱신에서는 빌드·도구 실행·테스트·플레이 확인을 하지 않았습니다.
