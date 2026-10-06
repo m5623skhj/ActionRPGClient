@@ -1,8 +1,8 @@
 # 던전 전투 클라이언트
 
-2026-10-06 클라이언트 `1d153cf`와 현재 서버 계약 기준입니다. 던전 입장·입력·표시·클리어 후 전환을 설명합니다.
+2026-10-06 슬라이딩 구현을 포함한 현재 클라이언트와 서버 계약 기준입니다. 던전 입장·입력·표시·클리어 후 전환을 설명합니다.
 
-공유 패킷 원본은 [Tool/PacketDefine.yml](../../ActionRPGServer/Tool/PacketDefine.yml), 실행 규칙은 [서버 전투 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/COMBAT_PROTOCOL.md)과 [플레이어 스킬 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/PLAYER_SKILLS.md)입니다. [이동 보간 계약](../../ActionRPGServer/output/movement-smoothing/SERVER_HANDOFF.md)의 요청 ID는 `movement-smoothing-20261003`, 실시간 wire version은 1입니다.
+공유 패킷 원본은 [Tool/PacketDefine.yml](../../ActionRPGServer/Tool/PacketDefine.yml), 실행 규칙은 [서버 전투 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/COMBAT_PROTOCOL.md)과 [플레이어 스킬 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/PLAYER_SKILLS.md)입니다. [이동 보간 계약](../../ActionRPGServer/output/movement-smoothing/SERVER_HANDOFF.md)의 요청 ID는 `movement-smoothing-20261003`, 이 문서의 현재 전투 wire version은 슬라이딩을 포함한 2입니다. 이전 이동 보간 인계의 version 1과 혼용하지 않습니다.
 
 ## 입장과 월드 적용
 
@@ -11,7 +11,7 @@
 3. 별도 연결 worker가 MultiSocketRUDP 코어로 TLS session broker 교환과 RUDP 연결을 진행합니다. `ClientOptionFile/CoreOption.txt`와 서버가 지정한 브로커를 사용합니다.
 4. RUDP `DungeonChallenge`를 받으면 타운 TLS 연결로 `ConfirmDungeonJoin(roomId,challenge)`을 보냅니다. `DungeonAuthResult` 성공 뒤에만 월드 조각을 요청합니다.
 5. 월드 JSON을 재조립한 뒤 roomId·localPlayerId·맵/몬스터 참조·스킬 계약을 검증합니다. 서버/로컬 PlayerSkills가 다르면 진입을 중단합니다.
-6. 입장 맵·좌표·combatRules를 적용하고 실시간 v1 구독과 reliable 전투 JSON 요청을 시작합니다. Running 상태를 받은 뒤 행동 입력을 전송합니다.
+6. 입장 맵·좌표·combatRules를 적용하고 실시간 v2 구독과 reliable 전투 JSON 요청을 시작합니다. Running 상태를 받은 뒤 행동 입력을 전송합니다.
 
 상태는 Idle → WaitingRoom → Connecting → WaitingAuthentication → WaitingWorld → Entered입니다. 선택창이 닫힌 것만으로 입장이 완료되지 않습니다. 화면의 Dungeon 상태와 Town/GameRoom 연결·인증·월드 데이터 오류를 함께 확인해야 합니다. 목록·입장 조건·몬스터 처치에 따른 워프 허용은 서버가 결정합니다.
 
@@ -22,8 +22,9 @@
 | 입력/표시 | 처리 |
 | --- | --- |
 | 방향키·달리기 | 로컬 지면 이동을 즉시 예측. 방향/달리기 변경 즉시, 같은 입력은 0.1초 간격으로 reliable 전송 |
-| X | `DungeonActionInput` action=1, 기본 사격 |
-| C | `DungeonActionInput` action=2, 점프 |
+| X (달리기 이외) | `DungeonActionInput` action=1, 기본 사격 |
+| 던전 지상 달리기 중 X | action=3, Slide 기본 행동. 일반 사격과 중복 소비하지 않음 |
+| C | DungeonActionInput action=2, 점프 |
 | 습득한 커맨드 또는 A/S/D/F/G/H | `DungeonSkillInput`의 skillId·facingLeft |
 | V | 던전 기본 action으로 보내지 않음 |
 | HP·피격·죽음·시전·탄환·클리어 | 서버 상태 적용 |
@@ -38,6 +39,16 @@
 
 `DungeonActionResult.accepted=false`를 받으면 ACTION NOT ACCEPTED를 1초 표시합니다. 사망·피격·다른 행동·쿨타임·허용 단계·제한 등에서 서버가 거절할 수 있지만 이 패킷에는 상세 거절 사유가 없습니다. 표시만으로 특정 원인을 단정하지 않습니다.
 
+## 슬라이딩
+
+던전 지상에서 실제 이동 중 달리기+X를 누르면 Slide(action=3)를 한 번 전송합니다. 기존 스킬 커맨드/단축키 처리 우선순위는 유지합니다. 입력에는 현재 mapEpoch·moveSequence·directionX/Y·running을 함께 넣어 같은 프레임 달리기 시작과 X를 서버가 동일하게 판정합니다. 사격 Prepare/Fire 중에는 서버가 Slide를 예약하지 않고 거절하며, 클라이언트도 해당 X를 일반 사격으로 바꾸지 않습니다. 이동이 허용되는 Recover와 콤보 입력 유예에서는 시작 시 기존 사격 예약·방향 고정을 정리한 뒤 새 슬라이딩 방향을 고정합니다.
+
+월드의 combatRules.slideDefinitions는 characterId·attackPower·durationSeconds·motionId를 전달합니다. 캐릭터 1~3의 motionId=slide를 공용 PlayerSlide에 연결합니다. 현재 기본 지속 시간은 서버 데이터의 0.4초이고, 시작 시 실제 이동 방향과 버프가 반영된 달리기 속도를 고정합니다. 막히지 않은 거리는 속도×지속 시간이며 벽·게이트에서 서버가 중단할 수 있습니다. 피해는 캐릭터별 공격력에 시작 시 버프를 반영한 값의 100%로 서버가 계산하며, 클라이언트는 타격·피해량을 확정하지 않습니다.
+
+본인은 지연 버퍼 없이 이동을 즉시 예측하고 거절·서버 상태로 보정합니다. 승인 전의 오래된 위치로 끌어당기지 않으며, 승인 상태의 방향·속도·지속 시간을 사용합니다. 다른 플레이어는 기존 125ms 상태 버퍼에서 위치와 slideSeconds를 같은 표시 시각으로 맞춥니다. 동일 slideSequence의 반복 수신으로 애니메이션을 되감지 않으며, 원격 위치 외삽은 슬라이딩 종료를 넘지 않습니다.
+
+슬라이딩 동안 일반 이동을 추가 적분하거나 사격·점프·스킬을 종료 후 실행하도록 예약하지 않습니다. 피격·사망·클리어·맵 epoch 변경·복귀·재도전·연결 리셋에서 예측과 상태를 정리합니다. 서버 확인 없이 예측을 유지하는 시간은 제한됩니다.
+
 ## 스킬과 성장 상태
 
 앞차기의 현재 ID는 `Character1.FrontKick`, 입력은 Up 다음 Z, 단계 간 최대 0.35초입니다. 지상 전용이며 해당 캐릭터가 습득하고 쿨타임이 끝나야 합니다. unavailable 커맨드도 즉시 소비하여 나중에 자동 발동하거나 마지막 X/C 입력이 기본 사격/점프로 이어지지 않게 합니다.
@@ -47,6 +58,10 @@
 실시간 SKL1 확장은 캐릭터·시전 번호·스킬·시간·버프·투사체 정보를 포함하지만 진행값·쿨타임은 포함하지 않습니다. reliable JSON이 이를 보완합니다. 서버 수락 시 쿨타임을 표시하고 JSON 갱신을 요청하며, GameWorld는 별도의 최신 tick/accepted sequence 기준으로 쿨타임을 적용합니다. 오래된 JSON 위치로 최신 실시간 자세를 덮어쓰지 않고, 룸 JSON의 진행값으로 최신 타운 학습 권한을 덮어쓰지도 않습니다.
 
 ## 패킷·전달 주기
+
+전투 규칙·상태 JSON과 실시간 요청/응답/chunk의 version은 2입니다. ID 7 행동 입력은 version:u16, sequence:u32, action:u8, facingLeft:u8, mapEpoch:u32, moveSequence:u32, directionX:i8, directionY:i8, running:u8 순서로 19바이트입니다. ID 8 응답은 version:u16, sequence:u32, accepted:u8, serverTick:u64 순서로 15바이트입니다. 이 크기는 패킷 헤더를 제외한 필드 합계입니다.
+
+실시간 플레이어 레코드는 기존 running 뒤에 slideActive:u8, slideSequence:u32와 slideSeconds·slideDurationSeconds·slideDirectionX·slideDirectionY·slideSpeed:f32를 추가해 101바이트입니다. 기존 SKL1 확장 순서는 유지하며 버전 1로 읽지 않습니다.
 
 [DungeonProtocol.h](ActionRPGClient/Network/DungeonProtocol.h)는 YAML 생성 결과입니다. ID 1~10을 유지하고 11~13에 실시간, 14에 플레이어 스킬 입력을 추가했습니다.
 
@@ -61,9 +76,9 @@
 | 13 | DungeonRealtimeChunk, unreliable |
 | 14 | DungeonSkillInput, reliable |
 
-실시간 구독은 월드 수신 뒤 version=1·enabled=1·현재 challenge로 요청합니다. 구독 결과의 roomId·dungeonId·version·challenge를 확인합니다. 첫 상태 조각은 reliable 구독 결과보다 먼저 도착할 수 있습니다.
+실시간 구독은 월드 수신 뒤 version=2·enabled=1·현재 challenge로 요청합니다. 구독 결과의 roomId·dungeonId·version·challenge를 확인합니다. 첫 상태 조각은 reliable 구독 결과보다 먼저 도착할 수 있습니다.
 
-현재 서버 목표는 **시뮬레이션 30Hz, 상태 전달 15Hz**입니다. 안내 필드는 `tickIntervalMs=33`, `snapshotIntervalMs=67`이지만 실제 tick dt는 1/30초입니다. 클라이언트는 v1의 이전 20Hz 안내값 50ms도 허용하고 전달 간격 50~100ms를 확인합니다. 33ms를 실제 dt로 누적하지 않습니다.
+현재 서버 목표는 **시뮬레이션 30Hz, 상태 전달 15Hz**입니다. 안내 필드는 `tickIntervalMs=33`, `snapshotIntervalMs=67`이지만 실제 tick dt는 1/30초입니다. 클라이언트는 tick 안내값 33~50ms와 전달 간격 50~100ms를 확인합니다. 33ms를 실제 dt로 누적하지 않습니다.
 
 실시간 조각에는 연결 challenge, roomId, dungeonId, mapEpoch, snapshotSequence, serverTick, serverTimeMs, mapId, 길이/offset, state가 있습니다. serverTimeMs는 서버 steady_clock 캡처 시각이며 Unix 시각이 아닙니다. 도착 시각과의 오프셋을 추정해 표시 시각을 만듭니다.
 

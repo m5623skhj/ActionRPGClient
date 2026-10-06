@@ -18,7 +18,7 @@ namespace
         "PlayerShootStart", "PlayerShootFire", "PlayerShootEnd",
         "PlayerJumpStart", "PlayerJumpHold", "PlayerJumpLand",
         "PlayerAirShootStart", "PlayerAirShootFire", "PlayerAirShootEnd",
-        "PlayerHit", "PlayerAirHitStart", "PlayerAirHitFall", "PlayerKnockdown", "PlayerGetUp"
+        "PlayerHit", "PlayerAirHitStart", "PlayerAirHitFall", "PlayerKnockdown", "PlayerGetUp", "PlayerSlide"
     };
 }
 
@@ -153,6 +153,23 @@ namespace ActionRPG
         return true;
     }
 
+    /** Align a matching slide snapshot to local preview time; ignore poses preceding its input. */
+    void Player::ReconcileCombatGroundPosition(const CombatPlayerState& inState, const GameplayMap& inMap)
+    {
+        const auto pending = GetPendingSlideSequence();
+        if (pending != 0 && inState.actionSequence < pending) return;
+        Vector2 target = inState.position;
+        if (inState.slideActive)
+        {
+            const float age = std::clamp(GetSlidePresentationSeconds() - inState.slideSeconds, 0.0f,
+                std::min(0.1f, std::max(0.0f, inState.slideDurationSeconds - inState.slideSeconds)));
+            target.x += inState.slideDirectionX * inState.slideSpeed * age;
+            target.y += inState.slideDirectionY * inState.slideSpeed * age;
+            target = inMap.ConstrainGroundMovement(inState.position, target, HORIZONTAL_RADIUS, DEPTH_RADIUS);
+        }
+        ReconcileGroundPosition(target);
+    }
+
     void Player::ReconcileGroundPosition(const Vector2 inAuthoritativePosition)
     {
         Vector2 position = GetGroundPosition();
@@ -218,7 +235,7 @@ namespace ActionRPG
         if (townSkill && skillPresentation
             && skillPresentation->Render(*townSkill, GetGroundPosition(), GetHeight(), townSkill->skillSeconds, inRenderer, inCamera)) return;
         const auto state = GetCombatPlayerState();
-        if (state && skillPresentation && !state->skillId.empty()
+        if (state && !IsSliding() && !HasPendingSlide() && skillPresentation && !state->skillId.empty()
             && state->hp != 0 && state->reaction == CombatReaction::None)
         {
             const float seconds = state->skillSeconds + GetCombatElapsedSeconds();

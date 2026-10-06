@@ -22,12 +22,14 @@ namespace ActionRPG
         void ApplyHit(CharacterHitType inType) override;
         void ResetActionState() override;
         void SetRunningEnabled(bool inEnabled) override;
+        [[nodiscard]] bool IsDungeonRunInput() const { return IsRunningEnabled() && !IsHitReacting() && runState.IsRunning(); }
         void ActivateCommandSkill(const SkillEffectDefinition& inEffect);
         [[nodiscard]] bool ActivateCatalogSkill(const std::string& inId, const std::unordered_map<std::string,std::uint32_t>& inSkillLevels);
         [[nodiscard]] const std::unordered_map<std::string,float>& GetTownSkillCooldowns() const { return townSkillCooldowns; }
         [[nodiscard]] bool IsLocallyCasting() const { return townSkill.has_value(); }
         void SetSkillPresentation(const PlayerSkillPresentation* inPresentation) { skillPresentation = inPresentation; }
         void ReconcileGroundPosition(Vector2 inAuthoritativePosition);
+        void ReconcileCombatGroundPosition(const CombatPlayerState& inState, const GameplayMap& inMap);
         void ClearTownPositionCorrection() { pendingTownCorrection = {}; }
         void ReconcileTownGroundPosition(Vector2 inAuthoritativePosition, Vector2 inVelocity,
             float inSnapshotDelaySeconds, const GameplayMap& inGameplayMap);

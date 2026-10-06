@@ -9,6 +9,12 @@
 
 namespace ActionRPG
 {
+    struct SlideDefinition
+    {
+        float durationSeconds{};
+        std::uint32_t attackPower{};
+        std::string motionId;
+    };
     struct DungeonMap
     {
         TownProtocol::MapInfo map;
@@ -24,12 +30,14 @@ namespace ActionRPG
         [[nodiscard]] const std::string& GetEntryMapId() const { return entryMapId; }
         [[nodiscard]] Vector2 GetSpawn() const { return spawn; }
         [[nodiscard]] const CombatRules& GetCombatRules() const { return combatRules; }
+        [[nodiscard]] const SlideDefinition& GetSlideDefinition(std::uint32_t inCharacterId) const { return slideDefinitions.at(inCharacterId); }
         [[nodiscard]] const PlayerSkills::Catalog& GetPlayerSkills() const { return playerSkills; }
     private:
         std::unordered_map<std::string, DungeonMap> maps;
         std::string entryMapId;
         Vector2 spawn{};
         CombatRules combatRules;
+        std::unordered_map<std::uint32_t, SlideDefinition> slideDefinitions;
         PlayerSkills::Catalog playerSkills;
     };
 }

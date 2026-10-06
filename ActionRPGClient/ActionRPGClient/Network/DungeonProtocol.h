@@ -102,10 +102,13 @@ namespace ActionRPG::DungeonProtocol
         [[nodiscard]] ::PacketId GetPacketId() const override;
         void BufferToPacket(NetBuffer& inBuffer) override;
         void PacketToBuffer(NetBuffer& outBuffer) override;
-
+        std::uint16_t version{2};
         std::uint32_t sequence{};
         std::uint8_t action{};
         std::uint8_t facingLeft{};
+        std::uint32_t mapEpoch{}, moveSequence{};
+        std::int8_t directionX{}, directionY{};
+        std::uint8_t running{};
     };
 
     class DungeonActionResult final : public IPacket
@@ -114,7 +117,7 @@ namespace ActionRPG::DungeonProtocol
         [[nodiscard]] ::PacketId GetPacketId() const override;
         void BufferToPacket(NetBuffer& inBuffer) override;
         void PacketToBuffer(NetBuffer& outBuffer) override;
-
+        std::uint16_t version{};
         std::uint32_t sequence{};
         std::uint8_t accepted{};
         std::uint64_t serverTick{};

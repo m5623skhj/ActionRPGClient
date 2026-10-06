@@ -68,6 +68,7 @@ namespace ActionRPG
         std::string_view airHitFall;
         std::string_view knockdown;
         std::string_view getUp;
+        std::string_view slide;
     };
 
     // State, animation and projectile requests are mutated only on the game thread.
@@ -107,6 +108,15 @@ namespace ActionRPG
         void PredictAttackFacing(std::uint32_t inSequence, bool inSkill = false);
         void ResolvePredictedAttackFacing(std::uint32_t inSequence, bool inAccepted);
         void ClearPredictedAttackFacing();
+        [[nodiscard]] bool CanStartSlide() const;
+        [[nodiscard]] bool IsSliding() const;
+        [[nodiscard]] bool HasPendingSlide() const { return slidePrediction.has_value(); }
+        bool PredictSlide(std::uint32_t inSequence, Vector2 inDirection, float inDurationSeconds);
+        void ResolvePredictedSlide(std::uint32_t inSequence, bool inAccepted);
+        void ClearSlidePrediction();
+        void ClearSlideState();
+        [[nodiscard]] std::uint32_t GetPendingSlideSequence() const { return slidePrediction ? slidePrediction->sequence : 0; }
+        [[nodiscard]] float GetSlidePresentationSeconds() const;
         void ApplyCombatState(const CombatPlayerState& inState, const CombatRules& inRules,
             bool inSetPosition = false);
         void ApplyBufferedCombatState(const CombatPlayerState& inState, const CombatRules& inRules);
@@ -237,6 +247,16 @@ namespace ActionRPG
         SpriteAnimation airHitFallAnimation;
         SpriteAnimation knockdownAnimation;
         SpriteAnimation getUpAnimation;
+        std::optional<SpriteAnimation> slideAnimation;
+        float slidePresentationSeconds{};
+        struct SlidePrediction
+        {
+            std::uint32_t sequence{};
+            Vector2 direction{};
+            float speed{}, durationSeconds{}, elapsedSeconds{}, acknowledgementSeconds{};
+            bool facingLeft{};
+        };
+        std::optional<SlidePrediction> slidePrediction;
         std::optional<CombatPlayerState> combatState;
         CombatRules combatRules;
         std::uint32_t predictedAttackFacingSequence{};

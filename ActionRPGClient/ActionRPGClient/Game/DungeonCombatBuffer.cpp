@@ -24,6 +24,18 @@ namespace ActionRPG
             const float dx = inB.position.x - inA.position.x, dy = inB.position.y - inA.position.y;
             return inA.hp != 0 && inB.hp != 0 && dx * dx + dy * dy < TELEPORT_DISTANCE * TELEPORT_DISTANCE;
         }
+        bool ContinuousPlayer(const CombatPlayerState& inA, const CombatPlayerState& inB, const float inSeconds)
+        {
+            if (Continuous(inA, inB)) return true;
+            if (inA.hp == 0 || inB.hp == 0 || inA.slideSequence == 0 || inA.slideSequence != inB.slideSequence
+                || (!inA.slideActive && !inB.slideActive) || inSeconds <= 0.0f || inSeconds > 0.5f) return false;
+            // A fast slide may exceed the ordinary teleport threshold within one valid snapshot interval.
+            const float duration = std::max(inA.slideDurationSeconds, inB.slideDurationSeconds);
+            const float limit = std::max(TELEPORT_DISTANCE,
+                std::max(inA.slideSpeed, inB.slideSpeed) * std::min(inSeconds, duration) + 16.0f);
+            const float dx = inB.position.x - inA.position.x, dy = inB.position.y - inA.position.y;
+            return dx * dx + dy * dy <= limit * limit;
+        }
         void Pose(CombatActorState& outState, const CombatActorState& inA, const CombatActorState& inB,
             const float inRatio, const float inSeconds)
         {
@@ -105,11 +117,29 @@ namespace ActionRPG
         {
             const auto pa = Find(a->players, [&player](const auto& value) { return value.playerId == player.playerId; });
             const auto pb = Find(b->players, [&player](const auto& value) { return value.playerId == player.playerId; });
-            if (!pa || !pb || !Continuous(*pa, *pb) || player.hp == 0) continue;
+            if (!pa || !pb || !ContinuousPlayer(*pa, *pb, static_cast<float>(span / 1000.0)) || player.hp == 0) continue;
             const auto hp = player.hp, maxHp = player.maxHp;
             player = useB ? *pb : *pa;
-            Pose(player, *pa, *pb, boundedRatio, static_cast<float>(span / 1000.0));
+            float playerRatio = boundedRatio;
+            if (playerRatio > 1.0f && (pa->slideActive || pb->slideActive))
+            {
+                // A completed slide cannot coast past its endpoint during a missing frame.
+                playerRatio = !pb->slideActive || span <= 0.0 ? 1.0f
+                    : std::min(playerRatio, 1.0f + std::max(0.0f, pb->slideDurationSeconds - pb->slideSeconds)
+                        / static_cast<float>(span / 1000.0));
+            }
+            Pose(player, *pa, *pb, playerRatio, static_cast<float>(span / 1000.0));
             Advance(player, age); player.shotSeconds += age; player.jumpSeconds += age;
+            if (player.slideActive)
+            {
+                player.slideSeconds = std::min(player.slideDurationSeconds, player.slideSeconds + age);
+                if (player.slideSeconds >= player.slideDurationSeconds) player.slideActive = false;
+            }
+            if (playerRatio < boundedRatio)
+            {
+                player.presentationMoving = false;
+                player.presentationSpeed = 0.0f;
+            }
             if (!player.skillId.empty()) player.skillSeconds += age;
             for (auto& buff : player.buffs) buff.remainingSeconds = std::max(0.0f, buff.remainingSeconds - age);
             player.hp = hp; player.maxHp = maxHp;

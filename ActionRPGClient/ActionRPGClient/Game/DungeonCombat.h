@@ -40,6 +40,9 @@ namespace ActionRPG
         float shotSeconds{}, jumpSeconds{};
         std::uint32_t shotCount{}, airShotCount{}, actionSequence{}, moveSequence{};
         bool airAttack{}, running{};
+        bool slideActive{};
+        std::uint32_t slideSequence{};
+        float slideSeconds{}, slideDurationSeconds{}, slideDirectionX{}, slideDirectionY{}, slideSpeed{};
         std::uint32_t shotSequence{}, jumpSequence{};
         std::uint32_t characterId{}, skillSequence{};
         std::string skillId;

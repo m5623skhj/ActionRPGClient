@@ -479,12 +479,12 @@ namespace ActionRPG
         }
         player.Update(inDeltaSeconds, gameplayInput, gameplayMap);
         if (dungeonEntryState==DungeonEntryState::Idle) skillUi.ApplyTownCooldowns(player.GetTownSkillCooldowns());
+        SendMovementInput(gameplayInput, inDeltaSeconds);
         if (dungeonEntryState == DungeonEntryState::Entered)
         {
             UpdateDungeonCombat(inDeltaSeconds);
             SendCombatActions(gameplayInput);
         }
-        SendMovementInput(gameplayInput, inDeltaSeconds);
         UpdateRemotePlayers(inDeltaSeconds);
         if (const auto monsters = dungeonMonsters.find(dungeonMapId); monsters != dungeonMonsters.end())
         {
@@ -1064,6 +1064,7 @@ namespace ActionRPG
                     if (inEvent.mapEpoch <= pendingMapEpoch) return;
                     pendingMapEpoch = inEvent.mapEpoch;
                     player.ClearPredictedAttackFacing();
+                    player.ClearSlideState();
                     skillUi.CancelDrag();
                     commandQueue.Clear();
                     combatBuffer.Clear(); presentationSnapshot.reset();
@@ -1078,6 +1079,7 @@ namespace ActionRPG
                 {
                     if (inEvent.sequence > combatActionSequence) { ResetDungeonEntry(); return; }
                     player.ResolvePredictedAttackFacing(inEvent.sequence, inEvent.accepted);
+                    player.ResolvePredictedSlide(inEvent.sequence, inEvent.accepted);
                     if (const auto skill=skillActionIds.find(inEvent.sequence); skill!=skillActionIds.end())
                     {
                         if (inEvent.accepted) { lastAcceptedSkillSequence=std::max(lastAcceptedSkillSequence,inEvent.sequence); skillUi.AcceptSkill(skill->second); dungeonClient.RequestCombatRefresh(); }
@@ -1140,9 +1142,9 @@ namespace ActionRPG
         appliedMapEpoch = pendingMapEpoch = snapshot.mapEpoch;
         const auto& rules = dungeonWorld->GetCombatRules();
         // Old movement acknowledgements affect only position correction, not HP/entities/clear state.
-        if (self->moveSequence >= lastDungeonStateSequence) player.ReconcileGroundPosition(self->position);
-        lastDungeonStateSequence = std::max(lastDungeonStateSequence, self->moveSequence);
         player.ApplyCombatState(*self, rules);
+        if (self->moveSequence >= lastDungeonStateSequence) player.ReconcileCombatGroundPosition(*self, gameplayMap);
+        lastDungeonStateSequence = std::max(lastDungeonStateSequence, self->moveSequence);
         std::unordered_set<std::uint64_t> presentPlayers;
         for (const auto& state : snapshot.players)
         {
@@ -1189,7 +1191,10 @@ namespace ActionRPG
                 throw std::runtime_error("Combat tick time exceeds the supported range.");
             snapshot.serverTimeMs = static_cast<std::uint64_t>(timeMs);
         }
-        if (snapshot.cleared) { player.ClearPredictedAttackFacing(); combatBuffer.Clear(); }
+        if (snapshot.cleared)
+        {
+            player.ClearPredictedAttackFacing(); player.ClearSlideState(); combatBuffer.Clear();
+        }
         combatBuffer.Push(snapshot);
         lastCombatTick = snapshot.serverTick; hasCombatTick = true; dungeonCleared = snapshot.cleared;
         combatSnapshotAge = 0.0f; combatSnapshot = std::move(snapshot);
@@ -1201,6 +1206,11 @@ namespace ActionRPG
             || pendingMapEpoch>appliedMapEpoch) { commandQueue.Clear(); return; }
         const auto actor=std::find_if(combatSnapshot->players.begin(),combatSnapshot->players.end(),
             [this](const auto& value){return value.playerId==localPlayerId;});
+        if (player.IsSliding() || player.HasPendingSlide() || (actor != combatSnapshot->players.end() && actor->slideActive))
+        {
+            commandQueue.Clear();
+            return; // Sliding never reserves a shot, jump or skill for its ending frame.
+        }
         bool matched=false;
         const auto command=playerSkillPresentation.TryCommand(commandQueue,localCharacterId,skillUi.GetProgression().skillLevels,matched);
         const auto hotkey=skillUi.Hotkey(inInput);
@@ -1209,7 +1219,7 @@ namespace ActionRPG
         {
             commandQueue.Clear();
             if (actor!=combatSnapshot->players.end() && actor->hp>0 && actor->reaction==CombatReaction::None
-                && !actor->skillActive && actor->jumpPhase!=CombatJumpPhase::Prepare
+                && !actor->skillActive && !actor->slideActive && actor->jumpPhase!=CombatJumpPhase::Prepare
                 && (actor->shotPhase==CombatShotPhase::None || actor->shotPhase==CombatShotPhase::Recover)
                 && !id.empty() && skillUi.CanUse(id,actor->height>0,true) && combatInputsThisSecond<20 && skillActionIds.size()<64)
             {
@@ -1223,15 +1233,39 @@ namespace ActionRPG
             return; // No skill reservation; an unavailable command ending in X/C cannot also fire/jump.
         }
         if (actor==combatSnapshot->players.end() || actor->hp==0 || actor->reaction!=CombatReaction::None) return;
+        const Vector2 direction{
+            static_cast<float>(inInput.moveRight)-static_cast<float>(inInput.moveLeft),
+            static_cast<float>(inInput.moveDown)-static_cast<float>(inInput.moveUp)};
+        const bool slideIntent = inInput.WasPressed(InputKey::ActionX) && player.IsDungeonRunInput()
+            && dungeonWorld && actor->jumpPhase == CombatJumpPhase::Grounded && player.GetHeight() <= 0.0f
+            && !actor->skillActive && (direction.x != 0.0f || direction.y != 0.0f);
         for (const auto key:inInput.pressedKeys)
         {
+            if (slideIntent && key != InputKey::ActionX) continue;
             const std::uint8_t action=key==InputKey::ActionX ? 1:key==InputKey::ActionC ? 2:0;
             if (action==0 || combatInputsThisSecond>=20) continue;
             if (combatActionSequence==std::numeric_limits<std::uint32_t>::max()) { ResetDungeonEntry(); return; }
+            const bool slide = action == 1 && slideIntent;
+            DungeonProtocol::DungeonActionInput packet;
+            packet.sequence = combatActionSequence + 1;
+            packet.action = slide ? 3 : action;
+            packet.facingLeft = slide && direction.x != 0.0f ? direction.x < 0.0f : player.GetFacingLeft();
+            packet.mapEpoch = appliedMapEpoch;
+            packet.moveSequence = dungeonMovementSequence;
+            packet.directionX = static_cast<std::int8_t>(direction.x);
+            packet.directionY = static_cast<std::int8_t>(direction.y);
+            packet.running = player.IsDungeonRunInput() ? 1 : 0;
+            if (!dungeonClient.SendAction(packet)) continue;
             ++combatInputsThisSecond;
-            const auto sequence = ++combatActionSequence;
-            if (action == 1) player.PredictAttackFacing(sequence);
-            dungeonClient.SendAction(sequence,action,player.GetFacingLeft());
+            combatActionSequence = packet.sequence;
+            if (slide)
+            {
+                const auto& definition = dungeonWorld->GetSlideDefinition(localCharacterId);
+                player.PredictSlide(packet.sequence, direction, definition.durationSeconds);
+                commandQueue.Clear();
+                break; // Consume X exactly once; no same-frame C/second X reservation.
+            }
+            if (action == 1) player.PredictAttackFacing(packet.sequence);
         }
     }
 
@@ -2636,7 +2670,7 @@ namespace ActionRPG
                 static_cast<int>(inInput.moveRight) - static_cast<int>(inInput.moveLeft));
             const auto dy = static_cast<std::int8_t>(player.IsHitReacting() ? 0 :
                 static_cast<int>(inInput.moveDown) - static_cast<int>(inInput.moveUp));
-            const bool running = player.IsRunning();
+            const bool running = player.IsDungeonRunInput();
             if (hasSentMovementInput && dx == lastSentDirectionX && dy == lastSentDirectionY
                 && running == lastDungeonRun && movementSendAccumulator < 0.1f) return;
             DungeonProtocol::DungeonMoveInput packet;

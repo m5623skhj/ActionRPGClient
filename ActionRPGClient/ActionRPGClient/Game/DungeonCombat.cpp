@@ -54,6 +54,20 @@ namespace
     {
         if (!inValue.is_array() || inValue.size() > inLimit) throw std::runtime_error("Invalid combat list.");
     }
+    void ValidateSlide(const ActionRPG::CombatPlayerState& inState)
+    {
+        const float length = std::hypot(inState.slideDirectionX, inState.slideDirectionY);
+        if (inState.slideDurationSeconds > 2.0f || inState.slideSeconds > 2.0f
+            || inState.slideSpeed > 20000.0f || length > 1.001f
+            || (inState.slideActive && (inState.slideSequence == 0 || inState.slideDurationSeconds <= 0.0f
+                || inState.slideSeconds > inState.slideDurationSeconds + 0.001f
+                || inState.slideSpeed <= 0.0f || length < 0.999f
+                || inState.hp == 0 || inState.reaction != ActionRPG::CombatReaction::None
+                || inState.jumpPhase != ActionRPG::CombatJumpPhase::Grounded || inState.height > 0.0f
+                || inState.shotPhase != ActionRPG::CombatShotPhase::None || inState.skillActive
+                || inState.slideSequence > inState.actionSequence)))
+            throw std::runtime_error("Invalid slide state.");
+    }
     ActionRPG::CombatActorState Actor(const Json& inActor)
     {
         ActionRPG::CombatActorState actor;
@@ -82,7 +96,7 @@ namespace ActionRPG
     CombatRules CombatRules::Parse(const std::string_view inJson)
     {
         const auto value = Json::parse(inJson);
-        if (value.at("version") != 1) throw std::runtime_error("Unsupported combat rules.");
+        if (value.at("version") != 2) throw std::runtime_error("Unsupported combat rules.");
         CombatRules rules;
         rules.tickIntervalSeconds = TickInterval(value, rules.tickIntervalSeconds);
         rules.maxHp = Integer(value.at("maxHp")); rules.maxShots = Integer(value.at("maxShots"));
@@ -107,7 +121,7 @@ namespace ActionRPG
     {
         if (inJson.size() > 512 * 1024) throw std::runtime_error("Combat snapshot too large.");
         const auto value = Json::parse(inJson);
-        if (value.at("version") != 1) throw std::runtime_error("Unsupported combat snapshot.");
+        if (value.at("version") != 2) throw std::runtime_error("Unsupported combat snapshot.");
         DungeonCombatSnapshot result;
         result.roomId = Id(value.at("roomId")); result.serverTick = Id(value.at("serverTick"), true);
         result.hasServerTime = value.contains("serverTimeMs");
@@ -132,6 +146,13 @@ namespace ActionRPG
             player.shotSequence = Integer(source.value("shotSequence", Json(0)));
             player.jumpSequence = Integer(source.value("jumpSequence", Json(0)));
             player.running = source.value("running", false);
+            player.slideActive = source.at("slideActive").get<bool>();
+            player.slideSequence = Integer(source.at("slideSequence"));
+            player.slideSeconds = Number(source.at("slideSeconds"));
+            player.slideDurationSeconds = Number(source.at("slideDurationSeconds"));
+            player.slideDirectionX = Number(source.at("slideDirectionX"), true);
+            player.slideDirectionY = Number(source.at("slideDirectionY"), true);
+            player.slideSpeed = Number(source.at("slideSpeed"));
             player.shotSeconds = Number(source.at("shotSeconds")); player.jumpSeconds = Number(source.at("jumpSeconds"));
             player.shotCount = Integer(source.at("shotCount")); player.airShotCount = Integer(source.at("airShotCount"));
             if (player.shotCount > 5 || player.airShotCount > 5) throw std::runtime_error("Invalid shot count.");
@@ -231,9 +252,10 @@ namespace ActionRPG
             }
             result.projectiles.push_back(projectile);
         }
+        for (const auto& player : result.players) ValidateSlide(player);
         return result;
     }
-    // Binary payload v1: unaligned little-endian fields, never native struct layout.
+    // Binary payload v2: unaligned little-endian fields, never native struct layout.
     DungeonCombatSnapshot DungeonCombatSnapshot::ParseRealtime(const std::string_view inBytes)
     {
         class Reader
@@ -311,6 +333,11 @@ namespace ActionRPG
             player.shotCount = static_cast<std::uint32_t>(reader.UInt(1));
             player.airShotCount = static_cast<std::uint32_t>(reader.UInt(1));
             const auto jump = reader.UInt(1); player.jumpSeconds = reader.Float(); player.running = reader.Bool();
+            player.slideActive = reader.Bool();
+            player.slideSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            player.slideSeconds = reader.Float(); player.slideDurationSeconds = reader.Float();
+            player.slideDirectionX = reader.Float(true); player.slideDirectionY = reader.Float(true);
+            player.slideSpeed = reader.Float();
             if (shot > 3 || jump > 2 || player.shotCount > 5 || player.airShotCount > 5)
                 throw std::runtime_error("Invalid realtime player action.");
             player.shotPhase = static_cast<CombatShotPhase>(shot); player.jumpPhase = static_cast<CombatJumpPhase>(jump);
@@ -389,6 +416,7 @@ namespace ActionRPG
         }
         if (!reader.Finished()) throw std::runtime_error("Trailing realtime bytes.");
 
+        for (const auto& player : result.players) ValidateSlide(player);
         return result;
     }
 

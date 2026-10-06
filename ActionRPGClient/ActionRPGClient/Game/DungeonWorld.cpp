@@ -40,6 +40,26 @@ namespace ActionRPG
             throw std::runtime_error("Invalid dungeon world.");
         DungeonWorld result;
         result.combatRules = CombatRules::Parse(world.at("combatRules").dump());
+        const auto& slides = world.at("combatRules").at("slideDefinitions");
+        if (!slides.is_array() || slides.empty() || slides.size() > 256)
+            throw std::runtime_error("Invalid slide definitions.");
+        for (const auto& source : slides)
+        {
+            const auto& idValue = source.at("characterId");
+            if (!idValue.is_number_integer() || idValue < 1 || idValue > 3)
+                throw std::runtime_error("Unsupported slide character.");
+            const auto id = idValue.get<std::uint32_t>();
+            const auto& attack = source.at("attackPower");
+            if (!attack.is_number_integer() || attack < 1 || attack > 1000000)
+                throw std::runtime_error("Invalid character attack power.");
+            SlideDefinition definition{Number(source.at("durationSeconds")), attack.get<std::uint32_t>(),
+                source.at("motionId").get<std::string>()};
+            if (definition.durationSeconds < 0.05f || definition.durationSeconds > 2.0f
+                || definition.motionId != "slide" || !result.slideDefinitions.emplace(id, std::move(definition)).second)
+                throw std::runtime_error("Invalid slide definition.");
+        }
+        for (std::uint32_t id = 1; id <= 3; ++id)
+            if (!result.slideDefinitions.contains(id)) throw std::runtime_error("Missing slide character.");
         if (world.contains("playerSkills")) result.playerSkills = PlayerSkills::Catalog::Parse(world.at("playerSkills"));
         result.entryMapId = world.at("entryMapId").get<std::string>();
         result.spawn = Position(world.at("players").at(std::to_string(inPlayerId)));

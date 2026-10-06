@@ -56,6 +56,8 @@ namespace ActionRPG
         , knockdownAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.knockdown)
         , getUpAnimation(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.getUp)
     {
+        if (!inAnimations.slide.empty())
+            slideAnimation.emplace(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.slide);
         const IniDocument characterDefinitions(inAssetCatalog.GetDataPath("Characters"));
         ConfigureJumpSpeed(characterDefinitions, 0);
         attackEventFrame = ParseOneBasedFrame(*animationDefinitions, inAnimations.attackFire, "event_frame");
@@ -191,6 +193,7 @@ namespace ActionRPG
      */
     void Character::ApplyHit(const CharacterHitType inType)
     {
+        ClearSlideState();
         const bool wasAirborne = height > 0.0f || jumpPhase == JumpPhase::Airborne
             || hitPhase == HitPhase::Launch || hitPhase == HitPhase::Falling;
         CancelAttack();
@@ -236,8 +239,10 @@ namespace ActionRPG
 
     void Character::ResetActionState()
     {
+        ClearSlidePrediction();
         bufferedPresentation = false; combatAnimationChanged = true; lastCombatAnimation = nullptr; lastCombatAnimationSeconds = 0;
-        combatState.reset(); combatPresentationSeconds = deathPresentationSeconds = 0.0f;
+        combatState.reset(); combatPresentationSeconds = deathPresentationSeconds = slidePresentationSeconds = 0.0f;
+        if (slideAnimation) slideAnimation->Reset();
         CancelAttack();
         bufferedActions.clear();
         pendingProjectileRequests.clear();
@@ -579,6 +584,80 @@ namespace ActionRPG
         predictedAttackFacingSeconds = 0.0f;
     }
 
+    bool Character::CanStartSlide() const
+    {
+        return combatState && !slidePrediction && !combatState->slideActive && IsRunning() && combatState->hp != 0
+            && combatState->reaction == CombatReaction::None && !combatState->skillActive
+            && combatState->jumpPhase == CombatJumpPhase::Grounded && height <= 0.0f
+            && (combatState->shotPhase == CombatShotPhase::None || combatState->shotPhase == CombatShotPhase::Recover);
+    }
+
+    bool Character::IsSliding() const
+    {
+        return (slidePrediction && slidePrediction->elapsedSeconds < slidePrediction->durationSeconds)
+            || (combatState && combatState->slideActive
+                && slidePresentationSeconds < combatState->slideDurationSeconds);
+    }
+
+    /** Capture normalized ground direction and buffed run speed once; the server owns hits/damage. */
+    bool Character::PredictSlide(const std::uint32_t inSequence, const Vector2 inDirection,
+        const float inDurationSeconds)
+    {
+        const float length = std::hypot(inDirection.x, inDirection.y);
+        if (!CanStartSlide() || inSequence == 0 || !std::isfinite(length) || length <= 0.0f
+            || !std::isfinite(inDurationSeconds) || inDurationSeconds <= 0.0f
+            || !std::isfinite(runSpeed) || runSpeed <= 0.0f) return false;
+        ClearPredictedAttackFacing();
+        CancelAttack();
+        bufferedActions.clear();
+        pendingProjectileRequests.clear();
+        slidePrediction = SlidePrediction{inSequence, {inDirection.x / length, inDirection.y / length},
+            runSpeed, inDurationSeconds, 0.0f, inDurationSeconds + 0.5f,
+            inDirection.x == 0.0f ? facingLeft : inDirection.x < 0.0f};
+        facingLeft = slidePrediction->facingLeft;
+        if (slideAnimation) slideAnimation->Reset();
+        combatAnimationChanged = true;
+        return true;
+    }
+
+    void Character::ResolvePredictedSlide(const std::uint32_t inSequence, const bool inAccepted)
+    {
+        if (!slidePrediction || slidePrediction->sequence != inSequence || inAccepted) return;
+        ClearSlidePrediction();
+        if (combatState)
+        {
+            // An expired/denied preview must not resume forced motion from its stale active pose.
+            combatState->slideActive = false;
+            slidePresentationSeconds = combatState->slideDurationSeconds;
+            groundPosition = combatState->position;
+            facingLeft = combatState->facingLeft;
+        }
+    }
+
+    void Character::ClearSlidePrediction()
+    {
+        if (!slidePrediction) return;
+        slidePrediction.reset();
+        combatAnimationChanged = true;
+    }
+
+    void Character::ClearSlideState()
+    {
+        ClearSlidePrediction();
+        if (combatState && combatState->slideActive)
+        {
+            combatState->slideActive = false;
+            combatAnimationChanged = true;
+        }
+        slidePresentationSeconds = 0.0f;
+    }
+
+    float Character::GetSlidePresentationSeconds() const
+    {
+        return slidePrediction ? slidePrediction->elapsedSeconds
+            : combatState ? slidePresentationSeconds : 0.0f;
+    }
+
     void Character::ConfigureMovementSpeeds(const float inWalkSpeed, const float inRunSpeed)
     {
         walkSpeed = inWalkSpeed;
@@ -614,13 +693,33 @@ namespace ActionRPG
             || combatState->reactionSequence != inState.reactionSequence
             || combatState->shotSequence != inState.shotSequence || combatState->jumpSequence != inState.jumpSequence
             || combatState->shotPhase != inState.shotPhase || combatState->jumpPhase != inState.jumpPhase
-            || combatState->shotCount != inState.shotCount || combatState->airShotCount != inState.airShotCount;
+            || combatState->shotCount != inState.shotCount || combatState->airShotCount != inState.airShotCount
+            || combatState->slideActive != inState.slideActive || combatState->slideSequence != inState.slideSequence;
         bufferedPresentation = false;
+        if (!combatState || combatState->slideSequence != inState.slideSequence || !inState.slideActive)
+            slidePresentationSeconds = inState.slideSeconds;
+        else slidePresentationSeconds = std::max(slidePresentationSeconds, inState.slideSeconds);
         const bool wasDead = combatState && combatState->hp == 0;
         const bool landed = combatState && combatState->jumpPhase == CombatJumpPhase::Airborne
             && inState.jumpPhase == CombatJumpPhase::Grounded;
         isMoving = combatState && (std::abs(inState.position.x - combatState->position.x) > 0.5f
             || std::abs(inState.position.y - combatState->position.y) > 0.5f);
+        if (slidePrediction)
+        {
+            auto& slide = *slidePrediction;
+            if (inSetPosition || inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive)
+                ClearSlidePrediction();
+            else if (inState.slideSequence == slide.sequence && inState.slideActive)
+            {
+                slide.direction = {inState.slideDirectionX, inState.slideDirectionY};
+                slide.speed = inState.slideSpeed; slide.durationSeconds = inState.slideDurationSeconds;
+                slide.elapsedSeconds = std::min(slide.durationSeconds, std::max(slide.elapsedSeconds, inState.slideSeconds));
+                slide.acknowledgementSeconds = slide.durationSeconds - slide.elapsedSeconds + 0.5f;
+                slide.facingLeft = inState.facingLeft;
+            }
+            else if (inState.actionSequence >= slide.sequence)
+                ClearSlidePrediction();
+        }
         if (inSetPosition) groundPosition = inState.position;
         combatState = inState; combatRules = inRules; combatPresentationSeconds = 0.0f;
         if (!wasDead && inState.hp == 0) deathPresentationSeconds = 0.0f;
@@ -629,8 +728,11 @@ namespace ActionRPG
             || (predictedAttackFacingSequence != 0 && inState.actionSequence >= predictedAttackFacingSequence
                 && (inState.shotPhase != CombatShotPhase::None || inState.shotCount > 0)))
             ClearPredictedAttackFacing();
+        if (inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive)
+            ClearSlidePrediction();
         height = inState.height;
-        facingLeft = predictedAttackFacingSequence != 0 ? predictedAttackFacingLeft : inState.facingLeft;
+        facingLeft = slidePrediction ? slidePrediction->facingLeft
+            : predictedAttackFacingSequence != 0 ? predictedAttackFacingLeft : inState.facingLeft;
         ConfigureMovementSpeeds(inRules.walkSpeed * inState.movementMultiplier, inRules.runSpeed * inState.movementMultiplier);
         pendingProjectileRequests.clear();
     }
@@ -639,6 +741,7 @@ namespace ActionRPG
     {
         ApplyCombatState(inState, inRules, true);
         bufferedPresentation = true;
+        slidePresentationSeconds = inState.slideSeconds;
         isMoving = inState.presentationMoving && inState.hp != 0 && inState.reaction == CombatReaction::None;
         runningRequested = isMoving && (inState.running || inState.presentationSpeed > (inRules.walkSpeed + inRules.runSpeed) * 0.5f);
         const float speed = runningRequested ? inRules.runSpeed : inRules.walkSpeed;
@@ -654,6 +757,7 @@ namespace ActionRPG
         if (state.reaction == CombatReaction::Falling)
             return state.verticalSpeed > 0.0f ? airHitStartAnimation : airHitFallAnimation;
         if (state.reaction == CombatReaction::Rising) return getUpAnimation;
+        if (IsSliding() && slideAnimation) return *slideAnimation;
         if (state.jumpPhase == CombatJumpPhase::Prepare) return jumpStartAnimation;
         if (state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
             return IsRunning() ? runAnimation : walkAnimation;
@@ -680,6 +784,12 @@ namespace ActionRPG
     {
         if (!combatState) return;
         const auto& state = *combatState;
+        if (slidePrediction)
+        {
+            slidePrediction->acknowledgementSeconds -= inDeltaSeconds;
+            if (slidePrediction->acknowledgementSeconds <= 0.0f)
+                ResolvePredictedSlide(slidePrediction->sequence, false);
+        }
         if (predictedAttackFacingSequence != 0)
         {
             predictedAttackFacingSeconds = std::max(0.0f, predictedAttackFacingSeconds - inDeltaSeconds);
@@ -694,19 +804,39 @@ namespace ActionRPG
         if (inLocalDirection)
         {
             const auto previous = groundPosition;
-            Vector2 direction = *inLocalDirection;
-            const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
-            const bool allowed = state.hp != 0 && state.reaction == CombatReaction::None
-                && !state.skillActive && (state.shotPhase == CombatShotPhase::None || state.shotPhase == CombatShotPhase::Recover);
-            runningRequested = allowed && inRun;
-            isMoving = allowed && length > 0.0f;
-            if (isMoving)
+            if (slidePrediction || state.slideActive)
             {
-                const float speed = IsRunning() ? runSpeed : walkSpeed;
-                groundPosition.x += direction.x / length * speed * inDeltaSeconds;
-                groundPosition.y += direction.y / length * speed * inDeltaSeconds;
-                if (direction.x != 0.0f && !IsAttackFacingLocked()) facingLeft = direction.x < 0.0f;
+                const float elapsed = GetSlidePresentationSeconds();
+                const float duration = slidePrediction ? slidePrediction->durationSeconds : state.slideDurationSeconds;
+                const float speed = slidePrediction ? slidePrediction->speed : state.slideSpeed;
+                const Vector2 direction = slidePrediction ? slidePrediction->direction
+                    : Vector2{state.slideDirectionX, state.slideDirectionY};
+                const float seconds = std::clamp(duration - elapsed, 0.0f, inDeltaSeconds);
+                groundPosition.x += direction.x * speed * seconds;
+                groundPosition.y += direction.y * speed * seconds;
                 groundPosition = inMap.ConstrainGroundMovement(previous, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
+                if (slidePrediction) slidePrediction->elapsedSeconds += seconds;
+                else slidePresentationSeconds += seconds;
+                facingLeft = slidePrediction ? slidePrediction->facingLeft : state.facingLeft;
+                isMoving = false;
+                runningRequested = false;
+            }
+            else
+            {
+                Vector2 direction = *inLocalDirection;
+                const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+                const bool allowed = state.hp != 0 && state.reaction == CombatReaction::None
+                    && !state.skillActive && (state.shotPhase == CombatShotPhase::None || state.shotPhase == CombatShotPhase::Recover);
+                runningRequested = allowed && inRun;
+                isMoving = allowed && length > 0.0f;
+                if (isMoving)
+                {
+                    const float speed = IsRunning() ? runSpeed : walkSpeed;
+                    groundPosition.x += direction.x / length * speed * inDeltaSeconds;
+                    groundPosition.y += direction.y / length * speed * inDeltaSeconds;
+                    if (direction.x != 0.0f && !IsAttackFacingLocked()) facingLeft = direction.x < 0.0f;
+                    groundPosition = inMap.ConstrainGroundMovement(previous, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
+                }
             }
         }
         else if (!bufferedPresentation)
@@ -737,6 +867,11 @@ namespace ActionRPG
         { elapsed += combatRules.riseSeconds - state.reactionSeconds; duration = combatRules.riseSeconds; }
         else if (state.reaction == CombatReaction::Falling)
         { elapsed = state.verticalSpeed > 0.0f ? combatPresentationSeconds : 0.0f; }
+        else if (IsSliding() && slideAnimation)
+        {
+            elapsed = GetSlidePresentationSeconds();
+            duration = slidePrediction ? slidePrediction->durationSeconds : state.slideDurationSeconds;
+        }
         else if (state.jumpPhase == CombatJumpPhase::Prepare)
         { elapsed += state.jumpSeconds; duration = combatRules.jumpPrepareSeconds; }
         else if (state.shotPhase != CombatShotPhase::None)
@@ -747,7 +882,7 @@ namespace ActionRPG
         }
         else if (state.jumpPhase == CombatJumpPhase::Airborne) elapsed = 0.0f;
         else { animation.Update(inDeltaSeconds * (bufferedPresentation ? movementAnimationScale : 1.0f)); return; }
-        const float seconds = std::max(0.0f, elapsed) / duration * animation.GetDuration();
+        const float seconds = std::max(0.0f, elapsed) / std::max(0.001f, duration) * animation.GetDuration();
         lastCombatAnimationSeconds = combatAnimationChanged || lastCombatAnimation != &animation
             ? seconds : std::max(lastCombatAnimationSeconds, seconds);
         lastCombatAnimation = &animation; combatAnimationChanged = false;

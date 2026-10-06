@@ -60,6 +60,10 @@
 
 기본 지상 사격은 start/fire/end, 공중 사격도 start/fire/end로 분리합니다. 점프는 start/hold/land, 피격은 hit/air-hit-start/fall/knockdown/get-up을 사용합니다. 원본 통합 시트가 있어도 실제 런타임은 분리 섹션을 사용할 수 있습니다. 최대 사격 횟수·입력 유예·방향 고정과 던전 서버 타이밍은 [전투 문서](../COMBAT_CLIENT.md)를 참고합니다.
 
+PlayerSlide는 [player_slide.png](Images/Characters/player_slide.png)를 사용합니다. 원본 2048×1024, 셀 512×512, 4열×2행의 8프레임을 행 우선으로 읽고 248×248로 표시합니다. frame_seconds=0.05로 기본 재생은 0.4초이며, 던전에서는 서버 캐릭터별 durationSeconds에 맞춰 경과 시간을 비례 적용하고 단발 재생합니다. 캐릭터 1~3은 공용 PlayerSlide를 사용합니다.
+
+발 기준점은 셀의 (208,488)입니다. anchor_xs의 8개 값은 모두 0.40625, 두 행의 anchor_y는 0.953125입니다. 기존 SpriteAnimation은 좌우 반전 때 가로 기준점도 1-anchor로 반사하므로 캐릭터 지면 좌표가 유지됩니다. 동일 슬라이딩 순번의 반복 상태 수신은 재생을 처음으로 되돌리지 않습니다.
+
 ## 캐릭터별 점프·피격
 
 `characters.ini`의 Default/Character1~3은 현재 `jump_speed=690`입니다. 마을의 초기 상승 속도로 사용하며 ID가 확정된 입장 응답에서 적용합니다. 던전은 서버 combatRules.jumpSpeed·gravity·height/verticalSpeed를 적용합니다. 마을 값을 던전 서버 값에 다시 곱하지 않습니다.

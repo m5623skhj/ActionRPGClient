@@ -68,7 +68,7 @@ namespace ActionRPG
         void RequestCombatRefresh();
         void StartRealtime(std::uint64_t inRoomId);
         [[nodiscard]] bool HasFreshRealtime() const;
-        void SendAction(std::uint32_t inSequence, std::uint8_t inAction, bool inFacingLeft);
+        bool SendAction(DungeonProtocol::DungeonActionInput& inAction);
         void SendSkill(std::uint32_t inSequence, const std::string& inSkillId, bool inFacingLeft);
         [[nodiscard]] DungeonConnectionState GetConnectionState() const;
         void SendReliable(IPacket& inPacket);
