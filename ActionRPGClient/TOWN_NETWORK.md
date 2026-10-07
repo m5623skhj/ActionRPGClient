@@ -1,6 +1,6 @@
 # 인증 및 타운 네트워크
 
-2026-10-06 클라이언트 `1d153cf` 기준입니다. 이 문서는 클라이언트의 인증·타운 TLS·콘텐츠 이벤트 연결을 설명합니다. 서버 인증·DB 설정은 [AuthServer](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md), 타운 규칙은 [TownServer](../../ActionRPGServer/ActionRPGServer/TownServer/DEVELOPMENT.md), 마이그레이션은 [DB 작업 문서](../../ActionRPGServer/docs/workflows/DATABASE_MIGRATIONS.md)에서 관리합니다.
+2026-10-07 클라이언트 소스 기준입니다. 이 문서는 클라이언트의 인증·타운 TLS·콘텐츠 이벤트 연결을 설명합니다. 서버 인증·DB 설정은 [AuthServer](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md), 타운 규칙은 [TownServer](../../ActionRPGServer/ActionRPGServer/TownServer/DEVELOPMENT.md), 마이그레이션은 [DB 작업 문서](../../ActionRPGServer/docs/workflows/DATABASE_MIGRATIONS.md)에서 관리합니다.
 
 ## 로그인에서 타운 입장까지
 
@@ -30,6 +30,8 @@ Google Authorization Code/PKCE(S256), 매 시도 새 state, Auth challenge의 no
 
 기동 시 실행 파일 옆 `Assets/Data/AuthClient.json`을 읽습니다. 원본 [AuthClient.json](Assets/Data/AuthClient.json)은 빈 템플릿으로 보존합니다. 로컬 실행기 [RunLocalTest.bat](../../ActionRPGServer/RunLocalTest.bat)가 `%LOCALAPPDATA%/ActionRPG/LocalTest/settings.json`의 공개 client 항목을 매 실행 실제 EXE 옆 설정에 공급합니다. UTF-8 JSON의 최대 크기는 32KiB이며 최초 Google Desktop ID는 실제 등록값을 입력합니다. `playerName`은 빈 값으로 두어 프로세스별 이름을 사용하고 `characterId`는 1~3 범위입니다. 별도 override 기능이나 게임 명령줄 인증 인자는 사용하지 않습니다.
 
+로컬 실행기가 클라이언트 프로세스에만 선택적 환경변수 ACTIONRPG_GOOGLE_CLIENT_ID와 ACTIONRPG_GOOGLE_DESKTOP_CLIENT_SECRET을 전달합니다. 클라이언트는 시작 시 두 값을 읽고 자기 환경에서 제거합니다. secret이 있으면 두 값 모두 1~1024자의 공백 없는 printable ASCII여야 하며, 환경의 ID가 JSON의 googleClientId와 정확히 일치해야 합니다. 잘못된 값이나 ID 불일치는 로그인 설정 오류로 처리합니다. 검증된 secret은 메모리에만 두고 Google 토큰 교환 form에 URL 인코딩해 client_secret으로 추가합니다. secret이 없으면 기존 PKCE 흐름을 유지합니다. JSON·명령줄·로그·오류 메시지에는 secret을 기록하지 않으며, PKCE·loopback·Auth ID 토큰 검증은 그대로 사용합니다.
+
 재빌드의 CopyRuntimeAssets와 에셋 미러 동기화는 빈 원본 설정을 다시 복사할 수 있으므로, 이후 실행기로 사용자 설정을 재공급합니다. 사용자 설정의 타운 CA 절대 경로를 그대로 사용합니다. 실행용 JSON에는 아래 공개 필드만 포함하며, DB 접속 정보·타운 등록키·인증서 개인 키는 공급하지 않습니다. 로컬 Auth HTTPS의 인증서 신뢰 준비는 실행기에서 CurrentUser 범위로 담당하고, 타운 TLS는 아래 townCaFile을 사용합니다. 변경된 설정은 클라이언트 재시작 시 읽습니다.
 
 | 필드 | 의미·조건 |
@@ -49,11 +51,51 @@ Auth·Google HTTPS는 WinHTTP의 Windows 인증서 저장소로 검증합니다.
 
 실행기가 여는 두 클라이언트는 서로 다른 실제 Google 계정으로 수동 로그인합니다. 브라우저가 같은 계정을 자동 선택하면 타운 선택 화면의 계정 전환을 사용해 다음 로그인에서 계정을 선택합니다. 같은 계정의 새 로그인은 기존 토큰을 무효화하므로 기존 클라이언트의 재로그인이 필요할 수 있습니다. playerName·characterId를 바꾸는 것은 계정 전환이 아닙니다.
 
+## 새 PC 인증 준비와 문제 해결
+
+MySQL·Auth·Town·Room·클라이언트를 새 PC에 모두 로컬 설치하는 전체 순서는 [서버 통합 설치·문제 해결 가이드](../../ActionRPGServer/docs/workflows/LOCAL_DEVELOPMENT_SETUP.md)를 따릅니다. 서버는 v145, 클라이언트는 v143 도구 집합으로 Debug/x64를 준비합니다. 원격 서버 접속과 기존 DB 데이터 이관은 별도 절차입니다.
+
+로컬 실행기의 공개 연결 설정은 `%LOCALAPPDATA%/ActionRPG/LocalTest/settings.json`, 보호된 자격 증명은 같은 폴더의 `credentials.dpapi`에 둡니다. Google Desktop ID/secret 쌍은 보호된 객체에 저장하며 기존 DB·타운 자격 증명을 보존합니다. 기존 프로필에 쌍이 없으면 실행기가 secret을 숨김 입력으로 한 번 요청합니다. secret은 1~1024자의 공백 없는 printable ASCII이고, 다른 Google client ID에 연결된 secret은 사용하지 않습니다.
+
+DPAPI 파일과 인증서 개인 키는 다른 PC나 Windows 사용자에게 복사해 재사용하지 않습니다. 새 PC에서는 실행기의 최초 설정으로 사용자 프로필·로컬 인증서·CurrentUser 신뢰 등록을 새로 준비하고, Google 자격 증명과 서버 설정을 해당 PC에서 입력합니다. 기존 settings.json의 절대 경로·인증서 thumbprint도 새 PC에 그대로 적용하지 않습니다. DB 데이터 이전은 이 인증 프로필 이전과 별개이며 서버 문서를 따릅니다.
+
+Auth HTTPS는 Windows 인증서 저장소의 신뢰를 사용합니다. Town TLS는 실행용 JSON의 townCaFile PEM과 hostname/SAN 일치를 사용합니다. 한쪽 CA 설정만 변경해서 다른 쪽 인증서 오류를 해결할 수 없습니다. 로컬 CA 신뢰는 실행기가 CurrentUser 범위로 준비합니다. 원격 배포는 운영자가 제공한 CA와 인증서의 실제 호스트 이름을 사용하며 인증서 검사를 끄지 않습니다.
+
+### 실제 사례: Google 토큰 교환 HTTP 400
+
+실제 게임 화면에서 `[Google 토큰 교환] HTTP 400 / OAuth: invalid_request / Google 클라이언트 자격 증명 누락`이 확인됐습니다. 마지막 사유는 응답 설명이 정확히 `client_secret is missing.`일 때만 내부 분류로 표시됩니다. 일반 invalid_request만으로 이 원인을 확정하지 않습니다. 수정 전 token form에는 client_secret이 없었으며, 수정 후 실행기가 검증된 ID/secret 쌍을 전달하고 클라이언트가 secret을 URL 인코딩해 추가합니다. PKCE(S256)·state·nonce·동일 loopback redirect_uri와 Auth에 대한 ID 토큰 제출은 유지합니다.
+
+**오류 안내만 추가한 이전 EXE에는 secret 전달 코드가 없습니다.** 런처·소스가 수정되어도 그 EXE를 계속 실행하면 같은 400이 발생할 수 있습니다. 아래 명령은 이 문서 폴더에서 사용자가 확인할 수 있는 시각 대조 예시입니다.
+
+```powershell
+Get-Item ./ActionRPGClient/Network/AuthSettings.cpp, ./ActionRPGClient/Network/AuthClient.cpp, ./artifacts/bin/x64/Debug/ActionRPGClient.exe |
+    Select-Object FullName, LastWriteTime
+```
+
+EXE가 수정 소스보다 오래됐다면 **Debug | x64 다시 빌드**가 필요합니다. 시각이 최신인 것만으로 코드 반영을 보장하지 않으므로 빌드 성공·실제 EXE 경로를 함께 확인합니다. 런처는 `ActionRPGClient/artifacts/bin/x64/Debug/ActionRPGClient.exe`를 실행합니다. Release EXE나 저장소 루트 artifacts의 라이브러리 출력과 혼동하지 않습니다. 다시 빌드한 뒤에는 수정된 실행기로 공개 JSON과 프로세스 환경을 재공급합니다.
+
+2026-10-07 사용자가 수정 적용 후 실제 Google 로그인과 정상 입장을 확인했습니다. 에이전트가 빌드·실행·DB 접속으로 재검증한 것은 아닙니다.
+
+| 증상 | 확인 및 대응 |
+| --- | --- |
+| 브라우저에 콜백 수신 안내가 나오지만 게임에서 실패 | 콜백 수신 뒤에도 Google 토큰 교환·Auth 검증이 남습니다. 게임의 실패 단계·HTTP 숫자·허용된 OAuth 코드만 확인합니다. |
+| Google 토큰 교환 400 + 자격 증명 누락 | 위 실제 사례의 소스/EXE 시각·Debug x64 재빌드·수정 런처의 ID/secret 공급을 확인합니다. secret 값이나 응답 원문을 공유하지 않습니다. |
+| 로그인 설정 오류 | 실행 EXE 옆 공개 JSON, ID 일치, secret 길이·문자 범위를 로컬에서 확인합니다. 원본 JSON에 secret을 추가하지 않습니다. |
+| Auth 준비 단계 또는 로그인 검증의 503 | 서버 준비·배포 상태를 확인한 뒤 새로 시도합니다. Google secret 누락으로 단정하지 않습니다. |
+| Auth 로그인 검증·타운 티켓의 403 | 표시된 실패 단계를 기준으로 서버의 거절 원인을 확인합니다. Google 토큰 교환 오류와 구분합니다. |
+| TLS 실패·HTTP 결과 미확인 | 실제 주소·연결 상태·호스트 이름·Auth Windows 신뢰·Town CA 파일을 각각 확인합니다. |
+| vcpkg manifest disabled 안내 | 그 문구만으로 빌드 실패 원인을 확정하지 않습니다. 첫 error/LNK 줄을 확인하고 manifest 사용과 MSBuild 연동을 확인합니다. |
+| LNK1168: EXE를 쓰기용으로 열 수 없음 | 실행 중이거나 남아 있는 ActionRPGClient 프로세스를 확인해 종료한 뒤 다시 빌드합니다. 창을 닫은 것과 프로세스 종료는 별도로 확인합니다. |
+| 재빌드 후 주소·ID 설정이 비어 있음 | 빈 원본 템플릿이 복사될 수 있습니다. RunLocalTest로 실행용 설정을 다시 공급합니다. |
+| 같은 계정의 다른 클라이언트가 끊김 | 새 로그인이 이전 토큰을 무효화할 수 있습니다. 두 실제 계정을 사용하고 필요하면 계정 전환 후 다시 로그인합니다. |
+
+문의 시에는 단계·HTTP 상태·허용된 OAuth 코드·고정된 분류 사유와 빌드 구성/실행 경로를 남깁니다. secret·인증 코드·토큰·error_description·응답 원문·verifier·nonce·state는 포함하지 않습니다.
+
 ## 취소·실패·세션 전환
 
 HTTPS 전체 요청 한도는 15초이고 타운 TLS·승인·EnterTown은 티켓 잔여 시간과 15초 중 작은 한도를 적용합니다. 브라우저 대기는 challenge 만료까지입니다. UI 취소는 대기 화면을 즉시 빠져나오고 늦게 완료된 결과는 시도 ID로 거릅니다. 불확실한 HTTP 결과를 자동 재시도하지 않습니다.
 
-`ready=false`는 기존 접속 종료 대기 상태입니다. 받은 티켓을 타운에 보내지 않으며 사용자가 다시 입장할 때 새 티켓을 발급합니다. 503은 준비 중, 403은 거절로 안내합니다. 타운 연결 종료만으로 중복 로그인·정지 등 상세 이유를 추측하지 않습니다. 기존 TCP 자동 연결·자동 재접속 경로는 제거되었습니다.
+`ready=false`는 기존 접속 종료 대기 상태입니다. 받은 티켓을 타운에 보내지 않으며 사용자가 다시 입장할 때 새 티켓을 발급합니다. HTTP 오류는 로그인 준비·Google 브라우저 인증·Google 토큰 교환·Auth 로그인 검증·타운 입장 티켓·로그아웃 단계를 구분합니다. HTTP 응답을 받은 거절에는 상태 숫자를 표시하고 Google 토큰 교환은 허용 목록과 일치하는 OAuth error 코드만 추가합니다. Google error가 invalid_request이고 error_description이 정확히 client_secret is missing.과 일치할 때만 내부 enum으로 분류해 고정 문구 “Google 클라이언트 자격 증명 누락”을 추가합니다. 다른 설명은 버립니다. 응답 원문·error_description·인증 코드·토큰·verifier·nonce·state는 출력하지 않습니다. Auth의 503은 준비 중으로 안내하며, 오류 코드만으로 client_secret 누락 등 특정 원인을 단정하지 않습니다. 브라우저의 콜백 수신 문구는 게임에서 검증이 진행 중임을 알리고 로그인 성공으로 표시하지 않습니다. 타운 연결 종료만으로 중복 로그인·정지 등 상세 이유를 추측하지 않습니다. 기존 TCP 자동 연결·자동 재접속 경로는 제거되었습니다.
 
 | 메뉴 | 처리 |
 | --- | --- |

@@ -6,10 +6,61 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <set>
 #include <stdexcept>
 #include <utility>
+
+namespace
+{
+    struct GoogleDesktopCredentials
+    {
+        std::string clientId;
+        std::string secret;
+    };
+
+    std::string DesktopCredentialAscii(const std::array<wchar_t, 1025>& inValue, const DWORD inLength)
+    {
+        if (inLength == 0 || inLength >= inValue.size())
+            throw std::runtime_error("Invalid Google Desktop credentials.");
+        std::string result;
+        result.reserve(inLength);
+        for (DWORD index = 0; index < inLength; ++index)
+        {
+            if (inValue[index] < L'!' || inValue[index] > L'~')
+                throw std::runtime_error("Invalid Google Desktop credentials.");
+            result.push_back(static_cast<char>(inValue[index]));
+        }
+        return result;
+    }
+
+    // Read once at startup and remove both values before the OAuth browser can inherit them.
+    GoogleDesktopCredentials ReadGoogleDesktopCredentials()
+    {
+        constexpr wchar_t ID_NAME[] = L"ACTIONRPG_GOOGLE_CLIENT_ID";
+        constexpr wchar_t SECRET_NAME[] = L"ACTIONRPG_GOOGLE_DESKTOP_CLIENT_SECRET";
+        std::array<wchar_t, 1025> idBuffer{};
+        std::array<wchar_t, 1025> secretBuffer{};
+        SetLastError(ERROR_SUCCESS);
+        const DWORD idLength = GetEnvironmentVariableW(ID_NAME, idBuffer.data(), static_cast<DWORD>(idBuffer.size()));
+        const DWORD idError = GetLastError();
+        SetLastError(ERROR_SUCCESS);
+        const DWORD secretLength = GetEnvironmentVariableW(SECRET_NAME, secretBuffer.data(), static_cast<DWORD>(secretBuffer.size()));
+        const DWORD secretError = GetLastError();
+        const bool idCleared = SetEnvironmentVariableW(ID_NAME, nullptr) != FALSE
+            || GetLastError() == ERROR_ENVVAR_NOT_FOUND;
+        const bool secretCleared = SetEnvironmentVariableW(SECRET_NAME, nullptr) != FALSE
+            || GetLastError() == ERROR_ENVVAR_NOT_FOUND;
+        if (!idCleared || !secretCleared)
+            throw std::runtime_error("Google Desktop credential cleanup failed.");
+        if (secretLength == 0 && secretError == ERROR_ENVVAR_NOT_FOUND) return {};
+        if ((idLength == 0 && idError != ERROR_SUCCESS)
+            || (secretLength == 0 && secretError != ERROR_SUCCESS))
+            throw std::runtime_error("Google Desktop credentials unavailable.");
+        return { DesktopCredentialAscii(idBuffer, idLength), DesktopCredentialAscii(secretBuffer, secretLength) };
+    }
+}
 
 namespace ActionRPG
 {
@@ -45,6 +96,7 @@ namespace ActionRPG
         settings.playerName = L"Player-" + std::to_wstring(GetCurrentProcessId());
         try
         {
+            auto desktopCredentials = ReadGoogleDesktopCredentials();
             const auto path = inAssets.GetAssetPath("Data/AuthClient.json");
             if (!std::filesystem::is_regular_file(path) || std::filesystem::file_size(path) > 32768)
                 throw std::runtime_error("Authentication settings unavailable.");
@@ -53,6 +105,12 @@ namespace ActionRPG
             if (!document.is_object()) throw std::runtime_error("Invalid authentication settings.");
             settings.authUrl = document.value("authUrl", std::string{});
             settings.googleClientId = document.value("googleClientId", std::string{});
+            if (!desktopCredentials.secret.empty())
+            {
+                if (desktopCredentials.clientId != settings.googleClientId)
+                    throw std::runtime_error("Google Desktop credential ID mismatch.");
+                settings.googleDesktopClientSecret = std::move(desktopCredentials.secret);
+            }
             const auto configuredName = document.value("playerName", std::string{});
             if (!configuredName.empty()) settings.playerName = AuthUtf8ToWide(configuredName);
             const auto character = document.value("characterId", nlohmann::json(1));
@@ -117,7 +175,8 @@ namespace ActionRPG
         catch (...)
         {
             settings.servers.clear();
-            settings.loginConfigurationError = L"Assets/Data/AuthClient.json 설정을 확인해 주세요.";
+            settings.googleDesktopClientSecret.clear();
+            settings.loginConfigurationError = L"Assets/Data/AuthClient.json과 런처의 Google Desktop 자격 증명 설정을 확인해 주세요.";
             settings.townConfigurationError = settings.loginConfigurationError;
         }
         return settings;

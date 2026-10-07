@@ -16,6 +16,7 @@
 #include <optional>
 #include <stdexcept>
 #include <stop_token>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -23,7 +24,70 @@ namespace
 {
     using Clock = std::chrono::steady_clock;
     using Json = nlohmann::json;
-    struct HttpFailure { unsigned long status; };
+    enum class AuthStage { Challenge, GoogleAuthorization, GoogleTokenExchange, Login, Ticket, Logout };
+    enum class OAuthFailureReason { Unclassified, MissingClientCredentials };
+    struct HttpFailure
+    {
+        AuthStage stage;
+        unsigned long status;
+        std::wstring oauthError;
+        OAuthFailureReason oauthReason = OAuthFailureReason::Unclassified;
+    };
+
+    std::wstring_view StageName(const AuthStage inStage)
+    {
+        switch (inStage)
+        {
+        case AuthStage::Challenge: return L"Auth 로그인 준비";
+        case AuthStage::GoogleAuthorization: return L"Google 브라우저 인증";
+        case AuthStage::GoogleTokenExchange: return L"Google 토큰 교환";
+        case AuthStage::Login: return L"Auth 로그인 검증";
+        case AuthStage::Ticket: return L"타운 입장 티켓";
+        case AuthStage::Logout: return L"Auth 로그아웃";
+        }
+        return L"인증";
+    }
+
+    // Never forward response text. Only exact allowlisted values become fixed diagnostics.
+    std::wstring GoogleOAuthError(const std::string& inBody, OAuthFailureReason& outReason)
+    {
+        outReason = OAuthFailureReason::Unclassified;
+        const auto response = Json::parse(inBody, nullptr, false);
+        if (!response.is_object()) return {};
+        const auto error = response.find("error");
+        if (error == response.end() || !error->is_string()) return {};
+        constexpr std::array<std::string_view, 10> ALLOWED_ERRORS{
+            "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client",
+            "access_denied", "redirect_uri_mismatch", "unsupported_grant_type",
+            "invalid_scope", "server_error", "temporarily_unavailable"
+        };
+        const auto& value = error->get_ref<const std::string&>();
+        const auto found = std::find(ALLOWED_ERRORS.begin(), ALLOWED_ERRORS.end(), value);
+        if (found == ALLOWED_ERRORS.end()) return {};
+        const auto description = response.find("error_description");
+        if (value == "invalid_request" && description != response.end() && description->is_string()
+            && description->get_ref<const std::string&>() == "client_secret is missing.")
+            outReason = OAuthFailureReason::MissingClientCredentials;
+        return std::wstring(found->begin(), found->end());
+    }
+
+    std::wstring FailureMessage(const HttpFailure& inFailure)
+    {
+        std::wstring result = L"[";
+        result += StageName(inFailure.stage);
+        result += L"] HTTP " + std::to_wstring(inFailure.status);
+        if (inFailure.stage == AuthStage::GoogleTokenExchange)
+        {
+            result += inFailure.oauthError.empty() ? L" / OAuth 오류 미분류" : L" / OAuth: " + inFailure.oauthError;
+            if (inFailure.oauthReason == OAuthFailureReason::MissingClientCredentials)
+                result += L" / Google 클라이언트 자격 증명 누락";
+        }
+        if (inFailure.stage == AuthStage::Logout)
+            return result + L". 로컬 로그아웃은 완료했으나 서버 처리 여부는 확인하지 못했습니다.";
+        if (inFailure.stage != AuthStage::GoogleTokenExchange && inFailure.status == 503)
+            return result + L". 서버 준비 후 새로 시도해 주세요.";
+        return result + L". 요청이 거절됐습니다. 설정을 확인한 뒤 새로 시도해 주세요.";
+    }
     constexpr char BASE64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
     std::string Base64Url(const unsigned char* inData, std::size_t inSize)
@@ -128,12 +192,12 @@ namespace
         return value.get<int>();
     }
 
-    Json Post(const std::string& inOrigin, const std::wstring_view inPath, const Json& inBody,
+    Json Post(const AuthStage inStage, const std::string& inOrigin, const std::wstring_view inPath, const Json& inBody,
         const std::string& inToken, const std::stop_token inStop)
     {
         const auto response = ActionRPG::AuthPost(inOrigin, inPath, inBody.dump(),
             L"application/json", inToken, inStop);
-        if (response.status != 200) throw HttpFailure{ response.status };
+        if (response.status != 200) throw HttpFailure{ inStage, response.status, {} };
         return Json::parse(response.body);
     }
 
@@ -146,8 +210,10 @@ namespace
 
     // Only binds localhost. Code/state are consumed here and never logged or displayed.
     std::string GoogleIdToken(const ActionRPG::AuthSettings& inSettings, const std::string& inNonce,
-        const Clock::time_point inDeadline, const bool inChooseAccount, const std::stop_token inStop)
+        const Clock::time_point inDeadline, const bool inChooseAccount, const std::stop_token inStop,
+        AuthStage& outStage)
     {
+        outStage = AuthStage::GoogleAuthorization;
         asio::io_context context;
         asio::ip::tcp::acceptor acceptor(context,
             asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0));
@@ -222,8 +288,9 @@ namespace
                 code.clear();
                 if (++invalidRequests > 16) throw std::runtime_error("Too many invalid OAuth callbacks.");
             }
-            const std::string body = valid ? "Authentication response received. You may return to the game."
-                : "Invalid authentication callback.";
+            const std::string body = !valid ? "Invalid authentication callback."
+                : denied ? "Google authorization was declined. Return to the game to check the result."
+                : "Google response received. Verification is still in progress in the game. Return to the game to check the login result.";
             const auto response = std::string(valid ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 400 Bad Request\r\n")
                 + "Content-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\n"
                   "Content-Security-Policy: default-src 'none'\r\nConnection: close\r\nContent-Length: "
@@ -243,11 +310,19 @@ namespace
         acceptor.close();
         if (inStop.stop_requested() || Clock::now() >= inDeadline)
             throw std::runtime_error("Authentication cancelled or expired.");
-        const auto form = "client_id=" + Encode(inSettings.googleClientId) + "&code=" + Encode(code)
+        auto form = "client_id=" + Encode(inSettings.googleClientId) + "&code=" + Encode(code)
             + "&code_verifier=" + Encode(verifier) + "&grant_type=authorization_code&redirect_uri=" + Encode(redirect);
+        if (!inSettings.googleDesktopClientSecret.empty())
+            form += "&client_secret=" + Encode(inSettings.googleDesktopClientSecret);
+        outStage = AuthStage::GoogleTokenExchange;
         const auto response = ActionRPG::AuthPost("https://oauth2.googleapis.com", L"/token", form,
             L"application/x-www-form-urlencoded", {}, inStop);
-        if (response.status != 200) throw HttpFailure{ response.status };
+        if (response.status != 200)
+        {
+            HttpFailure failure{ AuthStage::GoogleTokenExchange, response.status, {} };
+            failure.oauthError = GoogleOAuthError(response.body, failure.oauthReason);
+            throw failure;
+        }
         return StringField(Json::parse(response.body), "id_token", 16384);
     }
 }
@@ -306,22 +381,24 @@ namespace ActionRPG
             events.push_back({ inJob.attempt, inJob.operation, inKind, std::move(inMessage),
                 std::move(inCredential), inExpiry, inReady });
         }
-        void Execute(const Job& inJob)
+        void Execute(const Job& inJob, AuthStage& outStage)
         {
             if (inJob.operation == AuthOperation::Login)
             {
+                outStage = AuthStage::Challenge;
                 Emit(inJob, AuthEventKind::Progress, L"서버 확인: 로그인 요청 준비");
                 const auto challengeStarted = Clock::now();
-                const auto challenge = Post(inJob.settings.authUrl, L"/v1/challenges", Json::object(), {}, inJob.stop);
+                const auto challenge = Post(AuthStage::Challenge, inJob.settings.authUrl, L"/v1/challenges", Json::object(), {}, inJob.stop);
                 const auto challengeId = StringField(challenge, "challengeId", 1024);
                 const auto nonce = StringField(challenge, "nonce", 1024);
                 const auto deadline = challengeStarted + std::chrono::seconds(Lifetime(challenge, 300));
                 Emit(inJob, AuthEventKind::Progress, L"Google 인증 대기: 브라우저에서 로그인해 주세요.");
-                const auto idToken = GoogleIdToken(inJob.settings, nonce, deadline, inJob.chooseAccount, inJob.stop);
+                const auto idToken = GoogleIdToken(inJob.settings, nonce, deadline, inJob.chooseAccount, inJob.stop, outStage);
                 if (Clock::now() >= deadline) throw std::runtime_error("Challenge expired.");
+                outStage = AuthStage::Login;
                 Emit(inJob, AuthEventKind::Progress, L"서버 확인: Google 인증 검증");
                 const auto loginStarted = Clock::now();
-                const auto response = Post(inJob.settings.authUrl, L"/v1/login",
+                const auto response = Post(AuthStage::Login, inJob.settings.authUrl, L"/v1/login",
                     Json{ { "challengeId", challengeId }, { "idToken", idToken } }, {}, inJob.stop);
                 const auto token = StringField(response, "gameToken", 64);
                 if (token.size() != 64 || !std::all_of(token.begin(), token.end(), [](char value)
@@ -332,9 +409,10 @@ namespace ActionRPG
             }
             else if (inJob.operation == AuthOperation::Ticket)
             {
+                outStage = AuthStage::Ticket;
                 Emit(inJob, AuthEventKind::Progress, L"서버 확인: 타운 입장 티켓 발급");
                 const auto ticketStarted = Clock::now();
-                const auto response = Post(inJob.origin, L"/v1/tickets",
+                const auto response = Post(AuthStage::Ticket, inJob.origin, L"/v1/tickets",
                     Json{ { "serverId", inJob.serverId } }, inJob.token, inJob.stop);
                 const auto ticket = StringField(response, "ticket", 64);
                 if (ticket.size() != 64 || !std::all_of(ticket.begin(), ticket.end(), [](char value)
@@ -347,7 +425,8 @@ namespace ActionRPG
             }
             else
             {
-                Post(inJob.origin, L"/v1/logout", Json::object(), inJob.token, inJob.stop);
+                outStage = AuthStage::Logout;
+                Post(AuthStage::Logout, inJob.origin, L"/v1/logout", Json::object(), inJob.token, inJob.stop);
                 Emit(inJob, AuthEventKind::Complete, L"로그아웃했습니다.");
             }
         }
@@ -363,22 +442,21 @@ namespace ActionRPG
                     job = std::move(pending);
                     pending.reset();
                 }
-                try { Execute(*job); }
+                AuthStage stage = AuthStage::Challenge;
+                try { Execute(*job, stage); }
                 catch (const HttpFailure& failure)
                 {
-                    Emit(*job, AuthEventKind::Failed, job->operation == AuthOperation::Logout
-                        ? L"로컬 로그아웃은 완료했습니다. 서버 로그아웃 요청은 거절되거나 처리되지 않았습니다."
-                        : failure.status == 503
-                        ? L"서버 준비 중입니다. 준비가 끝나면 새로 시도해 주세요."
-                        : failure.status == 403
-                        ? L"인증 또는 입장이 거절됐습니다. 설정과 계정을 확인한 뒤 새로 시도해 주세요."
-                        : L"요청이 거절됐습니다. 새로 시도해 주세요.");
+                    Emit(*job, AuthEventKind::Failed, FailureMessage(failure));
                 }
                 catch (...)
                 {
-                    Emit(*job, AuthEventKind::Failed, job->operation == AuthOperation::Logout
-                        ? L"서버 로그아웃 완료 여부를 확인하지 못했습니다. 로컬 연결과 인증 정보는 정리했습니다."
-                        : L"요청 완료 여부를 확인하지 못했습니다. 브라우저·연결·설정을 확인한 뒤 새로 시도해 주세요.");
+                    // Exceptions can contain request/response data; report the stage, never what().
+                    std::wstring message = L"[";
+                    message += StageName(stage);
+                    message += job->operation == AuthOperation::Logout
+                        ? L"] 서버 로그아웃 완료 여부를 확인하지 못했습니다. 로컬 연결과 인증 정보는 정리했습니다."
+                        : L"] HTTP 응답 또는 검증 완료 여부를 확인하지 못했습니다. 브라우저·연결·설정을 확인해 주세요.";
+                    Emit(*job, AuthEventKind::Failed, std::move(message));
                 }
             }
             if (SUCCEEDED(comResult)) CoUninitialize();

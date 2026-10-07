@@ -22,6 +22,7 @@ namespace ActionRPG
     {
         std::string authUrl;
         std::string googleClientId;
+        std::string googleDesktopClientSecret; // Optional launcher credential; memory only.
         std::filesystem::path townCaFile;
         std::wstring playerName;
         std::uint32_t characterId{ 1 };
