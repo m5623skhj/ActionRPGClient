@@ -12,11 +12,13 @@
 namespace
 {
     using Json = nlohmann::json;
-    float Number(const Json& inValue, const bool inSigned = false)
+    float Number(const Json& inValue, const bool inSigned = false, const bool inUnbounded = false)
     {
         if (!inValue.is_number()) throw std::runtime_error("Invalid combat number.");
         const float value = inValue.get<float>();
-        if (!std::isfinite(value) || std::abs(value) > 1000000.0f || (!inSigned && value < 0.0f))
+        if (inUnbounded && inValue.get<double>() > 0.0 && value == 0.0f)
+            throw std::runtime_error("Combat number underflows float.");
+        if (!std::isfinite(value) || (!inUnbounded && std::abs(value) > 1000000.0f) || (!inSigned && value < 0.0f))
             throw std::runtime_error("Invalid combat number.");
         return value;
     }
@@ -68,6 +70,14 @@ namespace
                 || inState.slideSequence > inState.actionSequence)))
             throw std::runtime_error("Invalid slide state.");
     }
+    void ValidateActorTiming(const ActionRPG::CombatActorState& inActor)
+    {
+        if (inActor.reactionSeconds > inActor.reactionDurationSeconds + 0.001f
+            || (inActor.reaction == ActionRPG::CombatReaction::Hit && inActor.reactionDurationSeconds <= 0.0f)
+            || inActor.hitstopRemainingSeconds > inActor.hitstopDurationSeconds + 0.001f
+            || (inActor.hitstopDurationSeconds > 0.0f && (inActor.hitstopSequence == 0 || inActor.hitstopStartTimeMs == 0)))
+            throw std::runtime_error("Invalid combat actor timing.");
+    }
     ActionRPG::CombatActorState Actor(const Json& inActor)
     {
         ActionRPG::CombatActorState actor;
@@ -76,6 +86,12 @@ namespace
         actor.height = Number(inActor.at("height")); actor.verticalSpeed = Number(inActor.at("verticalSpeed"), true);
         actor.reactionSeconds = Number(inActor.at("reactionSeconds")); actor.facingLeft = inActor.at("facingLeft").get<bool>();
         actor.reactionSequence = Integer(inActor.value("reactionSequence", Json(0)));
+        actor.hitRecovery = Number(inActor.at("hitRecovery"), false, true);
+        actor.reactionDurationSeconds = Number(inActor.at("reactionDurationSeconds"), false, true);
+        actor.hitstopRemainingSeconds = Number(inActor.at("hitstopRemainingSeconds"), false, true);
+        actor.hitstopSequence = Integer(inActor.at("hitstopSequence"));
+        actor.hitstopStartTimeMs = Id(inActor.at("hitstopStartTimeMs"), true);
+        actor.hitstopDurationSeconds = Number(inActor.at("hitstopDurationSeconds"), false, true);
         const auto reaction = Text(inActor.at("reaction"));
         using Reaction = ActionRPG::CombatReaction;
         if (reaction == "None") actor.reaction = Reaction::None;
@@ -87,16 +103,33 @@ namespace
         else throw std::runtime_error("Unknown combat reaction.");
         if (actor.maxHp == 0 || actor.hp > actor.maxHp || ((actor.hp == 0) != (actor.reaction == Reaction::Dead)))
             throw std::runtime_error("Invalid combat HP/reaction.");
+        ValidateActorTiming(actor);
         return actor;
     }
 }
 
 namespace ActionRPG
 {
+    float CombatActiveSeconds(const CombatActorState& inActor, const double inStartMs, const double inEndMs)
+    {
+        const double begin = static_cast<double>(inActor.hitstopStartTimeMs);
+        const double end = begin + static_cast<double>(inActor.hitstopDurationSeconds) * 1000.0;
+        const double stopped = std::max(0.0, std::min(inEndMs, end) - std::max(inStartMs, begin));
+        return static_cast<float>(std::max(0.0, inEndMs - inStartMs - stopped) / 1000.0);
+    }
+
+    bool IsCombatHitstopped(const CombatActorState& inActor, const double inTimeMs)
+    {
+        const double begin = static_cast<double>(inActor.hitstopStartTimeMs);
+        return inActor.hp != 0 && inActor.reaction == CombatReaction::None
+            && inActor.hitstopDurationSeconds > 0.0f && inTimeMs >= begin
+            && inTimeMs < begin + static_cast<double>(inActor.hitstopDurationSeconds) * 1000.0;
+    }
+
     CombatRules CombatRules::Parse(const std::string_view inJson)
     {
         const auto value = Json::parse(inJson);
-        if (value.at("version") != 2) throw std::runtime_error("Unsupported combat rules.");
+        if (value.at("version") != 3) throw std::runtime_error("Unsupported combat rules.");
         CombatRules rules;
         rules.tickIntervalSeconds = TickInterval(value, rules.tickIntervalSeconds);
         rules.maxHp = Integer(value.at("maxHp")); rules.maxShots = Integer(value.at("maxShots"));
@@ -114,6 +147,7 @@ namespace ActionRPG
         rules.riseSeconds = positive("riseSeconds"); rules.projectileSpeed = positive("projectileSpeed");
         rules.muzzleHeight = Number(value.at("muzzleHeight")); rules.airFireLift = Number(value.at("airFireLift"));
         rules.airRecoilDistance = Number(value.at("airRecoilDistance"));
+        rules.shotHitstopSeconds = Number(value.at("shotHitstopSeconds"), false, true);
         return rules;
     }
 
@@ -121,11 +155,11 @@ namespace ActionRPG
     {
         if (inJson.size() > 512 * 1024) throw std::runtime_error("Combat snapshot too large.");
         const auto value = Json::parse(inJson);
-        if (value.at("version") != 2) throw std::runtime_error("Unsupported combat snapshot.");
+        if (value.at("version") != 3) throw std::runtime_error("Unsupported combat snapshot.");
         DungeonCombatSnapshot result;
         result.roomId = Id(value.at("roomId")); result.serverTick = Id(value.at("serverTick"), true);
-        result.hasServerTime = value.contains("serverTimeMs");
-        if (result.hasServerTime) result.serverTimeMs = Id(value.at("serverTimeMs"), true);
+        result.hasServerTime = true;
+        result.serverTimeMs = Id(value.at("serverTimeMs"));
         result.tickIntervalSeconds = TickInterval(value, 0.0);
         result.mapId = Text(value.at("mapId")); result.state = Text(value.at("state"));
         result.mapEpoch = Integer(value.value("mapEpoch", Json(1)));
@@ -255,7 +289,7 @@ namespace ActionRPG
         for (const auto& player : result.players) ValidateSlide(player);
         return result;
     }
-    // Binary payload v2: unaligned little-endian fields, never native struct layout.
+    // Binary payload v3: unaligned little-endian fields, never native struct layout.
     DungeonCombatSnapshot DungeonCombatSnapshot::ParseRealtime(const std::string_view inBytes)
     {
         class Reader
@@ -270,10 +304,10 @@ namespace ActionRPG
                     value |= static_cast<std::uint64_t>(static_cast<unsigned char>(data[offset++])) << (index * 8);
                 return value;
             }
-            float Float(const bool inSigned = false)
+            float Float(const bool inSigned = false, const bool inUnbounded = false)
             {
                 const float value = std::bit_cast<float>(static_cast<std::uint32_t>(UInt(4)));
-                if (!std::isfinite(value) || std::abs(value) > 1000000.0f || (!inSigned && value < 0))
+                if (!std::isfinite(value) || (!inUnbounded && std::abs(value) > 1000000.0f) || (!inSigned && value < 0))
                     throw std::runtime_error("Invalid realtime float.");
                 return value;
             }
@@ -317,6 +351,13 @@ namespace ActionRPG
                 || ((outActor.hp == 0) != (reaction == 5))) throw std::runtime_error("Invalid realtime actor.");
             outActor.reaction = static_cast<CombatReaction>(reaction);
             outActor.reactionSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            outActor.hitRecovery = reader.Float(false, true);
+            outActor.reactionDurationSeconds = reader.Float(false, true);
+            outActor.hitstopRemainingSeconds = reader.Float(false, true);
+            outActor.hitstopSequence = static_cast<std::uint32_t>(reader.UInt(4));
+            outActor.hitstopStartTimeMs = reader.UInt(8);
+            outActor.hitstopDurationSeconds = reader.Float(false, true);
+            ValidateActorTiming(outActor);
         };
         std::unordered_set<std::uint64_t> ids;
         for (std::uint64_t index = 0; index < playerCount; ++index)

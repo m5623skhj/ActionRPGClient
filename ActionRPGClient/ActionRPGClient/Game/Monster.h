@@ -91,6 +91,6 @@ namespace ActionRPG
         CombatRules serverRules;
         bool bufferedPresentation{};
         float animationPresentationSeconds{};
-        float serverPresentationSeconds{};
+        float serverPresentationSeconds{}, serverWallSeconds{}, localHitDurationSeconds{};
     };
 }

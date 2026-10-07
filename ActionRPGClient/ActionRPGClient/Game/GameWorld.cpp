@@ -1118,6 +1118,8 @@ namespace ActionRPG
         if (!snapshot.realtime && combatBuffer.HasFreshRealtime() && !snapshot.cleared) return;
         if (!snapshot.realtime && hasCombatTick && snapshot.serverTick == lastCombatTick
             && !(snapshot.cleared && !dungeonCleared)) return;
+        for (auto& actor : snapshot.players) actor.presentationTimeMs = static_cast<double>(snapshot.serverTimeMs);
+        for (auto& actor : snapshot.monsters) actor.presentationTimeMs = static_cast<double>(snapshot.serverTimeMs);
         const auto self = std::find_if(snapshot.players.begin(), snapshot.players.end(), [this](const auto& inPlayer)
             { return inPlayer.playerId == localPlayerId; });
         if (self == snapshot.players.end()) throw std::runtime_error("Combat snapshot omits the local player.");
@@ -1206,6 +1208,7 @@ namespace ActionRPG
             || pendingMapEpoch>appliedMapEpoch) { commandQueue.Clear(); return; }
         const auto actor=std::find_if(combatSnapshot->players.begin(),combatSnapshot->players.end(),
             [this](const auto& value){return value.playerId==localPlayerId;});
+        if (player.IsHitstopped()) { commandQueue.Clear(); return; }
         if (player.IsSliding() || player.HasPendingSlide() || (actor != combatSnapshot->players.end() && actor->slideActive))
         {
             commandQueue.Clear();
@@ -2118,6 +2121,7 @@ namespace ActionRPG
         player.SetGroundPosition(inPosition); player.ResetActionState(); player.ResetMovementSpeeds(); player.SetRunningEnabled(true);
         CombatPlayerState initial;
         initial.playerId = localPlayerId; initial.position = inPosition;
+        initial.hitRecovery = dungeonWorld->GetSlideDefinition(localCharacterId).hitRecovery;
         initial.hp = initial.maxHp = dungeonWorld->GetCombatRules().maxHp;
         player.ApplyCombatState(initial, dungeonWorld->GetCombatRules());
         commandQueue.Clear();

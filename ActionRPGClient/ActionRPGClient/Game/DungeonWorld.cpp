@@ -15,6 +15,13 @@ namespace ActionRPG
             if (!std::isfinite(value) || std::abs(value) > 1000000) throw std::runtime_error("Invalid dungeon coordinate.");
             return value;
         }
+        float ActorNumber(const nlohmann::json& inValue)
+        {
+            if (!inValue.is_number()) throw std::runtime_error("Invalid actor number.");
+            const float value = inValue.get<float>();
+            if ((inValue.get<double>() > 0.0 && value == 0.0f) || !std::isfinite(value) || value < 0.0f) throw std::runtime_error("Invalid actor number.");
+            return value;
+        }
         Vector2 Position(const nlohmann::json& inValue)
         {
             return { Number(inValue.at("x")), Number(inValue.at("y")) };
@@ -52,7 +59,8 @@ namespace ActionRPG
             const auto& attack = source.at("attackPower");
             if (!attack.is_number_integer() || attack < 1 || attack > 1000000)
                 throw std::runtime_error("Invalid character attack power.");
-            SlideDefinition definition{Number(source.at("durationSeconds")), attack.get<std::uint32_t>(),
+            SlideDefinition definition{Number(source.at("durationSeconds")), ActorNumber(source.at("hitRecovery")),
+                ActorNumber(source.at("hitstopSeconds")), attack.get<std::uint32_t>(),
                 source.at("motionId").get<std::string>()};
             if (definition.durationSeconds < 0.05f || definition.durationSeconds > 2.0f
                 || definition.motionId != "slide" || !result.slideDefinitions.emplace(id, std::move(definition)).second)

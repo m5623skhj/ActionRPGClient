@@ -36,6 +36,46 @@ namespace ActionRPG
             const float dx = inB.position.x - inA.position.x, dy = inB.position.y - inA.position.y;
             return dx * dx + dy * dy <= limit * limit;
         }
+        // Retained start/duration recover short stops between snapshots; newest cancellation is a tombstone.
+        void RetainedStop(CombatActorState& outState, const CombatActorState& inB, const CombatActorState& inLatest, const double inTarget)
+        {
+            if (inB.hitstopSequence >= outState.hitstopSequence
+                && (inB.hitstopDurationSeconds == 0.0f || static_cast<double>(inB.hitstopStartTimeMs) <= inTarget))
+            {
+                outState.hitstopSequence = inB.hitstopSequence;
+                outState.hitstopStartTimeMs = inB.hitstopStartTimeMs;
+                outState.hitstopDurationSeconds = inB.hitstopDurationSeconds;
+                outState.hitstopRemainingSeconds = inB.hitstopRemainingSeconds;
+            }
+            if (inLatest.hitstopSequence >= outState.hitstopSequence && inLatest.hitstopDurationSeconds == 0.0f)
+            {
+                outState.hitstopSequence = inLatest.hitstopSequence;
+                outState.hitstopStartTimeMs = inLatest.hitstopStartTimeMs;
+                outState.hitstopDurationSeconds = outState.hitstopRemainingSeconds = 0.0f;
+            }
+        }
+        float FrameActiveSeconds(const CombatActorState& inActor, const CombatActorState& inA,
+            const double inBegin, const double inEnd)
+        {
+            if (inActor.hitstopDurationSeconds == 0.0f || inA.hitstopSequence >= inActor.hitstopSequence
+                || inA.hitstopDurationSeconds == 0.0f) return CombatActiveSeconds(inActor, inBegin, inEnd);
+            // Merge overlapping retained intervals; repeated confirmations never add the same pause twice.
+            const double startA = static_cast<double>(inA.hitstopStartTimeMs);
+            const double endA = startA + static_cast<double>(inA.hitstopDurationSeconds) * 1000.0;
+            const double startB = static_cast<double>(inActor.hitstopStartTimeMs);
+            const double endB = startB + static_cast<double>(inActor.hitstopDurationSeconds) * 1000.0;
+            const auto overlap = [inBegin, inEnd](const double begin, const double end)
+            { return std::max(0.0, std::min(inEnd, end) - std::max(inBegin, begin)); };
+            const double stopped = overlap(startA, endA) + overlap(startB, endB)
+                - overlap(std::max(startA, startB), std::min(endA, endB));
+            return static_cast<float>(std::max(0.0, inEnd - inBegin - stopped) / 1000.0);
+        }
+        float ActiveRatio(const CombatActorState& inActor, const CombatActorState& inA,
+            const double inBegin, const double inEnd, const double inTarget)
+        {
+            const float span = FrameActiveSeconds(inActor, inA, inBegin, inEnd);
+            return span > 0.000001f ? FrameActiveSeconds(inActor, inA, inBegin, inTarget) / span : 0.0f;
+        }
         void Pose(CombatActorState& outState, const CombatActorState& inA, const CombatActorState& inB,
             const float inRatio, const float inSeconds)
         {
@@ -110,6 +150,7 @@ namespace ActionRPG
         const float ratio = span > 0 ? static_cast<float>(std::clamp((target - static_cast<double>(a->serverTimeMs)) / span,
             0.0, 1.0 + MAX_EXTRAPOLATION_MS / span)) : 0.0f;
         const float boundedRatio = latest.cleared || stalled ? std::min(ratio, 1.0f) : ratio;
+        const double poseTime = span > 0.0 ? static_cast<double>(a->serverTimeMs) + boundedRatio * span : target;
         const bool useB = target >= static_cast<double>(b->serverTimeMs);
         const float age = static_cast<float>(std::clamp((target - static_cast<double>(useB ? b->serverTimeMs : a->serverTimeMs)) / 1000.0, 0.0, 0.5));
         DungeonCombatSnapshot result = latest;
@@ -118,29 +159,40 @@ namespace ActionRPG
             const auto pa = Find(a->players, [&player](const auto& value) { return value.playerId == player.playerId; });
             const auto pb = Find(b->players, [&player](const auto& value) { return value.playerId == player.playerId; });
             if (!pa || !pb || !ContinuousPlayer(*pa, *pb, static_cast<float>(span / 1000.0)) || player.hp == 0) continue;
+            const auto authoritative = player;
             const auto hp = player.hp, maxHp = player.maxHp;
             player = useB ? *pb : *pa;
-            float playerRatio = boundedRatio;
+            RetainedStop(player, *pb, authoritative, target);
+            auto playerTimeline = player;
+            RetainedStop(playerTimeline, *pb, authoritative, static_cast<double>(b->serverTimeMs));
+            const float actionAge = FrameActiveSeconds(playerTimeline, *pa,
+                static_cast<double>(useB ? b->serverTimeMs : a->serverTimeMs), target);
+            float playerRatio = ActiveRatio(playerTimeline, *pa,
+                static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs), poseTime);
             if (playerRatio > 1.0f && (pa->slideActive || pb->slideActive))
             {
                 // A completed slide cannot coast past its endpoint during a missing frame.
                 playerRatio = !pb->slideActive || span <= 0.0 ? 1.0f
                     : std::min(playerRatio, 1.0f + std::max(0.0f, pb->slideDurationSeconds - pb->slideSeconds)
-                        / static_cast<float>(span / 1000.0));
+                        / std::max(0.000001f, FrameActiveSeconds(playerTimeline, *pa,
+                            static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs))));
             }
-            Pose(player, *pa, *pb, playerRatio, static_cast<float>(span / 1000.0));
-            Advance(player, age); player.shotSeconds += age; player.jumpSeconds += age;
+            Pose(player, *pa, *pb, playerRatio, FrameActiveSeconds(playerTimeline, *pa,
+                static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs)));
+            Advance(player, age); player.shotSeconds += actionAge; player.jumpSeconds += actionAge;
+            player.presentationTimeMs = target;
             if (player.slideActive)
             {
-                player.slideSeconds = std::min(player.slideDurationSeconds, player.slideSeconds + age);
-                if (player.slideSeconds >= player.slideDurationSeconds) player.slideActive = false;
+                player.slideSeconds = std::min(player.slideDurationSeconds, player.slideSeconds + actionAge);
+                if (player.slideSeconds >= player.slideDurationSeconds && !IsCombatHitstopped(player, target))
+                    player.slideActive = false;
             }
-            if (playerRatio < boundedRatio)
+            if (IsCombatHitstopped(player, target) || (playerRatio >= 1.0f && !player.slideActive && pb->slideActive))
             {
                 player.presentationMoving = false;
                 player.presentationSpeed = 0.0f;
             }
-            if (!player.skillId.empty()) player.skillSeconds += age;
+            if (!player.skillId.empty()) player.skillSeconds += actionAge;
             for (auto& buff : player.buffs) buff.remainingSeconds = std::max(0.0f, buff.remainingSeconds - age);
             player.hp = hp; player.maxHp = maxHp;
         }
@@ -149,10 +201,21 @@ namespace ActionRPG
             const auto ma = Find(a->monsters, [&monster](const auto& value) { return value.instanceId == monster.instanceId; });
             const auto mb = Find(b->monsters, [&monster](const auto& value) { return value.instanceId == monster.instanceId; });
             if (!ma || !mb || !Continuous(*ma, *mb) || monster.hp == 0) continue;
+            const auto authoritative = monster;
             const auto hp = monster.hp, maxHp = monster.maxHp;
             monster = useB ? *mb : *ma;
-            Pose(monster, *ma, *mb, boundedRatio, static_cast<float>(span / 1000.0));
-            Advance(monster, age); monster.actionSeconds += age;
+            RetainedStop(monster, *mb, authoritative, target);
+            auto monsterTimeline = monster;
+            RetainedStop(monsterTimeline, *mb, authoritative, static_cast<double>(b->serverTimeMs));
+            const float actionAge = FrameActiveSeconds(monsterTimeline, *ma,
+                static_cast<double>(useB ? b->serverTimeMs : a->serverTimeMs), target);
+            const float monsterRatio = ActiveRatio(monsterTimeline, *ma,
+                static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs), poseTime);
+            Pose(monster, *ma, *mb, monsterRatio, FrameActiveSeconds(monsterTimeline, *ma,
+                static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs)));
+            Advance(monster, age); monster.actionSeconds += actionAge;
+            monster.presentationTimeMs = target;
+            if (IsCombatHitstopped(monster, target)) monster.presentationMoving = false;
             monster.hp = hp; monster.maxHp = maxHp;
         }
         for (auto& projectile : result.projectiles)

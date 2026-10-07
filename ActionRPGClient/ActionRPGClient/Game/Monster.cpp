@@ -6,9 +6,9 @@
 #include <nlohmann/json.hpp>
 #include <d2d1_1helper.h>
 #include <cmath>
+#include <limits>
 #include <algorithm>
 #include <fstream>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 #include <unordered_set>
@@ -232,14 +232,14 @@ namespace ActionRPG
     {
         Character::ResetActionState();
         bufferedPresentation = false; animationPresentationSeconds = 0.0f;
-        serverState.reset(); serverPresentationSeconds = 0.0f;
+        serverState.reset(); serverPresentationSeconds = serverWallSeconds = localHitDurationSeconds = 0.0f;
         for (auto& entry : clips) entry.second.animation.Reset();
         motion = Motion::Idle;
     }
 
     void Monster::ClearPresentationHistory()
     {
-        serverState.reset(); serverPresentationSeconds = animationPresentationSeconds = 0.0f;
+        serverState.reset(); serverPresentationSeconds = serverWallSeconds = animationPresentationSeconds = 0.0f;
         bufferedPresentation = false;
         if (motion != Motion::Death) PlayMotion(Motion::Idle);
     }
@@ -268,6 +268,7 @@ namespace ActionRPG
     {
         PlayMotion(GetHeight() > 0.0f ? Motion::AirborneFall
             : inType == CharacterHitType::Airborne ? Motion::AirborneLaunch : Motion::Hit);
+        localHitDurationSeconds = GetHitReactionDuration(clips.at(motion).animation.GetDuration());
     }
 
     bool Monster::IsHitReacting() const
@@ -282,10 +283,22 @@ namespace ActionRPG
         if (!std::isfinite(inDeltaSeconds) || inDeltaSeconds < 0.0f)
             throw std::runtime_error("Invalid monster update interval.");
         auto& clip = clips.at(motion);
+        float activeDelta = inDeltaSeconds;
+        if (serverState)
+        {
+            const double previousTime = serverState->presentationTimeMs + (bufferedPresentation
+                ? -static_cast<double>(inDeltaSeconds) * 1000.0 : serverWallSeconds * 1000.0);
+            if (!bufferedPresentation) serverWallSeconds += inDeltaSeconds;
+            const double currentTime = serverState->presentationTimeMs
+                + (bufferedPresentation ? 0.0 : serverWallSeconds * 1000.0);
+            activeDelta = bufferedPresentation && IsCombatHitstopped(*serverState, currentTime) ? 0.0f
+                : CombatActiveSeconds(*serverState, previousTime, currentTime);
+        }
         if (serverState && !bufferedPresentation)
         {
-            serverPresentationSeconds = std::min(0.25f, serverPresentationSeconds + inDeltaSeconds);
-            const float blend = 1.0f - std::exp(-12.0f * inDeltaSeconds);
+            serverPresentationSeconds = std::min(0.25f, CombatActiveSeconds(*serverState, serverState->presentationTimeMs,
+                serverState->presentationTimeMs + serverWallSeconds * 1000.0));
+            const float blend = 1.0f - std::exp(-12.0f * activeDelta);
             auto position = GetGroundPosition();
             position.x += (serverState->position.x - position.x) * blend;
             position.y += (serverState->position.y - position.y) * blend;
@@ -295,16 +308,32 @@ namespace ActionRPG
                 height = std::max(0.0f, height + serverState->verticalSpeed * serverPresentationSeconds
                     - 0.5f * serverRules.gravity * serverPresentationSeconds * serverPresentationSeconds);
             SetPresentationHeight(height);
-            clip.animation.Update(inDeltaSeconds, clip.loop);
+            if (serverState->reaction == CombatReaction::Hit || serverState->reaction == CombatReaction::Down
+                || serverState->reaction == CombatReaction::Rising)
+            {
+                const float duration = serverState->reactionDurationSeconds;
+                const float elapsed = std::max(0.0f, duration - serverState->reactionSeconds + serverPresentationSeconds);
+                clip.animation.Seek(duration > 0.0f ? elapsed / duration * clip.animation.GetDuration()
+                    : clip.animation.GetDuration());
+            }
+            else clip.animation.Update(activeDelta, clip.loop);
             return;
         }
         if (serverState && bufferedPresentation)
         {
-            clip.animation.Update(inDeltaSeconds, clip.loop);
-            animationPresentationSeconds += inDeltaSeconds;
+            // Buffered action/reaction playback was sought at the exact display time in ApplyCombatState.
+            if (serverState->hp == 0 || (serverState->reaction == CombatReaction::Falling && serverState->verticalSpeed > 0.0f)
+                || (serverState->reaction == CombatReaction::None
+                && motion != Motion::Attack && serverState->actionType != "PlayMotion"))
+            {
+                clip.animation.Update(activeDelta, clip.loop);
+                animationPresentationSeconds += activeDelta;
+            }
             return;
         }
-        clip.animation.Update(inDeltaSeconds, clip.loop);
+        const float playbackDelta = motion == Motion::Hit && localHitDurationSeconds > 0.0f
+            ? inDeltaSeconds / localHitDurationSeconds * clip.animation.GetDuration() : inDeltaSeconds;
+        clip.animation.Update(playbackDelta, clip.loop);
         if (!clip.loop && clip.animation.IsFinished()
             && (motion == Motion::Hit || motion == Motion::Attack || motion == Motion::GetUp || !clip.holdLastFrame))
             PlayMotion(Motion::Idle);
@@ -315,6 +344,9 @@ namespace ActionRPG
     {
         if (inState.instanceId != instanceId || inState.dataId != dataId)
             throw std::runtime_error("Combat monster identity mismatch.");
+        if (serverState && inState.hitstopSequence < serverState->hitstopSequence) return;
+        const bool newStop = !serverState || inState.hitstopSequence != serverState->hitstopSequence;
+        ConfigureHitRecovery(inState.hitRecovery);
         MonsterMotion next = Motion::Idle;
         if (inState.hp == 0 || inState.reaction == CombatReaction::Dead) next = Motion::Death;
         else if (inState.reaction == CombatReaction::Hit) next = Motion::Hit;
@@ -338,19 +370,20 @@ namespace ActionRPG
                 else if (inState.animationId != "idle") throw std::runtime_error("Unsupported monster animation ID.");
             }
             else if ((inState.actionType == "MoveToTarget" || inState.actionType == "ReturnToSpawn")
-                && (inBuffered ? inState.presentationMoving : !serverState
+                && (inBuffered ? inState.presentationMoving || (motion == Motion::Move
+                    && IsCombatHitstopped(inState, inState.presentationTimeMs)) : !serverState
                     || std::abs(serverState->position.x - inState.position.x) > 0.5f
                     || std::abs(serverState->position.y - inState.position.y) > 0.5f)) next = Motion::Move;
         }
         const bool newAction = serverState && (inState.actionSequence != serverState->actionSequence
             || inState.aiNodeId != serverState->aiNodeId || (!serverState->actionStarted && inState.actionStarted));
         const bool newReaction = serverState && inState.reactionSequence != serverState->reactionSequence;
-        const bool restart = next != motion || (next == Motion::Attack && newAction) || (next == Motion::Hit && newReaction);
+        const bool restart = newStop || next != motion || (next == Motion::Attack && newAction) || (next == Motion::Hit && newReaction);
         if (restart) { PlayMotion(next); animationPresentationSeconds = 0.0f; }
         bufferedPresentation = inBuffered;
         SetFacingLeft(inState.facingLeft);
         SetPresentationHeight(inState.height);
-        if (!serverState || inBuffered) SetGroundPosition(inState.position);
+        if (!serverState || inBuffered || (newStop && inState.hitstopDurationSeconds > 0.0f)) SetGroundPosition(inState.position);
         if (next != Motion::Death)
         {
             auto& animation = clips.at(motion).animation;
@@ -361,14 +394,13 @@ namespace ActionRPG
             }
             else if (next == Motion::Hit || next == Motion::Knockdown || next == Motion::GetUp)
             {
-                const float duration = next == Motion::Hit ? inRules.hitStunSeconds
-                    : next == Motion::Knockdown ? inRules.downSeconds : inRules.riseSeconds;
-                const float seconds = std::max(0.0f, duration - inState.reactionSeconds) / duration * animation.GetDuration();
+                const float duration = inState.reactionDurationSeconds;
+                const float seconds = std::max(0.0f, duration - inState.reactionSeconds) / std::max(std::numeric_limits<float>::min(), duration) * animation.GetDuration();
                 animationPresentationSeconds = restart ? seconds : std::max(animationPresentationSeconds, seconds);
                 animation.Seek(animationPresentationSeconds);
             }
         }
-        serverState = inState; serverRules = inRules; serverPresentationSeconds = 0.0f;
+        serverState = inState; serverRules = inRules; serverPresentationSeconds = serverWallSeconds = 0.0f;
     }
 
     void Monster::Render(D2DRenderer& inRenderer, const Camera& inCamera) const

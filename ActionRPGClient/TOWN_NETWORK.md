@@ -28,7 +28,9 @@ Google Authorization Code/PKCE(S256), 매 시도 새 state, Auth challenge의 no
 
 ## 연결 설정과 신뢰
 
-기동 시 실행 파일 옆 `Assets/Data/AuthClient.json`을 읽습니다. 원본 [AuthClient.json](Assets/Data/AuthClient.json)은 미설정 상태이므로 실제 배포 값이 필요합니다. 변경 후 재시작하며 게임 명령줄로 인증 값을 덮어쓰지 않습니다.
+기동 시 실행 파일 옆 `Assets/Data/AuthClient.json`을 읽습니다. 원본 [AuthClient.json](Assets/Data/AuthClient.json)은 빈 템플릿으로 보존합니다. 로컬 실행기 [RunLocalTest.bat](../../ActionRPGServer/RunLocalTest.bat)가 `%LOCALAPPDATA%/ActionRPG/LocalTest/settings.json`의 공개 client 항목을 매 실행 실제 EXE 옆 설정에 공급합니다. UTF-8 JSON의 최대 크기는 32KiB이며 최초 Google Desktop ID는 실제 등록값을 입력합니다. `playerName`은 빈 값으로 두어 프로세스별 이름을 사용하고 `characterId`는 1~3 범위입니다. 별도 override 기능이나 게임 명령줄 인증 인자는 사용하지 않습니다.
+
+재빌드의 CopyRuntimeAssets와 에셋 미러 동기화는 빈 원본 설정을 다시 복사할 수 있으므로, 이후 실행기로 사용자 설정을 재공급합니다. 사용자 설정의 타운 CA 절대 경로를 그대로 사용합니다. 실행용 JSON에는 아래 공개 필드만 포함하며, DB 접속 정보·타운 등록키·인증서 개인 키는 공급하지 않습니다. 로컬 Auth HTTPS의 인증서 신뢰 준비는 실행기에서 CurrentUser 범위로 담당하고, 타운 TLS는 아래 townCaFile을 사용합니다. 변경된 설정은 클라이언트 재시작 시 읽습니다.
 
 | 필드 | 의미·조건 |
 | --- | --- |
@@ -44,6 +46,8 @@ Google Authorization Code/PKCE(S256), 매 시도 새 state, Auth challenge의 no
 Auth·Google HTTPS는 WinHTTP의 Windows 인증서 저장소로 검증합니다. Town TLS는 Asio/OpenSSL과 `townCaFile`로 체인·호스트명을 검증하며 TLS 1.2 이상을 사용합니다. 타운 CA 파일 설정은 Windows의 Auth HTTPS 신뢰를 변경하지 않습니다. 인증서 검사 무시·평문 fallback은 구현하지 않았습니다. 서버 개인 키·타운 비밀·DB 접속 문자열은 클라이언트 설정에 넣지 않습니다.
 
 토큰과 티켓은 메모리에만 두며 설정·로그·URL에 기록하지 않습니다. 게임 토큰은 응답 수명 최대 8시간, 티켓은 최대 30초, Google challenge는 최대 300초입니다. 요청 시작 시각을 기준으로 만료를 보수적으로 판단합니다. 토큰 영구 저장·자동 갱신·재기동 자동 로그인은 없습니다.
+
+실행기가 여는 두 클라이언트는 서로 다른 실제 Google 계정으로 수동 로그인합니다. 브라우저가 같은 계정을 자동 선택하면 타운 선택 화면의 계정 전환을 사용해 다음 로그인에서 계정을 선택합니다. 같은 계정의 새 로그인은 기존 토큰을 무효화하므로 기존 클라이언트의 재로그인이 필요할 수 있습니다. playerName·characterId를 바꾸는 것은 계정 전환이 아닙니다.
 
 ## 취소·실패·세션 전환
 

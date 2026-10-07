@@ -4,7 +4,7 @@
 
 Windows용 2D 액션 RPG 클라이언트입니다. Win32 메시지 루프, D3D11/DXGI 장치와 Direct2D 렌더링을 사용합니다. Google 로그인 뒤 Auth의 입장 티켓으로 TownServer에 TLS 접속하며, 던전에서는 MultiSocketRUDP로 GameRoomServer와 통신합니다.
 
-이 문서는 2026-10-06의 클라이언트 `1d153cf`와 현재 데이터·서버 계약을 기준으로 작성했습니다. 코드 구현과 실제 서비스 동작 확인은 구분합니다.
+이 문서는 2026-10-06의 클라이언트 `1d153cf`와 현재 데이터·서버 계약을 기준으로 작성했습니다. 코드 구현과 실제 서비스 동작 확인은 구분합니다. 현재 던전 전투 계약은 버전 3이며 공격자 역경직과 일반 피격 경직의 히트 리커버리를 포함합니다. 상세 상태·시간 규칙은 [COMBAT_CLIENT.md](COMBAT_CLIENT.md)를 참고하세요.
 
 ## 문서 안내
 
@@ -60,7 +60,11 @@ msbuild ./ActionRPGClient/ActionRPGClient.vcxproj /p:Configuration=Debug /p:Plat
 
 Visual Studio에서는 이 폴더의 [ActionRPGClient.slnx](ActionRPGClient.slnx)를 열고 `Debug | x64` 또는 `Release | x64`를 선택합니다. 클라이언트 실행 파일은 `ActionRPGClient/artifacts/bin/x64/<Configuration>/ActionRPGClient.exe`에 생성됩니다. RUDP·Logger 라이브러리는 저장소 루트의 `artifacts` 경로를 사용하므로 두 출력 위치를 혼동하지 않습니다.
 
-실행 파일 옆에 `Assets/`, `ClientOptionFile/CoreOption.txt`, OpenSSL 런타임 DLL이 필요합니다. 빌드 대상의 `CopyRuntimeAssets`·`CopyClientOptions`가 데이터를 복사합니다. 로그인 전에 [AuthClient.json](Assets/Data/AuthClient.json)에 실제 Auth 주소·Google Desktop ID·타운 목록·타운 CA를 설정하고 서버의 인증/TLS 설정과 맞춰야 합니다. 기본 파일은 미설정 상태이며 고정 localhost에 자동 접속하지 않습니다. 서버 기동·DB 준비 절차는 [AuthServer 문서](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md)를 참고합니다.
+실행 파일 옆에 `Assets/`, `ClientOptionFile/CoreOption.txt`, OpenSSL 런타임 DLL이 필요합니다. 빌드 대상의 `CopyRuntimeAssets`·`CopyClientOptions`가 데이터를 복사합니다. 클라이언트는 실행 파일 옆 `Assets/Data/AuthClient.json`에서 실제 Auth 주소·Google Desktop ID·타운 목록·타운 CA 경로를 읽습니다. 원본 [AuthClient.json](Assets/Data/AuthClient.json)은 빈 템플릿으로 보존합니다. 서버 기동·DB 준비 절차는 [AuthServer 문서](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md)를 참고합니다.
+
+로컬 연동은 서버 저장소의 [RunLocalTest.bat](../../ActionRPGServer/RunLocalTest.bat)를 사용합니다. 최초 설정에서 실제 Google Desktop ID와 DB 접속 정보를 입력받아 `%LOCALAPPDATA%/ActionRPG/LocalTest/settings.json`에 보관하고, 매 실행 클라이언트를 켜기 전에 공개 client 항목만 실행용 `AuthClient.json`에 공급합니다. 이 JSON에는 Auth 주소·Google client ID·타운 CA 경로·타운 목록·이름 초기값·캐릭터 종류만 포함하며 DB 정보·타운 등록키·개인 키는 포함하지 않습니다. 타운 CA는 사용자 설정의 절대 경로를 사용합니다. 재빌드가 빈 템플릿을 다시 복사한 뒤에는 실행기로 설정을 재공급합니다.
+
+실행기가 여는 두 클라이언트는 서로 다른 실제 Google 계정으로 로그인해야 합니다. 브라우저가 같은 계정을 선택하면 타운 선택 화면의 계정 전환을 사용합니다. 같은 계정의 새 로그인은 이전 토큰을 무효화하므로 먼저 로그인했던 클라이언트의 재로그인이 필요할 수 있습니다. 이름이나 캐릭터 종류를 다르게 선택해도 로그인 계정은 달라지지 않습니다.
 
 ## 에셋 반영
 
@@ -71,7 +75,7 @@ Visual Studio에서는 이 폴더의 [ActionRPGClient.slnx](ActionRPGClient.slnx
 ./SyncClientAssets.bat Release
 ```
 
-생략 시 Debug x64, Release 지정 시 Release x64에 반영합니다. 이 도구는 원본에서 삭제한 파일도 실행 폴더에서 삭제하는 미러 동기화입니다. 실행 폴더만 수정하지 말고 원본을 관리하며, 캐시된 데이터·이미지와 기동 시 설정을 다시 읽도록 클라이언트를 재시작합니다. C++나 wire 계약 변경은 양쪽 소스 빌드·배포가 필요합니다.
+생략 시 Debug x64, Release 지정 시 Release x64에 반영합니다. 이 도구는 원본에서 삭제한 파일도 실행 폴더에서 삭제하는 미러 동기화입니다. 실행 폴더만 수정하지 말고 원본을 관리하며, 캐시된 데이터·이미지와 기동 시 설정을 다시 읽도록 클라이언트를 재시작합니다. C++나 wire 계약 변경은 양쪽 소스 빌드·배포가 필요합니다. 로그인 설정은 빈 원본 템플릿을 유지하는 예외이며, 에셋 동기화 후에는 RunLocalTest로 실행용 설정을 다시 공급합니다.
 
 ## 편집 도구
 

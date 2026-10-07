@@ -15,7 +15,7 @@ namespace ActionRPG
     {
         float walkSpeed{}, runSpeed{}, shotPrepareSeconds{}, shotIntervalSeconds{}, shotRecoverSeconds{};
         float jumpSpeed{}, gravity{}, jumpPrepareSeconds{}, hitStunSeconds{}, downSeconds{}, riseSeconds{};
-        float projectileSpeed{}, muzzleHeight{}, airFireLift{}, airRecoilDistance{};
+        float projectileSpeed{}, muzzleHeight{}, airFireLift{}, airRecoilDistance{}, shotHitstopSeconds{};
         std::uint32_t maxHp{}, maxShots{};
         double tickIntervalSeconds{0.05};
         static CombatRules Parse(std::string_view inJson);
@@ -25,12 +25,20 @@ namespace ActionRPG
         Vector2 position{};
         std::uint32_t hp{}, maxHp{};
         float height{}, verticalSpeed{}, reactionSeconds{};
+        float hitRecovery{}, reactionDurationSeconds{}, hitstopRemainingSeconds{}, hitstopDurationSeconds{};
+        std::uint32_t hitstopSequence{};
+        std::uint64_t hitstopStartTimeMs{};
+        // Client-only server-clock instant for this pose; never serialized.
+        double presentationTimeMs{};
         bool facingLeft{};
         std::uint32_t reactionSequence{};
         bool presentationMoving{};
         float presentationSpeed{};
         CombatReaction reaction{ CombatReaction::None };
     };
+    // Count actor time outside the retained authoritative attacker-only stop interval.
+    [[nodiscard]] float CombatActiveSeconds(const CombatActorState& inActor, double inStartMs, double inEndMs);
+    [[nodiscard]] bool IsCombatHitstopped(const CombatActorState& inActor, double inTimeMs);
     struct CombatBuffState { std::string skillId; float remainingSeconds{}; };
     struct CombatPlayerState : CombatActorState
     {

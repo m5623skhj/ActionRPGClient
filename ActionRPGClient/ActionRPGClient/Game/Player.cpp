@@ -159,6 +159,7 @@ namespace ActionRPG
         const auto pending = GetPendingSlideSequence();
         if (pending != 0 && inState.actionSequence < pending) return;
         Vector2 target = inState.position;
+        if (IsHitstopped()) return;
         if (inState.slideActive)
         {
             const float age = std::clamp(GetSlidePresentationSeconds() - inState.slideSeconds, 0.0f,
@@ -240,8 +241,9 @@ namespace ActionRPG
         {
             const float seconds = state->skillSeconds + GetCombatElapsedSeconds();
             if (!skillPlayback || skillPlayback->sequence != state->skillSequence
-                || skillPlayback->id != state->skillId || skillPlayback->airborne != state->skillAirborne)
-                skillPlayback = SkillPlayback{state->skillSequence, state->skillId, state->skillAirborne, seconds};
+                || skillPlayback->id != state->skillId || skillPlayback->airborne != state->skillAirborne
+                || skillPlayback->hitstopSequence != state->hitstopSequence)
+                skillPlayback = SkillPlayback{state->skillSequence, state->skillId, state->skillAirborne, seconds, state->hitstopSequence};
             else skillPlayback->seconds = std::max(skillPlayback->seconds, seconds);
             if (skillPresentation->Render(*state, GetGroundPosition(), GetHeight(), skillPlayback->seconds, inRenderer, inCamera)) return;
         }

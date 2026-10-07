@@ -32,7 +32,8 @@
       "cooldownSeconds": 2,
       "execution": {
         "damage": 25,
-        "depthRadius": 24
+        "depthRadius": 24,
+        "hitstopSeconds": 0.05
       },
       "ground": {
         "motionId": "frontKick",

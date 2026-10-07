@@ -1,8 +1,8 @@
 # 던전 전투 클라이언트
 
-2026-10-06 슬라이딩 구현을 포함한 현재 클라이언트와 서버 계약 기준입니다. 던전 입장·입력·표시·클리어 후 전환을 설명합니다.
+2026-10-06 슬라이딩·역경직·히트 리커버리 구현을 포함한 현재 클라이언트와 서버 계약 기준입니다. 던전 입장·입력·표시·클리어 후 전환을 설명합니다.
 
-공유 패킷 원본은 [Tool/PacketDefine.yml](../../ActionRPGServer/Tool/PacketDefine.yml), 실행 규칙은 [서버 전투 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/COMBAT_PROTOCOL.md)과 [플레이어 스킬 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/PLAYER_SKILLS.md)입니다. [이동 보간 계약](../../ActionRPGServer/output/movement-smoothing/SERVER_HANDOFF.md)의 요청 ID는 `movement-smoothing-20261003`, 이 문서의 현재 전투 wire version은 슬라이딩을 포함한 2입니다. 이전 이동 보간 인계의 version 1과 혼용하지 않습니다.
+공유 패킷 원본은 [Tool/PacketDefine.yml](../../ActionRPGServer/Tool/PacketDefine.yml), 실행 규칙은 [서버 전투 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/COMBAT_PROTOCOL.md)과 [플레이어 스킬 계약](../../ActionRPGServer/ActionRPGServer/GameRoomServer/PLAYER_SKILLS.md)입니다. [이동 보간 계약](../../ActionRPGServer/output/movement-smoothing/SERVER_HANDOFF.md)의 요청 ID는 `movement-smoothing-20261003`, 이 문서의 현재 전투 wire version은 슬라이딩·역경직·히트 리커버리를 포함한 3입니다. 이전 이동 보간 인계의 version 1과 혼용하지 않습니다.
 
 ## 입장과 월드 적용
 
@@ -11,7 +11,7 @@
 3. 별도 연결 worker가 MultiSocketRUDP 코어로 TLS session broker 교환과 RUDP 연결을 진행합니다. `ClientOptionFile/CoreOption.txt`와 서버가 지정한 브로커를 사용합니다.
 4. RUDP `DungeonChallenge`를 받으면 타운 TLS 연결로 `ConfirmDungeonJoin(roomId,challenge)`을 보냅니다. `DungeonAuthResult` 성공 뒤에만 월드 조각을 요청합니다.
 5. 월드 JSON을 재조립한 뒤 roomId·localPlayerId·맵/몬스터 참조·스킬 계약을 검증합니다. 서버/로컬 PlayerSkills가 다르면 진입을 중단합니다.
-6. 입장 맵·좌표·combatRules를 적용하고 실시간 v2 구독과 reliable 전투 JSON 요청을 시작합니다. Running 상태를 받은 뒤 행동 입력을 전송합니다.
+6. 입장 맵·좌표·combatRules를 적용하고 실시간 v3 구독과 reliable 전투 JSON 요청을 시작합니다. Running 상태를 받은 뒤 행동 입력을 전송합니다.
 
 상태는 Idle → WaitingRoom → Connecting → WaitingAuthentication → WaitingWorld → Entered입니다. 선택창이 닫힌 것만으로 입장이 완료되지 않습니다. 화면의 Dungeon 상태와 Town/GameRoom 연결·인증·월드 데이터 오류를 함께 확인해야 합니다. 목록·입장 조건·몬스터 처치에 따른 워프 허용은 서버가 결정합니다.
 
@@ -43,11 +43,23 @@
 
 던전 지상에서 실제 이동 중 달리기+X를 누르면 Slide(action=3)를 한 번 전송합니다. 기존 스킬 커맨드/단축키 처리 우선순위는 유지합니다. 입력에는 현재 mapEpoch·moveSequence·directionX/Y·running을 함께 넣어 같은 프레임 달리기 시작과 X를 서버가 동일하게 판정합니다. 사격 Prepare/Fire 중에는 서버가 Slide를 예약하지 않고 거절하며, 클라이언트도 해당 X를 일반 사격으로 바꾸지 않습니다. 이동이 허용되는 Recover와 콤보 입력 유예에서는 시작 시 기존 사격 예약·방향 고정을 정리한 뒤 새 슬라이딩 방향을 고정합니다.
 
-월드의 combatRules.slideDefinitions는 characterId·attackPower·durationSeconds·motionId를 전달합니다. 캐릭터 1~3의 motionId=slide를 공용 PlayerSlide에 연결합니다. 현재 기본 지속 시간은 서버 데이터의 0.4초이고, 시작 시 실제 이동 방향과 버프가 반영된 달리기 속도를 고정합니다. 막히지 않은 거리는 속도×지속 시간이며 벽·게이트에서 서버가 중단할 수 있습니다. 피해는 캐릭터별 공격력에 시작 시 버프를 반영한 값의 100%로 서버가 계산하며, 클라이언트는 타격·피해량을 확정하지 않습니다.
+월드의 combatRules.slideDefinitions는 characterId·attackPower·durationSeconds·motionId·hitRecovery·hitstopSeconds를 전달합니다. 캐릭터 1~3의 motionId=slide를 공용 PlayerSlide에 연결합니다. 현재 기본 지속 시간은 서버 데이터의 0.4초이고, 시작 시 실제 이동 방향과 버프가 반영된 달리기 속도를 고정합니다. 막히지 않은 거리는 속도×지속 시간이며 벽·게이트에서 서버가 중단할 수 있습니다. 피해는 캐릭터별 공격력에 시작 시 버프를 반영한 값의 100%로 서버가 계산하며, 클라이언트는 타격·피해량을 확정하지 않습니다.
 
 본인은 지연 버퍼 없이 이동을 즉시 예측하고 거절·서버 상태로 보정합니다. 승인 전의 오래된 위치로 끌어당기지 않으며, 승인 상태의 방향·속도·지속 시간을 사용합니다. 다른 플레이어는 기존 125ms 상태 버퍼에서 위치와 slideSeconds를 같은 표시 시각으로 맞춥니다. 동일 slideSequence의 반복 수신으로 애니메이션을 되감지 않으며, 원격 위치 외삽은 슬라이딩 종료를 넘지 않습니다.
 
 슬라이딩 동안 일반 이동을 추가 적분하거나 사격·점프·스킬을 종료 후 실행하도록 예약하지 않습니다. 피격·사망·클리어·맵 epoch 변경·복귀·재도전·연결 리셋에서 예측과 상태를 정리합니다. 서버 확인 없이 예측을 유지하는 시간은 제한됩니다.
+
+## 역경직과 히트 리커버리
+
+역경직은 서버가 명중을 확정했을 때 공격자만 정지시키는 처리입니다. 현재 근접·슬라이딩 기본값은 0.05초이고 기본 사격은 0초입니다. 피해자는 자신의 피격 반응만 수행합니다. 공격별 hitstopSeconds=0은 정지를 끕니다. direct/projectile execution에 선택적으로 넣으며 누락은 0으로 정규화하고 buff에는 넣지 않습니다. 새 수치는 유한·비음수·float 표현 범위와 양수의 0 변환 방지를 검증하며 별도의 1초 상한은 없습니다.
+
+모든 캐릭터의 hitRecovery 기본값은 0입니다. 일반 피격 경직만 기본시간/(1+hitRecovery/100)으로 줄이고, 낙하·다운·기상 시간은 줄이지 않습니다. 클라이언트는 서버가 전달한 reactionDurationSeconds와 reactionSeconds로 피격 애니메이션을 맞추며 능력치를 다시 적용하지 않습니다. 마을의 공통 피격 미리보기도 일반 경직에만 같은 비율을 사용합니다.
+
+hitstopStartTimeMs는 serverTimeMs와 같은 steady_clock이고 발생번호·전체길이는 자연 종료 후에도 유지됩니다. 반복 상태가 새 정지 타이머를 만들지 않습니다. 취소 시 더 큰 발생번호와 길이 0을 받아 이전 이벤트를 복원하지 않습니다. 같은 serverTick의 더 새로운 snapshotSequence를 허용하며, 서버는 역경직 변화가 있는 tick의 끝에도 상태를 전달합니다.
+
+본인 이동·점프·사격·스킬·슬라이딩의 진행과 표시 시간은 정지 구간을 제외합니다. 슬라이딩 예측 대기 만료도 정지 시간을 소비하지 않습니다. 마지막 틱에 명중하면 slideSeconds가 전체 길이에 도달해도 서버 slideActive가 유지되고 역경직이 활성인 동안 마지막 슬라이딩 자세를 유지합니다. 정지 종료 또는 서버 비활성 상태에서 해제하며 추가 이동은 하지 않습니다. 원격 플레이어·몬스터의 위치·높이 보간, 측정 이동 속도와 동작 타이머도 같은 진행 시간에 맞춥니다. 중복·겹친 인접 정지 구간은 한 번만 제외합니다. 쿨타임·버프·UI·이미 발사된 탄환의 시간은 계속 흐릅니다. 정지 중 새 행동을 종료 후 실행하도록 예약하지 않습니다.
+
+늦게 도착한 확정 상태의 정지가 서버 시각상 이미 종료되었다면 나중 행동에 정지를 다시 적용하지 않습니다. 로컬 명중·피해 예측은 추가하지 않았으며 네트워크 지연의 영향과 실제 체감은 실행 검증이 필요합니다. 방·epoch 전환, 사망·클리어·복귀·재도전·연결 초기화에는 기존 개체 및 이력 정리 경로를 사용합니다.
 
 ## 스킬과 성장 상태
 
@@ -59,9 +71,9 @@
 
 ## 패킷·전달 주기
 
-전투 규칙·상태 JSON과 실시간 요청/응답/chunk의 version은 2입니다. ID 7 행동 입력은 version:u16, sequence:u32, action:u8, facingLeft:u8, mapEpoch:u32, moveSequence:u32, directionX:i8, directionY:i8, running:u8 순서로 19바이트입니다. ID 8 응답은 version:u16, sequence:u32, accepted:u8, serverTick:u64 순서로 15바이트입니다. 이 크기는 패킷 헤더를 제외한 필드 합계입니다.
+전투 규칙·상태 JSON과 실시간 요청/응답/chunk의 version은 3입니다. ID 7 행동 입력은 version:u16, sequence:u32, action:u8, facingLeft:u8, mapEpoch:u32, moveSequence:u32, directionX:i8, directionY:i8, running:u8 순서로 19바이트입니다. ID 8 응답은 version:u16, sequence:u32, accepted:u8, serverTick:u64 순서로 15바이트입니다. 이 크기는 패킷 헤더를 제외한 필드 합계입니다.
 
-실시간 플레이어 레코드는 기존 running 뒤에 slideActive:u8, slideSequence:u32와 slideSeconds·slideDurationSeconds·slideDirectionX·slideDirectionY·slideSpeed:f32를 추가해 101바이트입니다. 기존 SKL1 확장 순서는 유지하며 버전 1로 읽지 않습니다.
+실시간 공통 actor의 reactionSequence 뒤에는 hitRecovery:f32, reactionDurationSeconds:f32, hitstopRemainingSeconds:f32, hitstopSequence:u32, hitstopStartTimeMs:u64, hitstopDurationSeconds:f32를 추가합니다(28바이트). 플레이어 기본 레코드는 슬라이딩 25바이트를 포함해 129바이트입니다. 기존 SKL1 확장과 ID 7/8의 필드 순서는 유지하며 버전 1·2로 읽지 않습니다. 던전 world.version=1, 맵 version=5, PlayerSkills.schemaVersion=1은 유지합니다.
 
 [DungeonProtocol.h](ActionRPGClient/Network/DungeonProtocol.h)는 YAML 생성 결과입니다. ID 1~10을 유지하고 11~13에 실시간, 14에 플레이어 스킬 입력을 추가했습니다.
 
@@ -76,7 +88,7 @@
 | 13 | DungeonRealtimeChunk, unreliable |
 | 14 | DungeonSkillInput, reliable |
 
-실시간 구독은 월드 수신 뒤 version=2·enabled=1·현재 challenge로 요청합니다. 구독 결과의 roomId·dungeonId·version·challenge를 확인합니다. 첫 상태 조각은 reliable 구독 결과보다 먼저 도착할 수 있습니다.
+실시간 구독은 월드 수신 뒤 version=3·enabled=1·현재 challenge로 요청합니다. 구독 결과의 roomId·dungeonId·version·challenge를 확인합니다. 첫 상태 조각은 reliable 구독 결과보다 먼저 도착할 수 있습니다.
 
 현재 서버 목표는 **시뮬레이션 30Hz, 상태 전달 15Hz**입니다. 안내 필드는 `tickIntervalMs=33`, `snapshotIntervalMs=67`이지만 실제 tick dt는 1/30초입니다. 클라이언트는 tick 안내값 33~50ms와 전달 간격 50~100ms를 확인합니다. 33ms를 실제 dt로 누적하지 않습니다.
 

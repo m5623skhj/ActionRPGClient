@@ -281,7 +281,7 @@ namespace ActionRPG
         if (inRoomId == 0 || realtimeChallenge == 0 || GetConnectionState() != DungeonConnectionState::Connected) return;
         realtimeRoomId = inRoomId; realtimeRequested = true;
         DungeonProtocol::DungeonRealtimeRequest request;
-        request.version = 2; request.enabled = 1; request.challenge = realtimeChallenge;
+        request.version = 3; request.enabled = 1; request.challenge = realtimeChallenge;
         SendReliable(request);
     }
 
@@ -296,7 +296,7 @@ namespace ActionRPG
     {
         constexpr std::uint32_t MAX_REALTIME_BYTES = 48 * 1024;
         constexpr std::uint32_t REALTIME_CHUNK_BYTES = 768;
-        if (!realtimeRequested || receivingWorld || packet.version != 2 || packet.challenge != realtimeChallenge
+        if (!realtimeRequested || receivingWorld || packet.version != 3 || packet.challenge != realtimeChallenge
             || packet.roomId != realtimeRoomId || packet.dungeonId == 0 || packet.mapEpoch == 0
             || packet.snapshotSequence == 0 || packet.serverTimeMs == 0 || packet.state > 3
             || packet.mapId.empty() || packet.mapId.size() > 64 || packet.mapId.find('\0') != std::string::npos
@@ -365,7 +365,7 @@ namespace ActionRPG
 
     bool DungeonClient::SendAction(DungeonProtocol::DungeonActionInput& inAction)
     {
-        if (!combatPolling || receivingWorld || inAction.version != 2 || inAction.sequence == 0
+        if (!combatPolling || receivingWorld || inAction.version != 3 || inAction.sequence == 0
             || inAction.action < 1 || inAction.action > 3 || inAction.facingLeft > 1 || inAction.mapEpoch == 0
             || inAction.running > 1 || inAction.directionX < -1 || inAction.directionX > 1
             || inAction.directionY < -1 || inAction.directionY > 1) return false;
@@ -477,7 +477,7 @@ namespace ActionRPG
                 DungeonProtocol::DungeonRealtimeResult packet; packet.BufferToPacket(*buffer);
                 if (buffer->GetBufferError() != 0 || buffer->GetUseSize() != 0) { invalidPacket = true; break; }
                 if (!realtimeRequested || packet.challenge != realtimeChallenge || packet.roomId != realtimeRoomId) break;
-                if (packet.version != 2 || packet.accepted != 1 || packet.dungeonId == 0
+                if (packet.version != 3 || packet.accepted != 1 || packet.dungeonId == 0
                     // Tick hints are rounded milliseconds: 20Hz=50ms, 30Hz=33ms (actual dt=1/30s).
                     || (packet.tickIntervalMs != 50 && packet.tickIntervalMs != 33)
                     || packet.snapshotIntervalMs < 50 || packet.snapshotIntervalMs > 100
@@ -524,7 +524,7 @@ namespace ActionRPG
             case DungeonProtocol::PacketType::DUNGEON_ACTION_RESULT:
             {
                 DungeonProtocol::DungeonActionResult packet; packet.BufferToPacket(*buffer);
-                if (!combatPolling || packet.version != 2 || packet.sequence == 0 || packet.accepted > 1) invalidPacket = true;
+                if (!combatPolling || packet.version != 3 || packet.sequence == 0 || packet.accepted > 1) invalidPacket = true;
                 else events.emplace_back(DungeonActionResultEvent{packet.sequence, packet.accepted != 0, packet.serverTick});
                 break;
             }

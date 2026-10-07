@@ -104,6 +104,7 @@ namespace ActionRPG
         }
         void ResetMovementSpeeds() { walkSpeed = DEFAULT_WALK_SPEED; runSpeed = DEFAULT_RUN_SPEED; }
         void ConfigureMovementSpeeds(float inWalkSpeed, float inRunSpeed);
+        void ConfigureHitRecovery(float inHitRecovery);
         void ConfigureJumpSpeed(const IniDocument& inDefinitions, std::uint32_t inCharacterId);
         void PredictAttackFacing(std::uint32_t inSequence, bool inSkill = false);
         void ResolvePredictedAttackFacing(std::uint32_t inSequence, bool inAccepted);
@@ -128,6 +129,7 @@ namespace ActionRPG
         void PrepareCommandSkill();
         [[nodiscard]] bool HasCombatState() const { return combatState.has_value(); }
         [[nodiscard]] bool GetFacingLeft() const { return facingLeft; }
+        [[nodiscard]] bool IsHitstopped() const;
         [[nodiscard]] bool IsCombatDead() const { return combatState && combatState->hp == 0; }
 
     protected:
@@ -138,6 +140,8 @@ namespace ActionRPG
         Character(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,
             D2DRenderer& inRenderer, const CharacterAnimationSet& inAnimations);
 
+        [[nodiscard]] float GetHitReactionDuration(float inBaseSeconds) const
+        { return inBaseSeconds / (1.0f + hitRecovery / 100.0f); }
         void SetFacingLeft(bool inFacingLeft) { facingLeft = inFacingLeft; }
         void SetPresentationHeight(float inHeight) { height = inHeight; }
 
@@ -216,6 +220,7 @@ namespace ActionRPG
         JumpPhase jumpPhase{ JumpPhase::Grounded };
         HitPhase hitPhase{ HitPhase::None };
         float knockdownHoldRemainingSeconds{};
+        float hitRecovery{}, hitPresentationSeconds{}, hitReactionDurationSeconds{};
         bool airAttack{};
         bool attackProjectileQueued{};
         bool runningEnabled = true;
@@ -265,7 +270,7 @@ namespace ActionRPG
         bool bufferedPresentation{}, combatAnimationChanged{true};
         const SpriteAnimation* lastCombatAnimation{};
         float lastCombatAnimationSeconds{}, movementAnimationScale{1.0f};
-        float combatPresentationSeconds{}, deathPresentationSeconds{};
+        float combatPresentationSeconds{}, combatWallSeconds{}, deathPresentationSeconds{};
         std::deque<CharacterProjectileRequest> pendingProjectileRequests;
     };
 }

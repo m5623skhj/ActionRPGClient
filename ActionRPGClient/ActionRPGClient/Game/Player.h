@@ -53,6 +53,7 @@ namespace ActionRPG
             std::string id;
             bool airborne{};
             float seconds{};
+            std::uint32_t hitstopSequence{};
         };
         // Per-actor render cache, accessed only on the game thread and reset with the actor.
         mutable std::optional<SkillPlayback> skillPlayback;

@@ -14,9 +14,19 @@ direct의 마지막 활성 시간은 (endFrame+1)/fps이며 한 시전의 중복
 
 | 유형 | execution | 모드별 추가 필드 |
 |---|---|---|
-| direct | damage, depthRadius | attackRects: `{index, rect:{x,y,width,height}}` 배열 |
-| projectile | damage, speed, radius, range | spawn:{x,y,height}, yawDegrees, pitchDegrees |
+| direct | damage, depthRadius, hitstopSeconds(선택) | attackRects: `{index, rect:{x,y,width,height}}` 배열 |
+| projectile | damage, speed, radius, range, hitstopSeconds(선택) | spawn:{x,y,height}, yawDegrees, pitchDegrees |
 | buff | target:self, stat:damageMultiplier 또는 movementMultiplier, multiplier, durationSeconds, refresh:replaceDuration | 없음 |
+
+`PlayerSkills.schemaVersion`과 작업 schemaVersion은 1을 유지합니다.
+`execution.hitstopSeconds`는 direct/projectile의 선택 필드이며 단위는 초입니다. 누락은 0으로 정규화하고 명시한 0은 보존합니다.
+편집기의 새 direct 기본값은 0.05, 새 projectile은 0입니다. 기존 작업의 누락을 새 direct 기본값으로 바꾸지 않습니다.
+불러온 기존 작업은 다음 저장에 0을 포함하며, 공용 JSON 출력은 두 공격 유형에 이 필드를 명시합니다. buff에는 허용하지 않습니다.
+
+수치는 유한·비음수이며 IEEE754 binary32로 변환해 유한한 값이어야 합니다.
+float 최대값 3.4028234663852886e38을 넘거나, 양수인데 float 변환 후 0이 되는 값은 거절합니다. 임의의 게임 시간 상한은 없습니다.
+null·문자열을 누락으로 취급하지 않습니다. 적용 대상은 명중한 공격자이며 대상의 경직이나 버프 지속시간이 아닙니다.
+`hitRecovery`는 일반 경직만 단축하는 별도 공통 캐릭터 능력치이고, PlayerSkills나 이 편집기의 출력 필드에 추가하지 않습니다.
 
 공격 rect의 x는 오른쪽 기준 전방 X, y는 캐릭터 발 기준 아래쪽 경계의 높이, width/height는 양수 월드 크기입니다.
 서버에서 왼쪽 rect의 X 구간은 [-x-width, -x], 높이 구간은 [actorHeight+y, actorHeight+y+height]입니다.

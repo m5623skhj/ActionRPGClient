@@ -11,7 +11,7 @@ namespace ActionRPG
 {
     struct SlideDefinition
     {
-        float durationSeconds{};
+        float durationSeconds{}, hitRecovery{}, hitstopSeconds{};
         std::uint32_t attackPower{};
         std::string motionId;
     };

@@ -102,7 +102,7 @@ namespace ActionRPG::DungeonProtocol
         [[nodiscard]] ::PacketId GetPacketId() const override;
         void BufferToPacket(NetBuffer& inBuffer) override;
         void PacketToBuffer(NetBuffer& outBuffer) override;
-        std::uint16_t version{2};
+        std::uint16_t version{3};
         std::uint32_t sequence{};
         std::uint8_t action{};
         std::uint8_t facingLeft{};

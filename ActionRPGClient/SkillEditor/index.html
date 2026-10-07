@@ -24,7 +24,11 @@
    <label>입력 커맨드<input id="command" placeholder="Right Right Z"></label><small>Left / Right / Up / Down / Z / X / C / V</small>
    <div class="row"><label>입력 간격 (초)<input type="number" data-bind="input.maxStepSeconds" min="0.01" max="1.5" step="0.01"></label>
    <label>쿨다운 (초)<input type="number" data-bind="cooldownSeconds" min="0" max="86400" step="0.05"></label></div>
-   <section data-type="direct projectile"><label>피해량<input type="number" data-bind="execution.damage" min="1" max="1000000" step="1"></label></section>
+   <section data-type="direct projectile">
+    <label>피해량<input type="number" data-bind="execution.damage" min="1" max="1000000" step="1"></label>
+    <label>역경직 시간 (초)<input type="number" data-bind="execution.hitstopSeconds" min="0" step="any"></label>
+    <small>명중 시 공격자만 정지합니다. 0은 비활성입니다.</small>
+   </section>
    <section data-type="direct"><label>지면 Y 판정 반경<input type="number" data-bind="execution.depthRadius" min="0.1" max="500" step="0.1"></label></section>
    <section data-type="projectile">
     <label>총속도 (월드 단위/초)<input type="number" data-bind="execution.speed" min="1" max="4000"></label>
