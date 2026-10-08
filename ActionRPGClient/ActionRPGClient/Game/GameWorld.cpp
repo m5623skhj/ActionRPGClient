@@ -354,6 +354,7 @@ namespace ActionRPG
         , player(Vector2{ 640.0f, 640.0f }, inAssetCatalog, inRenderer)
         , projectileSystem(inAssetCatalog)
         , playerSkillPresentation(inAssetCatalog, inRenderer)
+        , combatHitAnimation(inRenderer, inAssetCatalog, animationDefinitions, "CombatHitSpark")
         , skillUi(inAssetCatalog, inRenderer)
         , assetCatalog(inAssetCatalog)
         , renderer(inRenderer)
@@ -577,6 +578,12 @@ namespace ActionRPG
         if (monsters != dungeonMonsters.end())
             for (const auto& monster : monsters->second)
                 if (monster->GetGroundPosition().y > player.GetGroundPosition().y) monster->Render(inRenderer, camera);
+        if (dungeonEntryState == DungeonEntryState::Entered)
+            for (const auto& effect : combatHitEffects)
+            {
+                const auto position = camera.WorldToScreen(effect.position);
+                effect.animation.Draw(inRenderer, position.x, position.y - effect.height, false);
+            }
         inRenderer.PopAxisAlignedClip();
         RenderCombatHud(inRenderer);
         if (!dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
@@ -1143,6 +1150,7 @@ namespace ActionRPG
             ApplyDungeonMap(snapshot.mapId, self->position);
             combatBuffer.Clear(); presentationSnapshot.reset();
         }
+        if (combatSnapshot) QueueCombatHitEffects(*combatSnapshot, snapshot, true);
         appliedMapEpoch = pendingMapEpoch = snapshot.mapEpoch;
         const auto& rules = dungeonWorld->GetCombatRules();
         // Old movement acknowledgements affect only position correction, not HP/entities/clear state.
@@ -1283,7 +1291,11 @@ namespace ActionRPG
         if (combatInputWindowSeconds >= 1.0f) { combatInputWindowSeconds = 0.0f; combatInputsThisSecond = 0; }
         combatSnapshotAge = std::min(0.25f, combatSnapshotAge + inDeltaSeconds);
         rejectedActionSeconds = std::max(0.0f, rejectedActionSeconds - inDeltaSeconds);
-        presentationSnapshot = combatBuffer.Sample();
+        for (auto& effect : combatHitEffects) (void)effect.animation.AdvanceOnce(inDeltaSeconds);
+        std::erase_if(combatHitEffects, [](const auto& effect) { return effect.animation.IsFinished(); });
+        auto sampled = combatBuffer.Sample();
+        if (sampled && presentationSnapshot) QueueCombatHitEffects(*presentationSnapshot, *sampled, false);
+        presentationSnapshot = std::move(sampled);
         if (!presentationSnapshot || !dungeonWorld) return;
         const auto& rules = dungeonWorld->GetCombatRules();
         for (const auto& state : presentationSnapshot->players)
@@ -1299,6 +1311,44 @@ namespace ActionRPG
             for (const auto& state : presentationSnapshot->monsters)
                 for (const auto& actor : monsters->second)
                     if (actor->GetInstanceId() == state.instanceId) actor->ApplyCombatState(state, rules, true, presentationSnapshot->mapEpoch);
+    }
+
+    // Server reactionSequence advances only on actual damage. HP arrives before buffered reactions,
+    // so remote contact effects follow the new reaction even if HP already changed in an earlier sample.
+    // Repeated snapshots, first observations and map changes never replay a contact effect.
+    void GameWorld::QueueCombatHitEffects(const DungeonCombatSnapshot& inPrevious,
+        const DungeonCombatSnapshot& inCurrent, const bool inLocalPlayer)
+    {
+        if (inPrevious.roomId != inCurrent.roomId || inPrevious.mapId != inCurrent.mapId
+            || inPrevious.mapEpoch != inCurrent.mapEpoch) return;
+        const auto queue = [this](const CombatActorState& before, const CombatActorState& after, float bodyHeight)
+        {
+            if (after.reactionSequence <= before.reactionSequence || after.hp > before.hp) return;
+            constexpr std::size_t MAX_HIT_EFFECTS = 64;
+            if (combatHitEffects.size() == MAX_HIT_EFFECTS) combatHitEffects.erase(combatHitEffects.begin());
+            combatHitEffects.push_back({ combatHitAnimation, after.position, after.height + bodyHeight });
+        };
+        for (const auto& actor : inCurrent.players)
+        {
+            if ((actor.playerId == localPlayerId) != inLocalPlayer) continue;
+            const auto before = std::find_if(inPrevious.players.begin(), inPrevious.players.end(),
+                [&actor](const auto& value) { return value.playerId == actor.playerId; });
+            if (before != inPrevious.players.end()) queue(*before, actor, 96.0f);
+        }
+        if (inLocalPlayer) return;
+        for (const auto& actor : inCurrent.monsters)
+        {
+            const auto before = std::find_if(inPrevious.monsters.begin(), inPrevious.monsters.end(),
+                [&actor](const auto& value) { return value.instanceId == actor.instanceId; });
+            if (before != inPrevious.monsters.end())
+            {
+                const auto& clips = monsterCatalog.Get(actor.dataId).clips;
+                const auto idle = clips.find(MonsterMotion::Idle);
+                const float bodyHeight = idle != clips.end() && !idle->second.frames.empty()
+                    ? idle->second.frames.front().pivot.y * idle->second.scale * 0.5f : 48.0f;
+                queue(*before, actor, bodyHeight);
+            }
+        }
     }
 
     void GameWorld::RenderCombatProjectiles(D2DRenderer& inRenderer) const
@@ -2119,7 +2169,7 @@ namespace ActionRPG
         mapBackground.Configure(room.map);
         transitionZones = room.map.transitionZones;
         dungeonMapId = inMapId;
-        combatBuffer.Clear(); presentationSnapshot.reset();
+        combatBuffer.Clear(); presentationSnapshot.reset(); combatHitEffects.clear();
         combatPlayers.clear(); combatSnapshot.reset(); combatSnapshotAge = 0.0f;
         skillUi.CancelDrag();
         remotePlayers.clear();
@@ -2148,7 +2198,7 @@ namespace ActionRPG
         dungeonClient.Stop();
         const bool restoreTown = dungeonWorld.has_value();
         dungeonWorld.reset(); dungeonMonsters.clear(); dungeonMapId.clear();
-        combatBuffer.Clear(); presentationSnapshot.reset(); appliedMapEpoch = pendingMapEpoch = 0;
+        combatBuffer.Clear(); presentationSnapshot.reset(); combatHitEffects.clear(); appliedMapEpoch = pendingMapEpoch = 0;
         combatPlayers.clear(); combatSnapshot.reset(); hasCombatTick = dungeonCleared = false;
         lastCombatTick = 0; combatActionSequence = lastCombatActionResult = combatInputsThisSecond = 0;
         combatInputWindowSeconds = combatSnapshotAge = rejectedActionSeconds = 0.0f;

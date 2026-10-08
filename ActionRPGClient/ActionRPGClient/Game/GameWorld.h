@@ -123,6 +123,8 @@ namespace ActionRPG
         void ApplyCombatSnapshot(std::string_view inJson);
         void SendCombatActions(const InputState& inInput);
         void UpdateDungeonCombat(float inDeltaSeconds);
+        void QueueCombatHitEffects(const DungeonCombatSnapshot& inPrevious,
+            const DungeonCombatSnapshot& inCurrent, bool inLocalPlayer);
         void RenderCombatProjectiles(D2DRenderer& inRenderer) const;
         void RenderCombatHud(D2DRenderer& inRenderer) const;
         void ProcessPlayerHits();
@@ -173,6 +175,14 @@ namespace ActionRPG
         InputCommandQueue commandQueue;
 
         PlayerSkillPresentation playerSkillPresentation;
+        SpriteAnimation combatHitAnimation;
+        struct CombatHitEffect
+        {
+            SpriteAnimation animation;
+            Vector2 position;
+            float height{};
+        };
+        std::vector<CombatHitEffect> combatHitEffects;
         SkillUi skillUi;
         std::unordered_map<std::uint32_t,std::string> skillActionIds;
         std::uint64_t lastSkillStateTick{};
