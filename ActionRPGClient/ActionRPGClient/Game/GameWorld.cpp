@@ -453,7 +453,7 @@ namespace ActionRPG
         if (inventoryAction.operation != InventoryOperation::None)
         {
             const char* action = inventoryAction.operation == InventoryOperation::Equip ? "Equip"
-                : inventoryAction.operation == InventoryOperation::Unequip ? "Unequip" : "Discard";
+                : inventoryAction.operation == InventoryOperation::Unequip ? "Unequip" : "Use";
             townClient.ChangeInventory(inventoryAction.requestId, inventoryAction.expectedRevision,
                 action, inventoryAction.instanceId, inventoryAction.quantity);
         }
@@ -1813,8 +1813,6 @@ namespace ActionRPG
         }
         if (inInput.WasPressed(InputKey::ToggleSystemMenu))
         {
-            if (systemUiPage == SystemUiPage::Inventory && inventoryUi.HandleEscape())
-            { uiClickConsumed = true; return; }
             if (systemUiPage == SystemUiPage::Closed)
             {
                 SetSystemUiPage(SystemUiPage::Menu);

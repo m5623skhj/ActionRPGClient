@@ -22,7 +22,7 @@ namespace ActionRPG
 
     enum class InventoryCategory : std::uint8_t { Equipment, Material, Consumable, Quest };
     enum class EquipmentSlot : std::uint8_t { Weapon, Top, Bottom, Shoes, Ring, Necklace, Bracelet };
-    enum class InventoryOperation : std::uint8_t { None, Equip, Unequip, Discard };
+    enum class InventoryOperation : std::uint8_t { None, Equip, Unequip, Use };
 
     // Presentation data only. The server owns quantities, restrictions and persistent IDs.
     struct InventoryItemView
@@ -66,7 +66,6 @@ namespace ActionRPG
         void Invalidate(std::wstring inMessage);
         void Reset();
         void Close();
-        [[nodiscard]] bool HandleEscape();
         [[nodiscard]] InventoryUiAction Update(float inDeltaSeconds, const InputState& inInput,
             float inWidth, float inHeight, bool inVisible);
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inDungeon) const;
@@ -84,10 +83,9 @@ namespace ActionRPG
         std::uint64_t expectedCharacterId{};
         std::uint32_t characterDefinitionId{}, characterLevel{};
         std::string stateRequestId;
-        enum class DiscardStage { Closed, Quantity, Confirmation };
         struct Layout
         {
-            D2D1_RECT_F panel, detail, detailText, discard, use, sell, status;
+            D2D1_RECT_F panel, status;
             std::array<D2D1_RECT_F, 4> tabs;
             std::array<D2D1_RECT_F, 40> bags;
             std::array<D2D1_RECT_F, 7> equipment;
@@ -98,7 +96,7 @@ namespace ActionRPG
         [[nodiscard]] InventoryUiAction BeginRequest(InventoryOperation inOperation,
             const std::string& inId, std::uint32_t inQuantity);
         [[nodiscard]] std::wstring Details() const;
-        [[nodiscard]] std::optional<std::uint32_t> DiscardQuantity() const;
+        [[nodiscard]] D2D1_RECT_F TooltipBounds(float inWidth, float inHeight) const;
         void DrawItem(D2DRenderer& inRenderer, const D2D1_RECT_F& inRect,
             const InventoryItemView* inItem, std::wstring_view inLabel = {}) const;
 
@@ -107,10 +105,10 @@ namespace ActionRPG
         InventorySnapshotView state;
         std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> icons;
         std::size_t tab{};
-        std::string selected, pendingRequest, discardItem;
+        std::string hovered, pendingRequest;
+        D2D1_RECT_F hoveredRect{};
         bool ready{}, connected{}, stateRequested{};
-        float pendingSeconds{}, stateWaitSeconds{}, detailScroll{};
-        DiscardStage discardStage{DiscardStage::Closed};
-        std::wstring quantityText, status{L"인벤토리 상태를 기다리는 중"};
+        float pendingSeconds{}, stateWaitSeconds{}, tooltipScroll{}, mouseX{};
+        std::wstring status{L"인벤토리 상태를 기다리는 중"};
     };
 }

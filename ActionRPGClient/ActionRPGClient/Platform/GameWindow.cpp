@@ -217,8 +217,17 @@ namespace ActionRPG
             return 0;
 
         case WM_MOUSEMOVE:
+        {
             mouseX = static_cast<float>(GET_X_LPARAM(inLParam));
             mouseY = static_cast<float>(GET_Y_LPARAM(inLParam));
+            TRACKMOUSEEVENT mouseTracking{sizeof(TRACKMOUSEEVENT), TME_LEAVE, windowHandle, 0};
+            TrackMouseEvent(&mouseTracking);
+            return 0;
+        }
+
+        case WM_MOUSELEAVE:
+            // Do not keep hover information at the last in-window position.
+            mouseX = mouseY = -1.0f;
             return 0;
 
         case WM_LBUTTONDOWN:
@@ -263,6 +272,7 @@ namespace ActionRPG
             return 0;
 
         case WM_KILLFOCUS:
+            mouseX = mouseY = -1.0f;
             leftMouseDown = false; pendingCancelDrag = true;
             pendingLeftMouseReleased = pendingRightMousePressed = false;
             if (GetCapture() == windowHandle) ReleaseCapture();

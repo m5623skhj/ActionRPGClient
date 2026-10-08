@@ -7,7 +7,6 @@
 #include <d2d1_1helper.h>
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -34,11 +33,12 @@ namespace
             13.0f, false, true);
     }
 
-    D2D1_RECT_F Dialog(float inWidth, float inHeight)
+    float TextHeight(const std::wstring& inText, const float inWidth)
     {
-        const float width = std::min(440.0f, inWidth - 32.0f);
-        const float left = (inWidth - width) * 0.5f, top = (inHeight - 244.0f) * 0.5f;
-        return D2D1::RectF(left, top, left + width, top + 244.0f);
+        // Use a full-width glyph estimate, consistent with the existing 14px UI text.
+        const float columns = std::max(1.0f, inWidth / 14.0f);
+        return (static_cast<float>(inText.size()) / columns
+            + static_cast<float>(std::count(inText.begin(), inText.end(), L'\n')) + 1.0f) * 22.0f;
     }
 }
 
@@ -53,11 +53,10 @@ namespace ActionRPG
         assembly.reset();
         expectedCharacterId = characterDefinitionId = characterLevel = 0;
         stateRequestId.clear();
-        selected.clear();
-        discardItem.clear();
+        hovered.clear();
         pendingRequest.clear();
         ready = connected = stateRequested = false;
-        pendingSeconds = stateWaitSeconds = detailScroll = 0.0f;
+        pendingSeconds = stateWaitSeconds = tooltipScroll = 0.0f;
         tab = 0;
         icons.clear();
         Close();
@@ -242,16 +241,8 @@ namespace ActionRPG
 
     void InventoryUi::Close()
     {
-        discardStage = DiscardStage::Closed;
-        discardItem.clear();
-        quantityText.clear();
-    }
-
-    bool InventoryUi::HandleEscape()
-    {
-        if (discardStage == DiscardStage::Closed) return false;
-        Close();
-        return true;
+        hovered.clear();
+        tooltipScroll = 0.0f;
     }
 
     void InventoryUi::Invalidate(std::wstring inMessage)
@@ -304,7 +295,7 @@ namespace ActionRPG
             if (inState.equipment[index]) validate(*inState.equipment[index], true, index);
         if (!sameCharacter)
         {
-            selected.clear();
+            hovered.clear();
             pendingRequest.clear();
             icons.clear();
         }
@@ -312,7 +303,7 @@ namespace ActionRPG
         state = std::move(inState);
         ready = true;
         stateRequested = false;
-        if (!FindItem(selected)) selected.clear();
+        if (!FindItem(hovered)) hovered.clear();
         const auto loadIcon = [&](const InventoryItemView& item)
         {
             if (item.icon.empty() || icons.contains(item.icon)) return;
@@ -323,7 +314,7 @@ namespace ActionRPG
         };
         for (const auto& bag : state.bags) for (const auto& item : bag) if (item) loadIcon(*item);
         for (const auto& item : state.equipment) if (item) loadIcon(*item);
-        if (pendingRequest.empty()) status = L"좌클릭: 상세 / 장비 우클릭: 장착 / 장비창 우클릭: 해제";
+        if (pendingRequest.empty()) status = L"마우스 오버: 정보 / 우클릭: 사용·장착·해제 / 휠: 정보 스크롤";
     }
 
     void InventoryUi::ResolveRequest(const std::string& inRequestId, std::wstring inMessage,
@@ -363,7 +354,7 @@ namespace ActionRPG
             return {};
         }
         if (inOperation == InventoryOperation::Unequip && !equipped) return {};
-        if (inOperation == InventoryOperation::Discard && (equipped || inQuantity == 0 || inQuantity > item->quantity))
+        if (inOperation == InventoryOperation::Use && (equipped || item->equipmentSlot || inQuantity != 1 || item->quantity == 0))
             return {};
         try { pendingRequest = CharacterInventoryJson::NewRequestId(); }
         catch (const std::exception&) { status = L"요청을 생성하지 못했습니다. 다시 시도해 주세요"; return {}; }
@@ -372,7 +363,7 @@ namespace ActionRPG
         return {inOperation, state.revision, pendingRequest, inId, inQuantity, false};
     }
 
-    /** Keep 8x5 and all seven equipment cells visible; compact view puts detail text below both grids. */
+    /** Keep 8x5 bags and seven equipment cells visible without reserving a fixed detail panel. */
     InventoryUi::Layout InventoryUi::CalculateLayout(const float inWidth, const float inHeight) const
     {
         Layout result;
@@ -382,12 +373,9 @@ namespace ActionRPG
         result.panel = D2D1::RectF(left, top, left + width, top + height);
         const float x = left + 12.0f, right = left + width - 12.0f;
         const float gridTop = top + 76.0f, bottom = top + height - 30.0f;
-        const float detailHeight = result.compact ? std::clamp(height * 0.20f, 64.0f, 108.0f) : 0.0f;
-        const float gridBottom = result.compact ? bottom - detailHeight - 8.0f : bottom;
         constexpr float GAP = 4.0f;
-        const float cell = std::min(result.compact ? 48.0f : 56.0f,
-            std::min((gridBottom - gridTop - 4.0f * GAP) / 5.0f,
-                (width - (result.compact ? 200.0f : 430.0f) - 7.0f * GAP) / 8.0f));
+        const float cell = std::min(64.0f, std::min((bottom - gridTop - 4.0f * GAP) / 5.0f,
+            (width - 200.0f - 7.0f * GAP) / 8.0f));
         const float bagWidth = 8.0f * cell + 7.0f * GAP;
         for (std::size_t index = 0; index < result.bags.size(); ++index)
         {
@@ -400,8 +388,8 @@ namespace ActionRPG
             result.tabs[index] = D2D1::RectF(tabX, gridTop - 32.0f, tabX + bagWidth / 4.0f - 2.0f, gridTop - 6.0f);
         }
         const float equipmentLeft = x + bagWidth + 16.0f;
-        const float equipmentWidth = result.compact ? right - equipmentLeft : 176.0f;
-        const float equipmentHeight = std::min(76.0f, (gridBottom - gridTop - 3.0f * GAP) / 4.0f);
+        const float equipmentWidth = std::min(216.0f, right - equipmentLeft);
+        const float equipmentHeight = std::min(84.0f, (bottom - gridTop - 3.0f * GAP) / 4.0f);
         for (std::size_t index = 0; index < result.equipment.size(); ++index)
         {
             const float slotX = equipmentLeft + (index % 2) * (equipmentWidth + GAP) / 2.0f;
@@ -409,44 +397,30 @@ namespace ActionRPG
             result.equipment[index] = D2D1::RectF(slotX, slotY,
                 slotX + (equipmentWidth - GAP) / 2.0f, slotY + equipmentHeight);
         }
-        result.detail = result.compact ? D2D1::RectF(x, bottom - detailHeight, right, bottom)
-            : D2D1::RectF(equipmentLeft + equipmentWidth + 16.0f, gridTop, right, bottom);
-        if (result.compact)
-        {
-            result.detailText = result.detail;
-            result.detailText.right -= 96.0f;
-            result.discard = D2D1::RectF(right - 90.0f, result.detail.top, right, result.detail.top + 28.0f);
-            result.use = D2D1::RectF(right - 90.0f, result.detail.top + 32.0f, right - 47.0f, result.detail.top + 60.0f);
-            result.sell = D2D1::RectF(right - 43.0f, result.detail.top + 32.0f, right, result.detail.top + 60.0f);
-        }
-        else
-        {
-            result.detailText = result.detail;
-            result.detailText.bottom -= 72.0f;
-            result.discard = D2D1::RectF(result.detail.left, bottom - 64.0f, right, bottom - 36.0f);
-            const float middle = (result.detail.left + right) * 0.5f;
-            result.use = D2D1::RectF(result.detail.left, bottom - 28.0f, middle - 2.0f, bottom);
-            result.sell = D2D1::RectF(middle + 2.0f, bottom - 28.0f, right, bottom);
-        }
         result.status = D2D1::RectF(x, bottom + 6.0f, right, top + height - 4.0f);
         return result;
     }
 
-    std::optional<std::uint32_t> InventoryUi::DiscardQuantity() const
+    D2D1_RECT_F InventoryUi::TooltipBounds(const float inWidth, const float inHeight) const
     {
-        std::string digits;
-        if (quantityText.empty() || quantityText.size() > 10) return std::nullopt;
-        for (const auto value : quantityText)
+        constexpr float MARGIN = 12.0f;
+        const float width = std::min(360.0f, inWidth - 2.0f * MARGIN);
+        const float height = std::min(std::min(440.0f, inHeight - 2.0f * MARGIN),
+            std::max(120.0f, TextHeight(Details(), width - 24.0f) + 48.0f));
+        float left = hoveredRect.right + 8.0f, top = hoveredRect.top;
+        if (left + width > inWidth - MARGIN)
         {
-            if (value < L'0' || value > L'9') return std::nullopt;
-            digits.push_back(static_cast<char>(value));
+            if (hoveredRect.left - 8.0f - width >= MARGIN) left = hoveredRect.left - 8.0f - width;
+            else
+            {
+                left = mouseX + 16.0f;
+                if (hoveredRect.bottom + 8.0f + height <= inHeight - MARGIN) top = hoveredRect.bottom + 8.0f;
+                else if (hoveredRect.top - 8.0f - height >= MARGIN) top = hoveredRect.top - 8.0f - height;
+            }
         }
-        std::uint32_t quantity{};
-        const auto result = std::from_chars(digits.data(), digits.data() + digits.size(), quantity);
-        const auto item = FindItem(discardItem);
-        if (result.ec != std::errc{} || result.ptr != digits.data() + digits.size() || !item
-            || quantity == 0 || quantity > item->quantity) return std::nullopt;
-        return quantity;
+        left = std::clamp(left, MARGIN, inWidth - MARGIN - width);
+        top = std::clamp(top, MARGIN, inHeight - MARGIN - height);
+        return D2D1::RectF(left, top, left + width, top + height);
     }
 
     InventoryUiAction InventoryUi::Update(const float inDeltaSeconds, const InputState& inInput,
@@ -482,95 +456,57 @@ namespace ActionRPG
             action.requestState = true;
             status = L"최신 인벤토리와 아이템 정의를 확인하는 중… 변경할 수 없습니다";
         }
-        if (discardStage != DiscardStage::Closed)
-        {
-            const auto dialog = Dialog(inWidth, inHeight);
-            const float middle = (dialog.left + dialog.right) * 0.5f;
-            const auto cancel = D2D1::RectF(dialog.left + 16.0f, dialog.bottom - 48.0f, middle - 8.0f, dialog.bottom - 16.0f);
-            const auto accept = D2D1::RectF(middle + 8.0f, dialog.bottom - 48.0f, dialog.right - 16.0f, dialog.bottom - 16.0f);
-            if (discardStage == DiscardStage::Quantity)
-                for (const auto value : inInput.textInput)
-                    if (value == L'\b' && !quantityText.empty()) quantityText.pop_back();
-                    else if (value >= L'0' && value <= L'9' && quantityText.size() < 10) quantityText += value;
-            if (inInput.leftMousePressed)
-            {
-                if (Contains(cancel, inInput.clickX, inInput.clickY)) Close();
-                else if (Contains(accept, inInput.clickX, inInput.clickY) && DiscardQuantity())
-                {
-                    if (discardStage == DiscardStage::Quantity) discardStage = DiscardStage::Confirmation;
-                    else
-                    {
-                        action = BeginRequest(InventoryOperation::Discard, discardItem, *DiscardQuantity());
-                        Close();
-                    }
-                }
-            }
-            return action; // Confirmation never shares clicks or Enter with the page underneath.
-        }
         const auto layout = CalculateLayout(inWidth, inHeight);
         if (inInput.leftMousePressed)
-        {
             for (std::size_t index = 0; index < layout.tabs.size(); ++index)
                 if (Contains(layout.tabs[index], inInput.clickX, inInput.clickY))
                 {
                     tab = index;
-                    selected.clear();
-                    detailScroll = 0.0f;
+                    Close();
                     return action;
                 }
-            for (std::size_t index = 0; index < layout.bags.size(); ++index)
-                if (Contains(layout.bags[index], inInput.clickX, inInput.clickY))
-                {
-                    selected = state.bags[tab][index] ? state.bags[tab][index]->instanceId : std::string{};
-                    detailScroll = 0.0f;
-                }
-            for (std::size_t index = 0; index < layout.equipment.size(); ++index)
-                if (Contains(layout.equipment[index], inInput.clickX, inInput.clickY))
-                {
-                    selected = state.equipment[index] ? state.equipment[index]->instanceId : std::string{};
-                    detailScroll = 0.0f;
-                }
-            bool equipped = false;
-            if (FindItem(selected, &equipped) && !equipped && ready && connected && pendingRequest.empty()
-                && Contains(layout.discard, inInput.clickX, inInput.clickY))
+
+        mouseX = inInput.mouseX;
+        std::string nextHover;
+        for (std::size_t index = 0; index < layout.bags.size(); ++index)
+            if (Contains(layout.bags[index], inInput.mouseX, inInput.mouseY) && state.bags[tab][index])
             {
-                discardItem = selected;
-                quantityText = L"1";
-                discardStage = DiscardStage::Quantity;
+                nextHover = state.bags[tab][index]->instanceId;
+                hoveredRect = layout.bags[index];
             }
+        for (std::size_t index = 0; index < layout.equipment.size(); ++index)
+            if (Contains(layout.equipment[index], inInput.mouseX, inInput.mouseY) && state.equipment[index])
+            {
+                nextHover = state.equipment[index]->instanceId;
+                hoveredRect = layout.equipment[index];
+            }
+        if (hovered != nextHover) tooltipScroll = 0.0f;
+        hovered = std::move(nextHover);
+        if (!hovered.empty())
+        {
+            const auto tooltip = TooltipBounds(inWidth, inHeight);
+            const float maxScroll = std::max(0.0f, TextHeight(Details(), tooltip.right - tooltip.left - 24.0f)
+                - (tooltip.bottom - tooltip.top - 48.0f));
+            tooltipScroll = std::clamp(tooltipScroll - inInput.mouseWheelDelta / 120.0f * 40.0f, 0.0f, maxScroll);
         }
-        if (discardStage != DiscardStage::Closed) return action;
         if (inInput.rightMousePressed && ready && connected && pendingRequest.empty())
         {
-            if (tab == 0)
-                for (std::size_t index = 0; index < layout.bags.size(); ++index)
-                    if (Contains(layout.bags[index], inInput.rightClickX, inInput.rightClickY) && state.bags[0][index])
-                    {
-                        selected = state.bags[0][index]->instanceId;
-                        return BeginRequest(InventoryOperation::Equip, selected, 1);
-                    }
+            for (std::size_t index = 0; index < layout.bags.size(); ++index)
+                if (Contains(layout.bags[index], inInput.rightClickX, inInput.rightClickY) && state.bags[tab][index])
+                    return BeginRequest(tab == 0 ? InventoryOperation::Equip : InventoryOperation::Use,
+                        state.bags[tab][index]->instanceId, 1);
             for (std::size_t index = 0; index < layout.equipment.size(); ++index)
                 if (Contains(layout.equipment[index], inInput.rightClickX, inInput.rightClickY) && state.equipment[index])
-                {
-                    selected = state.equipment[index]->instanceId;
-                    return BeginRequest(InventoryOperation::Unequip, selected, 1);
-                }
+                    return BeginRequest(InventoryOperation::Unequip, state.equipment[index]->instanceId, 1);
         }
-        const auto detail = Details();
-        const float columns = std::max(1.0f, (layout.detailText.right - layout.detailText.left) / 14.0f);
-        const float textHeight = (detail.size() / columns + std::count(detail.begin(), detail.end(), L'\n') + 1) * 20.0f;
-        const float maxScroll = std::max(0.0f, textHeight - (layout.detailText.bottom - layout.detailText.top));
-        detailScroll = std::clamp(detailScroll, 0.0f, maxScroll);
-        if (Contains(layout.detailText, inInput.mouseX, inInput.mouseY) && inInput.mouseWheelDelta)
-            detailScroll = std::clamp(detailScroll - inInput.mouseWheelDelta / 120.0f * 40.0f, 0.0f, maxScroll);
         return action;
     }
 
     std::wstring InventoryUi::Details() const
     {
         bool equipped = false;
-        const auto item = FindItem(selected, &equipped);
-        if (!item) return L"아이템을 선택하면 상세 정보가 표시됩니다";
+        const auto item = FindItem(hovered, &equipped);
+        if (!item) return {};
         std::wstring text = item->name + L"\n" + item->description + L"\n";
         if (item->equipmentSlot)
         {
@@ -579,8 +515,11 @@ namespace ActionRPG
             text += L"장착 조건: " + (item->requirements.empty() ? std::wstring(L"없음") : item->requirements) + L"\n";
             if (!equipped && !item->canEquip) text += item->equipReason + L"\n";
         }
-        else text += L"수량: " + std::to_wstring(item->quantity) + L" / 최대 스택 " + std::to_wstring(item->maxStack) + L"\n";
-        return text + L"사용·판매·아이템 효과는 아직 지원하지 않습니다";
+        text += L"수량: " + std::to_wstring(item->quantity) + L" / 최대 스택 " + std::to_wstring(item->maxStack) + L"\n";
+        if (!connected) return text + L"연결이 끊겼습니다";
+        if (!ready) return text + L"최신 상태 확인 중";
+        if (!pendingRequest.empty()) return text + L"서버 응답 대기 중";
+        return text + (equipped ? L"우클릭: 해제" : item->equipmentSlot ? L"우클릭: 장착" : L"우클릭: 1개 사용");
     }
 
     void InventoryUi::DrawItem(D2DRenderer& inRenderer, const D2D1_RECT_F& inRect,
@@ -588,8 +527,8 @@ namespace ActionRPG
     {
         inRenderer.FillRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom, D2D1::ColorF(0.07f, 0.09f, 0.12f));
         inRenderer.DrawRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom,
-            D2D1::ColorF(inItem && inItem->instanceId == selected ? 1.0f : 0.40f,
-                inItem && inItem->instanceId == selected ? 0.75f : 0.47f, 0.52f));
+            D2D1::ColorF(inItem && inItem->instanceId == hovered ? 1.0f : 0.40f,
+                inItem && inItem->instanceId == hovered ? 0.75f : 0.47f, 0.52f));
         D2D1_RECT_F art = inRect;
         art.left += 3.0f; art.right -= 3.0f; art.top += 3.0f; art.bottom -= 3.0f;
         if (!inLabel.empty())
@@ -636,36 +575,24 @@ namespace ActionRPG
             DrawItem(inRenderer, layout.bags[index], state.bags[tab][index] ? &*state.bags[tab][index] : nullptr);
         for (std::size_t index = 0; index < layout.equipment.size(); ++index)
             DrawItem(inRenderer, layout.equipment[index], state.equipment[index] ? &*state.equipment[index] : nullptr, EQUIPMENT_NAMES[index]);
-        inRenderer.PushAxisAlignedClip(layout.detailText);
-        const auto detail = Details();
-        auto textRect = layout.detailText;
-        textRect.top -= detailScroll;
-        const float columns = std::max(1.0f, (textRect.right - textRect.left) / 14.0f);
-        textRect.bottom = textRect.top + (detail.size() / columns + std::count(detail.begin(), detail.end(), L'\n') + 1) * 20.0f;
-        inRenderer.DrawUiText(detail, textRect, D2D1::ColorF(0.92f, 0.92f, 0.94f), 14.0f, true);
+        inRenderer.DrawUiText(status, layout.status, D2D1::ColorF(0.84f, 0.80f, 0.68f), 12.0f);
+        if (!FindItem(hovered)) return;
+        const auto tooltip = TooltipBounds(inWidth, inHeight);
+        inRenderer.FillRectangle(tooltip.left, tooltip.top, tooltip.right, tooltip.bottom,
+            D2D1::ColorF(0.06f, 0.08f, 0.12f, 0.98f));
+        inRenderer.DrawRectangle(tooltip.left, tooltip.top, tooltip.right, tooltip.bottom,
+            D2D1::ColorF(0.75f, 0.66f, 0.43f));
+        const auto content = D2D1::RectF(tooltip.left + 12.0f, tooltip.top + 12.0f,
+            tooltip.right - 12.0f, tooltip.bottom - 36.0f);
+        const auto text = Details();
+        auto textRect = content;
+        textRect.top -= tooltipScroll;
+        textRect.bottom = textRect.top + TextHeight(text, content.right - content.left);
+        inRenderer.PushAxisAlignedClip(content);
+        inRenderer.DrawUiText(text, textRect, D2D1::ColorF(0.94f, 0.94f, 0.96f), 14.0f, true);
         inRenderer.PopAxisAlignedClip();
-        bool equipped = false;
-        const auto item = FindItem(selected, &equipped);
-        Button(inRenderer, layout.discard, L"버리기", connected && ready && pendingRequest.empty() && item && !equipped);
-        Button(inRenderer, layout.use, L"사용", false);
-        Button(inRenderer, layout.sell, L"판매", false);
-        inRenderer.DrawUiText(status,
-            layout.status, D2D1::ColorF(0.84f, 0.80f, 0.68f), 12.0f);
-        if (discardStage == DiscardStage::Closed) return;
-        inRenderer.FillRectangle(0.0f, 0.0f, inWidth, inHeight, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.75f));
-        const auto dialog = Dialog(inWidth, inHeight);
-        inRenderer.FillRectangle(dialog.left, dialog.top, dialog.right, dialog.bottom, D2D1::ColorF(0.09f, 0.10f, 0.14f));
-        const auto discard = FindItem(discardItem);
-        const auto text = discardStage == DiscardStage::Quantity
-            ? L"버릴 수량을 입력하세요\n" + (discard ? discard->name : std::wstring{}) + L"\n보유 수량: "
-                + std::to_wstring(discard ? discard->quantity : 0) + L"\n수량: " + quantityText
-            : L"영구 삭제 확인\n" + (discard ? discard->name : std::wstring{}) + L" × " + quantityText
-                + L"\n버린 아이템은 복구할 수 없습니다.\n정말 버리시겠습니까?";
-        inRenderer.DrawUiText(text, D2D1::RectF(dialog.left + 16.0f, dialog.top + 16.0f, dialog.right - 16.0f, dialog.bottom - 60.0f),
-            D2D1::ColorF(0.96f, 0.87f, 0.80f), 16.0f, true);
-        const float middle = (dialog.left + dialog.right) * 0.5f;
-        Button(inRenderer, D2D1::RectF(dialog.left + 16.0f, dialog.bottom - 48.0f, middle - 8.0f, dialog.bottom - 16.0f), L"취소 (ESC)", true);
-        Button(inRenderer, D2D1::RectF(middle + 8.0f, dialog.bottom - 48.0f, dialog.right - 16.0f, dialog.bottom - 16.0f),
-            discardStage == DiscardStage::Quantity ? L"다음" : L"영구 삭제 요청", connected && ready && pendingRequest.empty() && DiscardQuantity().has_value());
+        inRenderer.DrawUiText(L"아이콘 위에서 휠: 정보 스크롤",
+            D2D1::RectF(content.left, tooltip.bottom - 28.0f, content.right, tooltip.bottom - 8.0f),
+            D2D1::ColorF(0.78f, 0.79f, 0.83f), 12.0f);
     }
 }
