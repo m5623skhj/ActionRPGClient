@@ -14,6 +14,18 @@
 namespace ActionRPG
 {
     struct SkillStateEvent { std::string payload; };
+    struct CharacterEvent
+    {
+        enum class Kind { List, Create, Select };
+        Kind kind;
+        std::string payload;
+    };
+    struct InventoryEvent
+    {
+        enum class Kind { State, Operation, Definitions };
+        Kind kind;
+        std::string payload;
+    };
 
     using TownEvent = std::variant<TownProtocol::EnterTownResponse, TownProtocol::PlayerAppear,
         TownProtocol::PlayerMove, TownProtocol::PlayerDisappear,
@@ -22,9 +34,9 @@ namespace ActionRPG
         TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult,
         TownProtocol::PartyDirectoryPage, TownProtocol::PartyDirectoryChanged,
         TownProtocol::DungeonCompletionResponse, TownProtocol::PartyDetailResponse,
-        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent>;
+        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent, InventoryEvent>;
 
-    enum class TownConnectionState { Disconnected, Connecting, AdmissionPending, EnteringTown, Ready, Failed };
+    enum class TownConnectionState { Disconnected, Connecting, AdmissionPending, CharacterSelection, EnteringTown, Ready, Failed };
     struct TownConnectionInfo
     {
         std::uint64_t attemptId{};
@@ -42,8 +54,17 @@ namespace ActionRPG
         TownClient& operator=(const TownClient&) = delete;
 
         void Start(std::uint64_t inAttempt, TownServerSettings inServer, std::filesystem::path inCa,
-            std::string inTicket, std::string inName, std::uint32_t inCharacter,
-            std::chrono::steady_clock::time_point inExpiry);
+            std::string inTicket, std::chrono::steady_clock::time_point inExpiry);
+        void RequestCharacterList(std::string inRequestId);
+        void CreateCharacter(std::string inRequestId, std::string inName, std::uint32_t inDefinitionId);
+        void SelectCharacter(std::string inRequestId, std::uint64_t inCharacterId, std::uint64_t inOwnerGeneration);
+        void RequestInventoryState(std::string inRequestId);
+        void ChangeInventory(std::string inRequestId, std::uint64_t inRevision, std::string inAction,
+            std::string inInstanceId, std::uint32_t inCount);
+        [[nodiscard]] std::vector<CharacterEvent> ConsumeCharacterEvents();
+        // These two accessors belong to the game thread; network workers only publish tagged events.
+        void SetSelectedCharacterId(std::uint64_t inId) { selectedCharacterId = inId; }
+        [[nodiscard]] std::uint64_t GetSelectedCharacterId() const { return selectedCharacterId; }
         void RequestStop();
         [[nodiscard]] TownConnectionInfo GetConnectionInfo() const;
         void Stop();
@@ -69,6 +90,8 @@ namespace ActionRPG
 
     private:
         void QueuePacket(std::vector<std::uint8_t> inBody);
+        void QueueCharacterPacket(std::vector<std::uint8_t> inBody, bool inSelecting = false);
+        std::uint64_t selectedCharacterId{};
         struct Impl;
         std::unique_ptr<Impl> impl;
     };

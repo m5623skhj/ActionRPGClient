@@ -4,6 +4,10 @@
 #include "Input/InputState.h"
 #include <cstdint>
 #include <string>
+#include <vector>
+#include <optional>
+#include <unordered_map>
+#include <nlohmann/json.hpp>
 
 namespace ActionRPG
 {
@@ -24,11 +28,32 @@ namespace ActionRPG
         [[nodiscard]] bool IsPlaying() const noexcept;
         [[nodiscard]] bool ConsumeExitRequested() noexcept;
     private:
-        enum class State { Login, GoogleLogin, ServerSelection, Ticket, Town, Playing, Leaving };
+        enum class State { Login, GoogleLogin, ServerSelection, Ticket, Town, CharacterSelection, CharacterCreate, Playing, Leaving };
         void StartLogin();
         void EnterSelectedTown();
         void CancelPending();
         void ProcessEvents();
+        void ProcessCharacterEvents();
+        void RequestCharacters();
+        void CreateCharacter();
+        void SelectCharacter();
+        void ClearCharacters();
+        struct Character
+        {
+            std::uint64_t id{}, generation{}, revision{};
+            std::uint32_t definitionId{}, level{};
+            std::wstring name;
+        };
+        enum class CharacterRequest { None, List, Create, Select };
+        std::vector<Character> characters;
+        std::unordered_map<std::uint32_t, nlohmann::json> characterBatches;
+        std::size_t selectedCharacter{};
+        std::uint32_t characterBatchCount{};
+        CharacterRequest characterRequest{CharacterRequest::None};
+        std::string characterRequestId;
+        std::optional<Character> pendingCharacter;
+        std::chrono::steady_clock::time_point characterDeadline{};
+        bool charactersCurrent{}, characterAccepted{};
         [[nodiscard]] bool HasToken() const;
         AuthSettings settings;
         AuthClient auth;

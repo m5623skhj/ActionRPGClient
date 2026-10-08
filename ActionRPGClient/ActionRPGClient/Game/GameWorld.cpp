@@ -1,4 +1,5 @@
 #include "Game/GameWorld.h"
+#include "Network/CharacterInventoryJson.h"
 #include <array>
 #include <unordered_set>
 #include <limits>
@@ -356,6 +357,7 @@ namespace ActionRPG
         , playerSkillPresentation(inAssetCatalog, inRenderer)
         , combatHitAnimation(inRenderer, inAssetCatalog, animationDefinitions, "CombatHitSpark")
         , skillUi(inAssetCatalog, inRenderer)
+        , inventoryUi(inAssetCatalog, inRenderer)
         , assetCatalog(inAssetCatalog)
         , renderer(inRenderer)
         , townClient(inTownClient)
@@ -372,6 +374,7 @@ namespace ActionRPG
                 action = SystemMenuAction::Party;
             }
             else if (actionName == "Skills") action = SystemMenuAction::Skills;
+            else if (actionName == "Inventory") action = SystemMenuAction::Inventory;
             else if (actionName == "Logout") action = SystemMenuAction::Logout;
             else if (actionName == "SwitchAccount") action = SystemMenuAction::SwitchAccount;
             else if (actionName == "SelectTown") action = SystemMenuAction::SelectTown;
@@ -387,7 +390,7 @@ namespace ActionRPG
             Microsoft::WRL::ComPtr<ID2D1Bitmap1> menuIcon;
             if (action == SystemMenuAction::Skills)
             { try { menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId)); } catch (const std::exception&) {} }
-            else menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
+            else if (action != SystemMenuAction::Inventory) menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
             systemMenuEntries.push_back(SystemMenuEntry{
                 Utf8ToWide(systemMenuDefinitions.GetValue(section, "Label")), action, std::move(menuIcon)});
         }
@@ -438,6 +441,22 @@ namespace ActionRPG
         const auto skillUiAction=skillUi.Update(inDeltaSeconds,interfaceInput,camera.GetViewportWidth(),camera.GetViewportHeight(),systemUiPage==SystemUiPage::Skills,skillBarVisible);
         if (skillUiAction.requestState) townClient.RequestSkillState();
         if (!IsDungeonUiRestricted() && !skillUiAction.learnSkill.empty()) townClient.LearnSkill(skillUiAction.learnSkill,skillUiAction.expectedSkillLevel);
+        inventoryUi.SetConnected(townClient.IsConnected());
+        InputState inventoryInput = interfaceInput;
+        if (uiClickConsumed) inventoryInput = {};
+        const bool inventoryVisible = systemUiPage == SystemUiPage::Inventory && !partyKickedNotice
+            && !hadKickedNotice && !dungeonCleared && !completionStopping && !pendingPartyInvitation
+            && !isDungeonSelectionOpen;
+        const auto inventoryAction = inventoryUi.Update(inDeltaSeconds, inventoryInput,
+            camera.GetViewportWidth(), camera.GetViewportHeight(), inventoryVisible);
+        if (inventoryAction.requestState) townClient.RequestInventoryState(inventoryAction.requestId);
+        if (inventoryAction.operation != InventoryOperation::None)
+        {
+            const char* action = inventoryAction.operation == InventoryOperation::Equip ? "Equip"
+                : inventoryAction.operation == InventoryOperation::Unequip ? "Unequip" : "Discard";
+            townClient.ChangeInventory(inventoryAction.requestId, inventoryAction.expectedRevision,
+                action, inventoryAction.instanceId, inventoryAction.quantity);
+        }
         InputState gameplayInput = inInput;
         const bool gameplayBlocked = dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
             || pendingPartyInvitation.has_value() || partyKickedNotice || hadKickedNotice || player.IsHitReacting() || hadUiAtFrameStart || interfaceInput.cancelDrag
@@ -598,6 +617,7 @@ namespace ActionRPG
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
     {
         skillUi.CancelDrag();
+        inventoryUi.Close();
         camera.Resize(inViewportWidth, inViewportHeight);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
@@ -668,6 +688,8 @@ namespace ActionRPG
                     localCharacterId = inEvent.characterId;
                     player.ConfigureJumpSpeed(characterDefinitions, localCharacterId);
                     skillUi.Invalidate();
+                    inventoryUi.Reset();
+                    inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(), localCharacterId, 0);
                     partySnapshot = {};
                     ResetPartyRequestUi();
                     partyKickedNotice = false;
@@ -684,10 +706,24 @@ namespace ActionRPG
                     try
                     {
                         skillUi.ApplyState(inEvent.payload,localCharacterId);
+                        inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(), localCharacterId, skillUi.GetProgression().level);
                         if (dungeonEntryState==DungeonEntryState::Entered) dungeonClient.RequestCombatRefresh();
                     }
                     catch (const std::exception& error)
                     { skillUi.Invalidate(); partyStatusText=L"스킬 상태 오류: "+Utf8ToWide(error.what()); }
+                }
+                else if constexpr (std::is_same_v<EventType, InventoryEvent>)
+                {
+                    try
+                    {
+                        if (inEvent.kind == InventoryEvent::Kind::State) inventoryUi.HandleState(inEvent.payload);
+                        else if (inEvent.kind == InventoryEvent::Kind::Definitions) inventoryUi.HandleDefinitions(inEvent.payload);
+                        else if (inventoryUi.HandleOperation(inEvent.payload)) townClient.RequestSkillState();
+                    }
+                    catch (const std::exception&)
+                    {
+                        inventoryUi.Invalidate(L"서버 인벤토리 상태를 확인하지 못했습니다. 다시 조회합니다");
+                    }
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PlayerAppear>)
                 {
@@ -1567,6 +1603,7 @@ namespace ActionRPG
             partyCreationPending = false;
             partyStatusText.clear();
         }
+        if (systemUiPage == SystemUiPage::Inventory) inventoryUi.Close();
         systemUiPage = page;
         commandQueue.Clear(); skillUi.CancelDrag();
         if (page==SystemUiPage::Skills) townClient.RequestSkillState();
@@ -1776,6 +1813,8 @@ namespace ActionRPG
         }
         if (inInput.WasPressed(InputKey::ToggleSystemMenu))
         {
+            if (systemUiPage == SystemUiPage::Inventory && inventoryUi.HandleEscape())
+            { uiClickConsumed = true; return; }
             if (systemUiPage == SystemUiPage::Closed)
             {
                 SetSystemUiPage(SystemUiPage::Menu);
@@ -1867,7 +1906,8 @@ namespace ActionRPG
                 return;
             }
             SetSystemUiPage(action==SystemMenuAction::Party ? SystemUiPage::Party
-                : action==SystemMenuAction::Skills ? SystemUiPage::Skills:SystemUiPage::ExitConfirmation);
+                : action==SystemMenuAction::Skills ? SystemUiPage::Skills
+                : action==SystemMenuAction::Inventory ? SystemUiPage::Inventory:SystemUiPage::ExitConfirmation);
             uiClickConsumed = true;
             return;
         }
@@ -2335,6 +2375,8 @@ namespace ActionRPG
     {
         if (systemUiPage==SystemUiPage::Skills)
         { skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),true); return; }
+        if (systemUiPage==SystemUiPage::Inventory)
+        { inventoryUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),IsDungeonUiRestricted()); return; }
         if (systemUiPage == SystemUiPage::Closed && !pendingPartyInvitation.has_value())
         {
             return;
@@ -2381,6 +2423,12 @@ namespace ActionRPG
                     else inRenderer.DrawBitmap(systemMenuEntries[index].icon.Get(),
                         D2D1::RectF(0.0f,0.0f,bitmapSize.width,bitmapSize.height),destination);
                 }
+                if (systemMenuEntries[index].action == SystemMenuAction::Inventory)
+                    for (int row = 0; row < 3; ++row) for (int column = 0; column < 3; ++column)
+                    {
+                        const float x = iconLeft + 8.0f + column * 24.0f, y = iconTop + 8.0f + row * 24.0f;
+                        inRenderer.DrawRectangle(x, y, x + 19.0f, y + 19.0f, D2D1::ColorF(0.90f,0.76f,0.40f));
+                    }
                 inRenderer.DrawText(systemMenuEntries[index].label,
                     tile.left + 12.0f, tile.bottom - 42.0f,
                     tile.right - 12.0f, tile.bottom - 12.0f,

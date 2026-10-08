@@ -49,6 +49,7 @@
     <ClInclude Include="App\Application.h"><Filter>App</Filter></ClInclude>
     <ClInclude Include="App\LoginFlow.h"><Filter>App</Filter></ClInclude>
     <ClInclude Include="Network\AuthSettings.h"><Filter>Network</Filter></ClInclude>
+    <ClInclude Include="Network\CharacterInventoryJson.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Network\AuthHttps.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Network\AuthClient.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Core\IniDocument.h"><Filter>Core</Filter></ClInclude>
@@ -121,7 +122,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Game\SkillUi.cpp"><Filter>Game</Filter></ClCompile>
+    <ClCompile Include="Game\InventoryUi.cpp"><Filter>Game</Filter></ClCompile>
     <ClInclude Include="Game\SkillUi.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\InventoryUi.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\CharacterProgression.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\SkillTreeCatalog.h"><Filter>Game</Filter></ClInclude>
     <None Include="..\Assets\Data\SkillUi.json"><Filter>Assets</Filter></None>

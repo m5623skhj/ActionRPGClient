@@ -1,6 +1,6 @@
 # 인증 및 타운 네트워크
 
-2026-10-07 클라이언트 소스 기준입니다. 이 문서는 클라이언트의 인증·타운 TLS·콘텐츠 이벤트 연결을 설명합니다. 서버 인증·DB 설정은 [AuthServer](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md), 타운 규칙은 [TownServer](../../ActionRPGServer/ActionRPGServer/TownServer/DEVELOPMENT.md), 마이그레이션은 [DB 작업 문서](../../ActionRPGServer/docs/workflows/DATABASE_MIGRATIONS.md)에서 관리합니다.
+2026-10-08 클라이언트 소스 기준입니다. 이 문서는 클라이언트의 인증·타운 TLS·콘텐츠 이벤트 연결을 설명합니다. 서버 인증·DB 설정은 [AuthServer](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md), 타운 규칙은 [TownServer](../../ActionRPGServer/ActionRPGServer/TownServer/DEVELOPMENT.md), 마이그레이션은 [DB 작업 문서](../../ActionRPGServer/docs/workflows/DATABASE_MIGRATIONS.md)에서 관리합니다.
 
 ## 로그인에서 타운 입장까지
 
@@ -10,25 +10,39 @@
  -> 시스템 브라우저 Google Desktop OAuth
  -> loopback 콜백의 code -> Google ID token
  -> Auth POST /v1/login -> gameToken
- -> 타운·캐릭터 종류·이름 선택
+ -> 타운 선택
  -> Auth POST /v1/tickets -> ready=true인 단기 ticket
  -> Town TLS
  -> AdmissionTicketRequest(36)
  -> AdmissionResult(37, result=0)
- -> EnterTownRequest(1)
- -> EnterTownResponse(2)
+ -> CharacterListRequest/Response(38/39)
+ -> 저장된 캐릭터 선택 또는 CharacterCreateRequest/Response(40/41)
+ -> CharacterSelectRequest/Response(42/43)
+ -> EnterTownResponse(2) -> SkillStateResponse(29) -> InventoryStateResponse(45) + ItemDefinitionsResponse(48)
  -> Playing -> Game 생성
 ```
 
 Google Authorization Code/PKCE(S256), 매 시도 새 state, Auth challenge의 nonce를 사용합니다. 콜백은 `127.0.0.1` 동적 포트의 `/oauth2/callback`입니다. Auth가 ID 토큰을 검증하고 계정을 결정합니다. Google access token을 게임 인증에 사용하지 않습니다.
 
-로그인과 게임 이름·종류 선택은 별개입니다. 현재 UI는 캐릭터 **종류 ID 1~3**과 UTF-8 1~32바이트 이름을 보내며, 저장 캐릭터 목록을 조회하는 API는 사용하지 않습니다. 입장 응답의 playerId·characterId가 게임 세션 기준입니다. 캐릭터 선택·이름은 인증 권한의 증거가 아닙니다.
+Auth는 로그인과 타운 티켓만 담당합니다. 타운 인증 후 계정 소유의 저장 캐릭터 목록을 조회하고 선택해야 월드에 입장합니다. 생성 화면은 종류 ID 1~3과 UTF-8 1~32바이트 이름을 받습니다. 영속 characterId와 ownerGeneration은 목록에서 받은 값으로 선택하며 서버가 소유권을 검사합니다. 기존 EnterTownResponse의 playerId는 런타임 ID, characterId는 캐릭터 종류 ID입니다. 영속 ID와 혼용하지 않습니다.
 
-서버 선택은 방향키·클릭, 페이지 이동은 PageUp/PageDown·휠, 캐릭터 종류는 좌우 선택, 이름은 텍스트 입력을 사용합니다. Enter로 입장합니다. Google/티켓/타운 입장 대기 중 Esc는 현재 시도를 취소하고, 서버 선택의 Esc는 로그아웃합니다.
+타운과 캐릭터 목록은 ↑↓·클릭·휠로 선택하고 Enter로 연결/입장합니다. 캐릭터 생성 화면에서 이름과 종류를 입력합니다. 조회 실패 시 이전 목록을 유지하되 선택을 비활성화합니다. 생성/선택 결과가 불명확하면 변경 요청을 자동 재전송하지 않습니다. Google/티켓/타운·캐릭터 처리 대기 중 Esc는 연결을 취소하고, 타운 선택의 Esc는 로그아웃합니다. 계정 전환·연결 취소 시 캐릭터 캐시와 영속 ID를 지웁니다.
+
+## 인벤토리와 장비
+
+메뉴의 인벤토리를 열면 장비·재료·소모품·퀘스트 탭이 각각 8×5칸으로 표시됩니다. 무기·상의·하의·신발·반지·목걸이·팔찌는 각각 한 부위를 사용합니다. 아이템 좌클릭은 상세 정보, 장비 가방 우클릭은 장착/교체, 장비창 우클릭은 해제입니다. 교체와 빈 칸 검사는 서버가 판정합니다. 던전에서도 사용할 수 있으며 전투는 계속되고 로컬 이동·공격 입력은 차단됩니다.
+
+InventoryStateRequest/Response(44/45), InventoryOperationRequest/Response(46/47), ItemDefinitionsResponse(48)는 JSON 문자열 패킷입니다. 요청은 최대 4096바이트, 일반 응답은 60000바이트, 정의 응답은 16384바이트입니다. characterId·revision·ownerGeneration은 10진 문자열, requestId는 CSPRNG 32바이트의 소문자 64자리 hex, instanceId는 소문자 32자리 hex입니다. 패킷 ID는 서버가 생성한 TownPacket.generated.h와 일치해야 합니다.
+
+상태가 먼저 도착하고 definitionBatchCount만큼 정의 배치를 받은 후, requestId·characterId·revision이 모두 일치하는 완전한 상태만 게임 스레드에서 적용합니다. 서로 다른 요청의 정의를 섞지 않습니다. 장착 조건과 비장비 최대 스택은 서버 정의를 사용하고, 서버 확정 전에는 슬롯·수량을 바꾸지 않습니다. 실패·타임아웃에는 기존 표시를 보존하고 최신 상태를 다시 조회합니다. DB 조회 실패를 빈 가방으로 처리하지 않습니다.
+
+버리기는 수량 입력 다음 별도의 영구 삭제 확인 버튼을 눌러야 요청됩니다. Enter만으로 삭제하지 않습니다. 사용·판매 버튼은 비활성화되며 아이템 효과·장비 능력치 실제 적용, 상점·드랍 오브젝트·정렬은 이번 범위에 없습니다. 아이콘 파일이 없어도 서버 아이템을 숨기거나 제거하지 않고 이름 표시로 대체합니다. 서버의 Items.json은 현재 빈 카탈로그이며 임의 테스트 아이템을 지급하지 않습니다.
+
+빌드·기능 테스트·DB 접속/적용은 이번 구현에서 수행하지 않았습니다. 2026-10-08 총괄 확인 기준 실제 DB는 head 4이며 V5와 신규 프로시저 권한은 미적용 상태입니다. 사용자가 V5 마이그레이션과 권한을 별도로 적용한 뒤 새 서버와 클라이언트를 함께 사용해야 합니다.
 
 ## 연결 설정과 신뢰
 
-기동 시 실행 파일 옆 `Assets/Data/AuthClient.json`을 읽습니다. 원본 [AuthClient.json](Assets/Data/AuthClient.json)은 빈 템플릿으로 보존합니다. 로컬 실행기 [RunLocalTest.bat](../../ActionRPGServer/RunLocalTest.bat)가 `%LOCALAPPDATA%/ActionRPG/LocalTest/settings.json`의 공개 client 항목을 매 실행 실제 EXE 옆 설정에 공급합니다. UTF-8 JSON의 최대 크기는 32KiB이며 최초 Google Desktop ID는 실제 등록값을 입력합니다. `playerName`은 빈 값으로 두어 프로세스별 이름을 사용하고 `characterId`는 1~3 범위입니다. 별도 override 기능이나 게임 명령줄 인증 인자는 사용하지 않습니다.
+기동 시 실행 파일 옆 `Assets/Data/AuthClient.json`을 읽습니다. 원본 [AuthClient.json](Assets/Data/AuthClient.json)은 빈 템플릿으로 보존합니다. 로컬 실행기 [RunLocalTest.bat](../../ActionRPGServer/RunLocalTest.bat)가 `%LOCALAPPDATA%/ActionRPG/LocalTest/settings.json`의 공개 client 항목을 매 실행 실제 EXE 옆 설정에 공급합니다. UTF-8 JSON의 최대 크기는 32KiB이며 최초 Google Desktop ID는 실제 등록값을 입력합니다. playerName·characterId는 인증 신원이나 입장 캐릭터를 결정하지 않습니다. 생성 화면에서 이름을 새로 입력하고 종류 1~3을 선택합니다. 별도 override 기능이나 게임 명령줄 인증 인자는 사용하지 않습니다.
 
 로컬 실행기가 클라이언트 프로세스에만 선택적 환경변수 ACTIONRPG_GOOGLE_CLIENT_ID와 ACTIONRPG_GOOGLE_DESKTOP_CLIENT_SECRET을 전달합니다. 클라이언트는 시작 시 두 값을 읽고 자기 환경에서 제거합니다. secret이 있으면 두 값 모두 1~1024자의 공백 없는 printable ASCII여야 하며, 환경의 ID가 JSON의 googleClientId와 정확히 일치해야 합니다. 잘못된 값이나 ID 불일치는 로그인 설정 오류로 처리합니다. 검증된 secret은 메모리에만 두고 Google 토큰 교환 form에 URL 인코딩해 client_secret으로 추가합니다. secret이 없으면 기존 PKCE 흐름을 유지합니다. JSON·명령줄·로그·오류 메시지에는 secret을 기록하지 않으며, PKCE·loopback·Auth ID 토큰 검증은 그대로 사용합니다.
 
@@ -39,8 +53,8 @@ Google Authorization Code/PKCE(S256), 매 시도 새 state, Auth challenge의 no
 | `authUrl` | HTTPS origin. 경로·쿼리·사용자 정보 없이 실제 Auth 호스트·포트 |
 | `googleClientId` | Google Desktop app ID. Auth의 `ACTIONRPG_GOOGLE_CLIENT_ID`와 일치 |
 | `townCaFile` | 타운 신뢰 CA PEM. 절대 경로 또는 Assets 기준 상대 경로 |
-| `playerName` | 이름 초기값. 빈 값은 `Player-<PID>`; 입장 시 UTF-8 1~32바이트 |
-| `characterId` | 기본 캐릭터 종류 1~3 |
+| `playerName` | 기존 설정 호환 필드. 저장 캐릭터 이름을 덮어쓰지 않음 |
+| `characterId` | 생성 화면의 기본 캐릭터 종류 1~3 |
 | `servers[]` | 타운 목록. 각 항목에 `serverId/name/hostname/port` |
 | `serverId` | Auth에 등록한 ID와 타운의 `ACTIONRPG_TOWN_ID` |
 | `hostname/port` | 타운 인증서 SAN과 일치하는 DNS/IP 및 TLS 포트 1~65535 |

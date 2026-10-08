@@ -1,4 +1,5 @@
 #include "Network/TownClient.h"
+#include <nlohmann/json.hpp>
 #include <asio.hpp>
 #include <asio/ssl.hpp>
 #include <openssl/ssl.h>
@@ -69,11 +70,13 @@ namespace ActionRPG
         mutable std::mutex mutex;
         TownConnectionInfo status;
         std::vector<TownEvent> events;
+        std::vector<CharacterEvent> characterEvents;
         std::thread worker;
         Impl() : worker([this] { ioContext.run(); }) {}
         ~Impl();
         void SetStatus(std::uint64_t inAttempt, TownConnectionState inState, std::wstring inMessage);
         void PushEvent(std::uint64_t inAttempt, TownEvent inEvent);
+        void PushCharacterEvent(std::uint64_t inAttempt, CharacterEvent inEvent);
     };
 
     // Each attempt owns its stream and buffers until its final callbacks have returned.
@@ -86,8 +89,8 @@ namespace ActionRPG
         asio::ip::tcp::resolver resolver;
         asio::steady_timer deadline;
         TownServerSettings server;
-        std::string ticket, playerName;
-        std::uint32_t characterId;
+        std::string ticket;
+        bool selectionRequested{};
         TownConnectionState state{ TownConnectionState::Connecting };
         bool closed{};
         std::array<std::uint8_t, 4> receiveHeader{};
@@ -95,12 +98,10 @@ namespace ActionRPG
         std::deque<std::shared_ptr<std::vector<std::uint8_t>>> sendQueue;
 
         Session(Impl& inOwner, const std::uint64_t inAttempt, TownServerSettings inServer,
-            const std::filesystem::path& inCa, std::string inTicket, std::string inName,
-            const std::uint32_t inCharacter)
+            const std::filesystem::path& inCa, std::string inTicket)
             : owner(inOwner), attemptId(inAttempt), tlsContext(MakeTlsContext(inCa)),
               socket(owner.strand, tlsContext), resolver(owner.strand), deadline(owner.strand),
-              server(std::move(inServer)), ticket(std::move(inTicket)), playerName(std::move(inName)),
-              characterId(inCharacter) {}
+              server(std::move(inServer)), ticket(std::move(inTicket)) {}
 
         bool IsCurrent() const { return !closed && owner.attempt.load() == attemptId; }
         void SetState(const TownConnectionState inState, std::wstring inMessage)
@@ -131,8 +132,7 @@ namespace ActionRPG
         {
             if (!IsCurrent() || Clock::now() >= inExpiry || ticket.size() != 64
                 || !std::all_of(ticket.begin(), ticket.end(), [](char value)
-                    { return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'); })
-                || playerName.empty() || playerName.size() > 32 || characterId < 1 || characterId > 3)
+                    { return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'); }))
                 { HandleDisconnect(); return; }
             socket.set_verify_callback(asio::ssl::host_name_verification(server.hostname));
             if (SSL_set_tlsext_host_name(socket.native_handle(), server.hostname.c_str()) != 1)
@@ -256,22 +256,38 @@ namespace ActionRPG
         }
         events.push_back(std::move(inEvent));
     }
+    void TownClient::Impl::PushCharacterEvent(const std::uint64_t inAttempt, CharacterEvent inEvent)
+    {
+        std::scoped_lock lock(mutex);
+        if (attempt.load() != inAttempt) return;
+        if (characterEvents.size() >= 256)
+        {
+            asio::post(strand, [this, inAttempt]
+            {
+                if (session && attempt.load() == inAttempt) session->HandleDisconnect();
+            });
+            return;
+        }
+        characterEvents.push_back(std::move(inEvent));
+    }
+
     TownClient::TownClient() : impl(std::make_unique<Impl>()) {}
     TownClient::~TownClient() = default;
 
     void TownClient::Start(const std::uint64_t inAttempt, TownServerSettings inServer,
-        std::filesystem::path inCa, std::string inTicket, std::string inName,
-        const std::uint32_t inCharacter, const Clock::time_point inExpiry)
+        std::filesystem::path inCa, std::string inTicket, const Clock::time_point inExpiry)
     {
+        selectedCharacterId = 0;
         {
             std::scoped_lock lock(impl->mutex);
             impl->attempt.store(inAttempt);
             impl->connected.store(false);
             impl->events.clear();
+            impl->characterEvents.clear();
             impl->status = { inAttempt, TownConnectionState::Connecting, L"타운 입장: TLS 연결 중" };
         }
         asio::post(impl->strand, [this, inAttempt, server = std::move(inServer), ca = std::move(inCa),
-            ticket = std::move(inTicket), name = std::move(inName), inCharacter, inExpiry]() mutable
+            ticket = std::move(inTicket), inExpiry]() mutable
         {
             if (impl->session) impl->session->Close();
             impl->session.reset();
@@ -279,7 +295,7 @@ namespace ActionRPG
             try
             {
                 impl->session = std::make_shared<Impl::Session>(*impl, inAttempt, std::move(server), ca,
-                    std::move(ticket), std::move(name), inCharacter);
+                    std::move(ticket));
                 impl->session->Start(inExpiry);
             }
             catch (...)
@@ -291,11 +307,13 @@ namespace ActionRPG
     }
     void TownClient::RequestStop()
     {
+        selectedCharacterId = 0;
         {
             std::scoped_lock lock(impl->mutex);
             impl->attempt.store(0);
             impl->connected.store(false);
             impl->events.clear();
+            impl->characterEvents.clear();
             impl->status = {};
         }
         asio::post(impl->strand, [this]
@@ -330,6 +348,74 @@ namespace ActionRPG
         if (impl->session && impl->session->state == TownConnectionState::Ready)
             impl->session->QueuePacket(std::move(inBody));
     }
+    void TownClient::QueueCharacterPacket(std::vector<std::uint8_t> inBody, const bool inSelecting)
+    {
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = std::move(inBody), inSelecting]() mutable
+        {
+            if (attempt != impl->attempt.load() || !impl->session) return;
+            auto& session = *impl->session;
+            if (session.state != TownConnectionState::CharacterSelection
+                && session.state != TownConnectionState::EnteringTown) return;
+            if (inSelecting)
+            {
+                session.selectionRequested = true;
+                session.SetState(TownConnectionState::EnteringTown, L"저장된 캐릭터 입장 대기");
+            }
+            session.QueuePacket(std::move(packet));
+        });
+    }
+
+    void TownClient::RequestCharacterList(std::string inRequestId)
+    {
+        QueueCharacterPacket(TownProtocol::Encode(TownProtocol::CharacterListRequest{
+            nlohmann::json{{"requestId", std::move(inRequestId)}}.dump()}));
+    }
+
+    void TownClient::CreateCharacter(std::string inRequestId, std::string inName, const std::uint32_t inDefinitionId)
+    {
+        QueueCharacterPacket(TownProtocol::Encode(TownProtocol::CharacterCreateRequest{
+            nlohmann::json{{"requestId", std::move(inRequestId)}, {"name", std::move(inName)},
+                {"characterDefinitionId", inDefinitionId}}.dump()}));
+    }
+
+    void TownClient::SelectCharacter(std::string inRequestId, const std::uint64_t inCharacterId,
+        const std::uint64_t inOwnerGeneration)
+    {
+        QueueCharacterPacket(TownProtocol::Encode(TownProtocol::CharacterSelectRequest{
+            nlohmann::json{{"requestId", std::move(inRequestId)}, {"characterId", std::to_string(inCharacterId)},
+                {"expectedOwnerGeneration", std::to_string(inOwnerGeneration)}}.dump()}), true);
+    }
+
+    void TownClient::RequestInventoryState(std::string inRequestId)
+    {
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(),
+            packet = TownProtocol::Encode(TownProtocol::InventoryStateRequest{
+                nlohmann::json{{"requestId", std::move(inRequestId)}}.dump()})]() mutable
+        {
+            if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
+        });
+    }
+
+    void TownClient::ChangeInventory(std::string inRequestId, const std::uint64_t inRevision, std::string inAction,
+        std::string inInstanceId, const std::uint32_t inCount)
+    {
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(),
+            packet = TownProtocol::Encode(TownProtocol::InventoryOperationRequest{
+                nlohmann::json{{"requestId", std::move(inRequestId)}, {"revision", std::to_string(inRevision)},
+                    {"action", std::move(inAction)}, {"instanceId", std::move(inInstanceId)}, {"count", inCount}}.dump()})]() mutable
+        {
+            if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
+        });
+    }
+
+    std::vector<CharacterEvent> TownClient::ConsumeCharacterEvents()
+    {
+        std::scoped_lock lock(impl->mutex);
+        std::vector<CharacterEvent> result;
+        result.swap(impl->characterEvents);
+        return result;
+    }
+
     void TownClient::SendMovement(const TownProtocol::MoveInput& inInput)
     {
         asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(inInput)]() mutable
@@ -524,17 +610,55 @@ namespace ActionRPG
         {
             const auto result = TownProtocol::DecodeAdmissionResult(receiveBody);
             if (!result || result->result != 0) { HandleDisconnect(); return; }
-            SetState(TownConnectionState::EnteringTown, L"타운 입장: 캐릭터 생성 대기");
-            QueuePacket(TownProtocol::Encode(TownProtocol::EnterTownRequest{ playerName, characterId }));
+            deadline.cancel();
+            SetState(TownConnectionState::CharacterSelection, L"저장된 캐릭터를 선택해 주세요");
             return;
         }
-        if (state == TownConnectionState::EnteringTown && *type != TownProtocol::PacketType::EnterTownResponse)
+        if ((state == TownConnectionState::CharacterSelection || state == TownConnectionState::EnteringTown)
+            && *type != TownProtocol::PacketType::CharacterListResponse
+            && *type != TownProtocol::PacketType::CharacterCreateResponse
+            && *type != TownProtocol::PacketType::CharacterSelectResponse
+            && (*type != TownProtocol::PacketType::EnterTownResponse || !selectionRequested))
             { HandleDisconnect(); return; }
         if (state == TownConnectionState::Ready && *type == TownProtocol::PacketType::EnterTownResponse)
             { HandleDisconnect(); return; }
 
         switch (*type)
         {
+        case TownProtocol::PacketType::CharacterListResponse:
+            if (auto packet = TownProtocol::DecodeCharacterListResponse(receiveBody))
+                owner.PushCharacterEvent(attemptId, {CharacterEvent::Kind::List, std::move(packet->json)});
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::CharacterCreateResponse:
+            if (auto packet = TownProtocol::DecodeCharacterCreateResponse(receiveBody))
+                owner.PushCharacterEvent(attemptId, {CharacterEvent::Kind::Create, std::move(packet->json)});
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::CharacterSelectResponse:
+            if (auto packet = TownProtocol::DecodeCharacterSelectResponse(receiveBody))
+            {
+                owner.PushCharacterEvent(attemptId, {CharacterEvent::Kind::Select, std::move(packet->json)});
+                if (state != TownConnectionState::Ready)
+                    SetState(TownConnectionState::CharacterSelection, L"캐릭터 선택 응답 확인");
+            }
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::InventoryStateResponse:
+            if (auto packet = TownProtocol::DecodeInventoryStateResponse(receiveBody))
+                PushEvent(InventoryEvent{InventoryEvent::Kind::State, std::move(packet->json)});
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::InventoryOperationResponse:
+            if (auto packet = TownProtocol::DecodeInventoryOperationResponse(receiveBody))
+                PushEvent(InventoryEvent{InventoryEvent::Kind::Operation, std::move(packet->json)});
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::ItemDefinitionsResponse:
+            if (auto packet = TownProtocol::DecodeItemDefinitionsResponse(receiveBody))
+                PushEvent(InventoryEvent{InventoryEvent::Kind::Definitions, std::move(packet->json)});
+            else HandleDisconnect();
+            break;
         case TownProtocol::PacketType::SkillStateResponse:
             if (auto packet=TownProtocol::DecodeSkillStateResponse(receiveBody)) PushEvent(SkillStateEvent{std::move(packet->payload)});
             else HandleDisconnect();

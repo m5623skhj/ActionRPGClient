@@ -134,6 +134,18 @@ namespace TownProtocol
 
 namespace TownProtocol
 {
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const CharacterListRequest& inPacket);
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const CharacterCreateRequest& inPacket);
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const CharacterSelectRequest& inPacket);
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const InventoryStateRequest& inPacket);
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const InventoryOperationRequest& inPacket);
+    [[nodiscard]] std::optional<CharacterListResponse> DecodeCharacterListResponse(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<CharacterCreateResponse> DecodeCharacterCreateResponse(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<CharacterSelectResponse> DecodeCharacterSelectResponse(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<InventoryStateResponse> DecodeInventoryStateResponse(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<InventoryOperationResponse> DecodeInventoryOperationResponse(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<ItemDefinitionsResponse> DecodeItemDefinitionsResponse(const std::vector<std::uint8_t>& inPacket);
+
     [[nodiscard]] std::vector<std::uint8_t> Encode(const AdmissionTicketRequest& inPacket);
     [[nodiscard]] std::optional<AdmissionResult> DecodeAdmissionResult(const std::vector<std::uint8_t>& inPacket);
 

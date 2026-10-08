@@ -120,6 +120,7 @@
     <ClCompile Include="Game\SkillCommandSystem.cpp" />
     <ClCompile Include="Game\PlayerSkillPresentation.cpp" />
     <ClCompile Include="Game\SkillUi.cpp" />
+    <ClCompile Include="Game\InventoryUi.cpp" />
     <ClCompile Include="Graphics\D2DRenderer.cpp" />
     <ClCompile Include="Graphics\GraphicsDevice.cpp" />
     <ClCompile Include="Main.cpp" />
@@ -135,6 +136,7 @@
     <ClInclude Include="App\Application.h" />
     <ClInclude Include="App\LoginFlow.h" />
     <ClInclude Include="Network\AuthSettings.h" />
+    <ClInclude Include="Network\CharacterInventoryJson.h" />
     <ClInclude Include="Network\AuthHttps.h" />
     <ClInclude Include="Network\AuthClient.h" />
     <ClInclude Include="Core\IniDocument.h" />
@@ -159,6 +161,7 @@
     <ClInclude Include="Game\PlayerSkillCatalog.h" />
     <ClInclude Include="Game\PlayerSkillPresentation.h" />
     <ClInclude Include="Game\SkillUi.h" />
+    <ClInclude Include="Game\InventoryUi.h" />
     <ClInclude Include="Game\CharacterProgression.h" />
     <ClInclude Include="Game\SkillTreeCatalog.h" />
     <ClInclude Include="Game\Vector2.h" />

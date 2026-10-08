@@ -11,6 +11,7 @@
 #include "Game/Player.h"
 #include "Game/ProjectileSystem.h"
 #include "Game/SkillUi.h"
+#include "Game/InventoryUi.h"
 #include "Game/PlayerSkillPresentation.h"
 #include "Input/InputState.h"
 #include "Network/TownClient.h"
@@ -97,7 +98,8 @@ namespace ActionRPG
             PartyDetails,
             PartyCreate,
             ExitConfirmation,
-            Skills
+            Skills,
+            Inventory
         };
 
         enum class SystemMenuAction
@@ -105,6 +107,7 @@ namespace ActionRPG
             Party,
             Exit,
             Skills,
+            Inventory,
             Logout,
             SwitchAccount,
             SelectTown
@@ -184,6 +187,7 @@ namespace ActionRPG
         };
         std::vector<CombatHitEffect> combatHitEffects;
         SkillUi skillUi;
+        InventoryUi inventoryUi;
         std::unordered_map<std::uint32_t,std::string> skillActionIds;
         std::uint64_t lastSkillStateTick{};
         std::uint32_t lastAcceptedSkillSequence{};
