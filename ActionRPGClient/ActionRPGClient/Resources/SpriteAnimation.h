@@ -27,7 +27,8 @@ namespace ActionRPG
         SpriteAnimation(D2DRenderer& inRenderer, const AssetCatalog& inAssetCatalog,
             const IniDocument& inDefinitions, std::string_view inSection);
         SpriteAnimation(Microsoft::WRL::ComPtr<ID2D1Bitmap1> inBitmap,
-            std::vector<SpriteFrame> inFrames, float inFrameSeconds, float inScale);
+            std::vector<SpriteFrame> inFrames, float inFrameSeconds, float inScale,
+            std::vector<float> inFrameDurationsSeconds = {});
 
         void Update(float inDeltaSeconds, bool inLoop = true);
         // Advance one playthrough and return update time left after the last frame's duration.
@@ -40,10 +41,15 @@ namespace ActionRPG
 
         [[nodiscard]] std::uint32_t GetCurrentFrame() const { return currentFrame; }
         [[nodiscard]] std::uint32_t GetFrameCount() const { return frameCount; }
-        [[nodiscard]] float GetDuration() const { return frameSeconds * static_cast<float>(frameCount); }
+        [[nodiscard]] float GetDuration() const { return frameEndSeconds.back(); }
+        [[nodiscard]] std::uint32_t GetFrameAt(float inSeconds, bool inLoop = false) const;
+        [[nodiscard]] float GetFrameStartSeconds(std::uint32_t inIndex) const;
         [[nodiscard]] bool IsFinished() const { return isFinished; }
 
     private:
+        void BuildTimeline(const std::vector<float>& inFrameDurationsSeconds);
+        void SetTime(double inSeconds, bool inLoop);
+        [[nodiscard]] std::uint32_t FrameAt(double inSeconds, bool inLoop) const;
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
         std::uint32_t columns{ 1 };
         std::uint32_t rows{ 1 };
@@ -51,7 +57,8 @@ namespace ActionRPG
         std::uint32_t currentFrame{};
         bool isFinished{};
         float frameSeconds{ 1.0f };
-        float elapsedSeconds{};
+        double elapsedSeconds{};
+        std::vector<float> frameEndSeconds{1.0f};
         float firstRowRatio{ 0.5f };
         float anchorY{ 1.0f };
         float secondRowAnchorY{ 1.0f };

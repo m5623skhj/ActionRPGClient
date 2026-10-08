@@ -47,6 +47,14 @@
       <div id="frameInfo">빈 문서</div>
     </section>
     <aside class="properties">
+      <h2>프레임 재생 시간</h2>
+      <label>현재 프레임 시간 (초)<input id="frameSeconds" type="number" min="0" step="any"></label>
+      <button id="applyFrameSeconds">현재 프레임 시간 적용</button>
+      <label>기본 FPS<input id="motionFps" type="number" min="0" max="240" step="any"></label>
+      <button id="applyFps">기본 FPS 적용</button>
+      <button id="resetFrameSeconds">모션을 균등 시간으로 되돌리기</button>
+      <p id="timingInfo" class="muted"></p>
+      <p class="muted">시간 배열이 있으면 기본 FPS보다 우선합니다. FPS를 바꿔도 배열은 유지됩니다.</p>
       <h2>피격 사각형</h2>
       <p class="muted">현재 프레임의 왼쪽 위 기준 · 원본 이미지 픽셀</p>
       <div class="numbers">
@@ -59,7 +67,7 @@
       <div class="button-row"><button id="copy">복사</button><button id="paste">붙여넣기</button><button id="delete">삭제</button></div>
       <button id="applyMotion">현재 모션 전체에 복사</button>
       <div class="button-row"><button id="undo">실행 취소</button><button id="redo">다시 실행</button></div>
-      <button id="animationsSave">변환한 animations.json 저장</button>
+      <button id="animationsSave">편집한 animations.json 저장</button>
       <h2>검사 결과</h2>
       <pre id="report">게임용 출력에는 모든 프레임의 피격 영역과 실제 이미지 확인이 필요합니다. 미완성 문서는 작업 저장할 수 있습니다.</pre>
       <p class="muted">재생은 모션 미리보기입니다. 게임 상태 전환이나 전투 판정은 실행하지 않습니다.</p>

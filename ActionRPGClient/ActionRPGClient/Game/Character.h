@@ -112,7 +112,7 @@ namespace ActionRPG
         [[nodiscard]] bool CanStartSlide() const;
         [[nodiscard]] bool IsSliding() const;
         [[nodiscard]] bool HasPendingSlide() const { return slidePrediction.has_value(); }
-        bool PredictSlide(std::uint32_t inSequence, Vector2 inDirection, float inDurationSeconds);
+        bool PredictSlide(std::uint32_t inSequence, Vector2 inDirection, float inDurationSeconds, float inDistancePerRunSpeedSeconds);
         void ResolvePredictedSlide(std::uint32_t inSequence, bool inAccepted);
         void ClearSlidePrediction();
         void ClearSlideState();

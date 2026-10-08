@@ -105,8 +105,41 @@
     changed(true); Refresh();
   }
 
+  function Snapshot() {
+    const timings = [];
+    for (const [id, character] of Object.entries(animations.characters))
+      for (const [motion, value] of Object.entries(character.motions)) {
+        const timing = { characterId: id, motionId: motion, fps: value.fps };
+        if (M.own(value, "frameDurationsSeconds")) timing.frameDurationsSeconds = value.frameDurationsSeconds.slice();
+        timings.push(timing);
+      }
+    return { rectangles: M.clone(rectangles), timings };
+  }
+
+  function Restore(snapshot) {
+    rectangles = snapshot.rectangles;
+    for (const timing of snapshot.timings) {
+      const motion = animations.characters[timing.characterId].motions[timing.motionId];
+      motion.fps = timing.fps;
+      if (M.own(timing, "frameDurationsSeconds")) motion.frameDurationsSeconds = timing.frameDurationsSeconds;
+      else delete motion.frameDurationsSeconds;
+    }
+    changed(true); Refresh();
+  }
+
   function Remember() {
-    undo.push(M.clone(rectangles)); if (undo.length > 30) undo.shift(); redo = [];
+    undo.push(Snapshot()); if (undo.length > 30) undo.shift(); redo = [];
+  }
+
+  function SetTiming(update) {
+    const motion = currentMotion();
+    if (!motion) throw new Error("시간을 편집할 모션을 선택하세요.");
+    const next = { ...motion }; update(next); M.FrameTimes(next);
+    if (motion.fps === next.fps && JSON.stringify(motion.frameDurationsSeconds) === JSON.stringify(next.frameDurationsSeconds)) return;
+    Remember(); motion.fps = next.fps;
+    if (M.own(next, "frameDurationsSeconds")) motion.frameDurationsSeconds = next.frameDurationsSeconds;
+    else delete motion.frameDurationsSeconds;
+    changed(true); Refresh();
   }
 
   function Commit(next) {
@@ -162,6 +195,13 @@
       $("frameInfo").textContent = characterId + " / " + motionId + " / " + frameIndex + " · " + motion.fps.toFixed(2)
         + " fps · " + frame.sourceRect.width.toFixed(1) + " × " + frame.sourceRect.height.toFixed(1) + " px · " + motion.image;
     }
+    const times = motion && M.FrameTimes(motion);
+    $("frameSeconds").value = motion ? M.FrameDurations(motion)[frameIndex] : "";
+    $("motionFps").value = motion ? motion.fps : "";
+    $("timingInfo").textContent = times ? (M.own(motion, "frameDurationsSeconds") ? "프레임별 시간" : "균등 시간")
+      + " · 시작 " + times[frameIndex] + "초 · 전체 " + times[motion.frameCount] + "초" : "모션을 선택하세요.";
+    for (const id of ["frameSeconds", "motionFps", "applyFrameSeconds", "applyFps", "resetFrameSeconds"])
+      $(id).disabled = busy || !motion;
     SyncNumbers(); Draw();
   }
 
@@ -397,11 +437,13 @@
   };
   $("save").onclick = () => Task(async () => {
     if (!animations) throw new Error("저장할 애니메이션 문서가 없습니다.");
+    M.ValidateAnimations(animations);
     await SaveJson({ schemaVersion: 1, format: "CharacterEditorProject", animations,
       hurtRects: rectangles, images: Object.fromEntries(Object.entries(images).map(([path, image]) => [path, image.dataUrl])) }, "Character.character-project.json", true);
   });
   $("animationsSave").onclick = () => Task(async () => {
     if (!animations) throw new Error("애니메이션 데이터가 없습니다.");
+    M.ValidateAnimations(animations);
     await SaveJson(animations, "animations.json");
   });
   $("export").onclick = () => Task(async () => {
@@ -425,9 +467,25 @@
     EndDrag(true);
     if (playing) pause(); else {
       if (frameIndex === currentMotion().frameCount - 1) frameIndex = 0;
-      playing = true; elapsed = 0; lastTime = performance.now(); $("play").textContent = "❚❚ 일시 정지"; Refresh();
+      playing = true; elapsed = M.FrameTimes(currentMotion())[frameIndex]; lastTime = performance.now(); $("play").textContent = "❚❚ 일시 정지"; Refresh();
     }
   };
+  for (const id of ["frameSeconds", "motionFps"]) $(id).onfocus = () => pause();
+  $("applyFrameSeconds").onclick = () => Task(async () => {
+    if ($("frameSeconds").value.trim() === "") throw new Error("현재 프레임 시간을 입력하세요.");
+    const duration = Number($("frameSeconds").value);
+    SetTiming(next => { next.frameDurationsSeconds = M.FrameDurations(next); next.frameDurationsSeconds[frameIndex] = duration; });
+    tell("현재 프레임 시간 적용 완료 · 전체 행동 시간과 타격 시점은 별도로 확인하세요.");
+  });
+  $("applyFps").onclick = () => Task(async () => {
+    if ($("motionFps").value.trim() === "") throw new Error("기본 FPS를 입력하세요.");
+    const fps = Number($("motionFps").value); SetTiming(next => { next.fps = fps; });
+    tell("기본 FPS 적용 완료 · 기존 프레임별 시간 배열은 유지됩니다.");
+  });
+  $("resetFrameSeconds").onclick = () => Task(async () => {
+    SetTiming(next => { delete next.frameDurationsSeconds; });
+    tell("현재 모션을 기본 FPS의 균등 시간으로 되돌렸습니다.");
+  });
   $("zoom").oninput = () => { EndDrag(true); Draw(); }; $("flip").onchange = () => { EndDrag(true); Draw(); };
   $("fit").onclick = () => { EndDrag(true); $("zoom").value = "1"; Draw(); };
   $("applyNumbers").onclick = () => Task(async () => {
@@ -447,12 +505,12 @@
     Commit(next); tell("현재 모션 전체에 사각형 복사 완료");
   });
   $("undo").onclick = () => {
-    pause(); if (!undo.length) return;
-    redo.push(M.clone(rectangles)); rectangles = undo.pop(); changed(true); Refresh();
+    pause(); EndDrag(true); if (!undo.length) return;
+    redo.push(Snapshot()); Restore(undo.pop());
   };
   $("redo").onclick = () => {
-    pause(); if (!redo.length) return;
-    undo.push(M.clone(rectangles)); rectangles = redo.pop(); changed(true); Refresh();
+    pause(); EndDrag(true); if (!redo.length) return;
+    undo.push(Snapshot()); Restore(redo.pop());
   };
   window.addEventListener("keydown", event => {
     if (busy || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
@@ -475,15 +533,14 @@
   function Tick(time) {
     if (playing && !busy && !drag) {
       elapsed += Math.min((time - lastTime) / 1000, 0.25);
-      const motion = currentMotion(); let advanced = false;
-      while (elapsed >= 1 / motion.fps && playing) {
-        elapsed -= 1 / motion.fps;
-        if (frameIndex + 1 < motion.frameCount) frameIndex++;
-        else if (motion.loop) frameIndex = 0;
-        else { if (!motion.holdLastFrame) frameIndex = 0; pause(); }
-        advanced = true;
+      const previousFrame = frameIndex;
+      const motion = currentMotion(), times = M.FrameTimes(motion), duration = times[motion.frameCount];
+      if (elapsed >= duration) {
+        if (motion.loop) elapsed %= duration;
+        else { frameIndex = motion.holdLastFrame ? motion.frameCount - 1 : 0; pause(); }
       }
-      if (advanced) UpdateFrameView();
+      if (playing) frameIndex = M.FrameAtTime(times, elapsed);
+      if (frameIndex !== previousFrame || !playing) UpdateFrameView();
     }
     lastTime = time; requestAnimationFrame(Tick);
   }

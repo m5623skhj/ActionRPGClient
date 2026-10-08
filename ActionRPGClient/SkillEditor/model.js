@@ -17,6 +17,42 @@
     assert(object(value) && Object.keys(value).length === names.length && names.every(name => own(value, name)), label + ": 필드 형식 오류");
   }
 
+  // One cumulative timeline drives preview, gameplay events and emitted visual data.
+  function Timeline(motion, limit = 60, minimum = 0.001) {
+    integer(motion.frameCount, 1, 512, "프레임 수"); number(motion.fps, 0.001, 240, "FPS");
+    const explicit = own(motion, "frameDurationsSeconds");
+    assert(!explicit || (Array.isArray(motion.frameDurationsSeconds) && motion.frameDurationsSeconds.length === motion.frameCount),
+      "프레임 시간은 프레임 수와 같은 길이의 배열이어야 합니다.");
+    const durations = explicit ? clone(motion.frameDurationsSeconds) : Array(motion.frameCount).fill(1 / motion.fps);
+    const starts = [0]; let representedTotal = 0;
+    for (const seconds of durations) {
+      assert(typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
+        && Number.isFinite(Math.fround(seconds)) && Math.fround(seconds) > 0, "프레임 시간은 float로 표현 가능한 양수여야 합니다.");
+      const previous = starts[starts.length - 1], next = previous + seconds;
+      const representedNext = Math.fround(representedTotal + Math.fround(seconds));
+      assert(Number.isFinite(next) && Number.isFinite(representedNext) && representedNext > representedTotal
+        && representedNext <= limit && next > previous && next <= limit,
+        "누적 프레임 시간은 엄격히 증가하고 모션 시간 한도 이내여야 합니다.");
+      starts.push(next); representedTotal = representedNext;
+    }
+    const total = starts[starts.length - 1];
+    assert(total >= minimum, "모션 총시간이 너무 짧습니다.");
+    if (own(motion, "durationSeconds")) assert(typeof motion.durationSeconds === "number" && Number.isFinite(motion.durationSeconds)
+      && Math.abs(motion.durationSeconds - total) <= 0.0001, "모션 총시간과 프레임 시간 합계가 다릅니다.");
+    return { durations, starts, total };
+  }
+  function FrameAt(timeline, seconds, loop = false) {
+    const time = loop ? Math.max(0, seconds) % timeline.total : Math.max(0, seconds);
+    let first = 0, last = timeline.durations.length;
+    while (first + 1 < last) { const middle = Math.floor((first + last) / 2);
+      if (timeline.starts[middle] <= time) first = middle; else last = middle; }
+    return first;
+  }
+  function ValidateAnimationTimes(document) {
+    for (const character of Object.values(document.characters))
+      for (const motion of Object.values(character.motions)) Timeline(motion, 60, 0);
+  }
+
   // Missing legacy values preserve the original no-hitstop behavior; explicit zero stays zero.
   function HitstopSeconds(execution) {
     const value = own(execution, "hitstopSeconds") ? execution.hitstopSeconds : 0;
@@ -94,8 +130,11 @@
     number(effect.pivotX, 0, 1, "이펙트 기준점 X"); number(effect.pivotY, 0, 1, "이펙트 기준점 Y");
     for (const name of ["x", "y", "height"]) number(effect.offset[name], -1000, 1000, "이펙트 위치 " + name);
     assert(typeof effect.loop === "boolean", "이펙트 반복 설정 오류");
+    const timing = Timeline(effect, 60, 0);
     const width = image.width / effect.columns, height = image.height / effect.rows;
-    return { image: effect.image, width: image.width, height: image.height, frameCount: effect.frameCount,
+    return { durationSeconds: timing.total,
+      ...(own(effect, "frameDurationsSeconds") ? { frameDurationsSeconds: clone(effect.frameDurationsSeconds) } : {}),
+      image: effect.image, width: image.width, height: image.height, frameCount: effect.frameCount,
       fps: effect.fps, loop: effect.loop, holdLastFrame: false, scaleToMovement: effect.scale,
       frames: Array.from({ length: effect.frameCount }, (_, index) => ({ index,
         sourceRect: { x: index % effect.columns * width, y: Math.floor(index / effect.columns) * height, width, height },
@@ -103,7 +142,7 @@
   }
   function Build(project, images) {
     assert(project?.format === "PlayerSkillEditorProject" && project.schemaVersion === 1, "작업 파일 형식 오류");
-    C.ValidateAnimations(project.animations);
+    C.ValidateAnimations(project.animations); ValidateAnimationTimes(project.animations);
     assert(Array.isArray(project.characters) && project.characters.length > 0 && project.characters.length <= 256, "characters.ini를 불러오세요.");
     const characterIds = new Set(), dataIds = new Set();
     for (const character of project.characters) {
@@ -155,8 +194,10 @@
         CheckImage(motion, images, paths);
         integer(variant.eventFrame, 0, motion.frameCount - 1, label + " 시작 프레임");
         integer(variant.endFrame, variant.eventFrame, motion.frameCount - 1, label + " 종료 프레임");
+        const timing = Timeline(motion);
         const compiled = { motionId: variant.motionId, frameCount: motion.frameCount, fps: motion.fps,
-          durationSeconds: motion.frameCount / motion.fps, eventFrame: variant.eventFrame, endFrame: variant.endFrame };
+          durationSeconds: timing.total, eventFrame: variant.eventFrame, endFrame: variant.endFrame };
+        if (own(motion, "frameDurationsSeconds")) compiled.frameDurationsSeconds = clone(motion.frameDurationsSeconds);
         assert(compiled.durationSeconds <= 60, label + ": 모션은 60초 이하로 제한됩니다.");
         if (skill.type === "direct") {
           compiled.attackRects = [];
@@ -170,7 +211,7 @@
           Object.assign(compiled, { spawn: clone(variant.spawn), yawDegrees: variant.yawDegrees, pitchDegrees: variant.pitchDegrees });
         }
         output[mode] = compiled;
-        const shown = { motion: clone(motion), effect: null };
+        const shown = { motion: { ...clone(motion), durationSeconds: timing.total }, effect: null };
         if (variant.effect) {
           const effect = variant.effect, effectMotion = EffectMotion(effect, images);
           integer(effect.eventFrame, 0, motion.frameCount - 1, "이펙트 시작 프레임");
@@ -191,7 +232,7 @@
   function ReadProject(value) {
     assert(value?.format === "PlayerSkillEditorProject" && value.schemaVersion === 1 && Array.isArray(value.characters)
       && value.characters.length <= 256 && Array.isArray(value.skills) && value.skills.length <= 256, "스킬 작업 파일 형식 오류");
-    if (value.animations) C.ValidateAnimations(value.animations);
+    if (value.animations) { C.ValidateAnimations(value.animations); ValidateAnimationTimes(value.animations); }
     const ids = new Set();
     for (const character of value.characters) {
       assert(object(character) && id(character.id) && character.id === "Character" + character.dataId && !ids.has(character.id), "작업 캐릭터 연결 오류");
@@ -211,7 +252,10 @@
         assert(object(v) && typeof v.motionId === "string", "작업 모드 형식 오류");
         if (skill.type === "direct") assert(object(v.attackRects), "공격 영역 목록 오류");
         if (skill.type === "projectile") assert(object(v.spawn), "발사 위치 오류");
-        if (v.effect !== null) assert(object(v.effect) && object(v.effect.offset), "이펙트 연결 오류");
+        if (v.effect !== null) {
+          assert(object(v.effect) && object(v.effect.offset), "이펙트 연결 오류");
+          if (own(v.effect, "frameDurationsSeconds")) Timeline(v.effect, 60, 0);
+        }
       }
     }
     assert(value.images && typeof value.images === "object" && !Array.isArray(value.images), "작업 이미지 목록 오류");
@@ -231,5 +275,5 @@
       y: Math.sin(yaw) * Math.cos(pitch) * speed, height: Math.sin(pitch) * speed };
   }
   window.PlayerSkillModel = { NewProject, Characters, NewSkill, Variant, SetType, Motion, Scale,
-    EffectMotion, Build, Check, ReadProject, Velocity, COORDINATES, KEYS, IsId: id, clone };
+    EffectMotion, Timeline, FrameAt, Build, Check, ReadProject, Velocity, COORDINATES, KEYS, IsId: id, clone };
 })();

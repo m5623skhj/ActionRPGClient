@@ -96,6 +96,29 @@ namespace
         return std::string(inText.substr(first, last - first));
     }
 
+    std::vector<float> ParseFrameSecondsList(const ActionRPG::IniDocument& inDocument,
+        const std::string_view inSection)
+    {
+        if (!inDocument.HasValue(inSection, "frame_seconds_list")) return {};
+        const auto& text = inDocument.GetValue(inSection, "frame_seconds_list");
+        std::vector<float> values;
+        std::size_t begin{};
+        do
+        {
+            const auto comma = text.find(',', begin);
+            const auto token = Trim(std::string_view(text).substr(begin,
+                comma == std::string::npos ? text.size() - begin : comma - begin));
+            std::size_t parsed{};
+            const float value = std::stof(token, &parsed);
+            if (parsed != token.size() || !std::isfinite(value) || value <= 0.0f)
+                throw std::runtime_error("Invalid frame_seconds_list in [" + std::string(inSection) + "].");
+            values.push_back(value);
+            if (comma == std::string::npos) break;
+            begin = comma + 1;
+        } while (begin <= text.size());
+        return values;
+    }
+
     std::vector<float> ParseFrameAnchorXs(const ActionRPG::IniDocument& inDocument,
         const std::string_view inSection, const std::uint32_t inFrameCount)
     {
@@ -141,7 +164,8 @@ namespace
 namespace ActionRPG
 {
     SpriteAnimation::SpriteAnimation(Microsoft::WRL::ComPtr<ID2D1Bitmap1> inBitmap,
-        std::vector<SpriteFrame> inFrames, const float inFrameSeconds, const float inScale)
+        std::vector<SpriteFrame> inFrames, const float inFrameSeconds, const float inScale,
+        std::vector<float> inFrameDurationsSeconds)
         : bitmap(std::move(inBitmap)), frameSeconds(inFrameSeconds),
           frames(std::move(inFrames)), scale(inScale)
     {
@@ -150,6 +174,7 @@ namespace ActionRPG
             || !std::isfinite(scale) || scale <= 0.0f)
             throw std::runtime_error("Invalid explicit sprite animation.");
         frameCount = static_cast<std::uint32_t>(frames.size());
+        BuildTimeline(inFrameDurationsSeconds);
         const auto size = bitmap->GetPixelSize();
         for (const auto& frame : frames)
         {
@@ -184,45 +209,81 @@ namespace ActionRPG
         frameAnchorXs = ParseFrameAnchorXs(inDefinitions, inSection, frameCount);
 
         const std::uint64_t availableCells = static_cast<std::uint64_t>(columns) * rows;
-        if (frameCount > availableCells)
+        if (frameCount > availableCells || frameCount > 4096)
         {
             throw std::runtime_error("Sprite frame_count exceeds the configured sheet cells in ["
                 + std::string(inSection) + "].");
         }
+        BuildTimeline(ParseFrameSecondsList(inDefinitions, inSection));
+    }
+
+    // Build once in playback float precision; tiny durations must not collapse a boundary.
+    void SpriteAnimation::BuildTimeline(const std::vector<float>& inFrameDurationsSeconds)
+    {
+        if (!inFrameDurationsSeconds.empty() && inFrameDurationsSeconds.size() != frameCount)
+            throw std::runtime_error("One duration is required per sprite frame.");
+        frameEndSeconds.clear();
+        frameEndSeconds.reserve(frameCount);
+        float previous{};
+        double previousExact{};
+        for (std::uint32_t index = 0; index < frameCount; ++index)
+        {
+            const float duration = inFrameDurationsSeconds.empty() ? frameSeconds : inFrameDurationsSeconds[index];
+            const float next = previous + duration;
+            const double nextExact = previousExact + duration;
+            if (!std::isfinite(duration) || duration <= 0.0f || !std::isfinite(next)
+                || next <= previous || next > 60.0f || !std::isfinite(nextExact) || nextExact > 60.0
+                || static_cast<float>(nextExact) <= static_cast<float>(previousExact))
+                throw std::runtime_error("Invalid sprite frame timeline.");
+            frameEndSeconds.push_back(static_cast<float>(nextExact));
+            previous = next;
+            previousExact = nextExact;
+        }
+    }
+
+    std::uint32_t SpriteAnimation::FrameAt(double inSeconds, const bool inLoop) const
+    {
+        const double duration = GetDuration();
+        if (inLoop) inSeconds = std::fmod(inSeconds, duration);
+        if (inSeconds >= duration) return frameCount - 1;
+        return static_cast<std::uint32_t>(std::upper_bound(frameEndSeconds.begin(),
+            frameEndSeconds.end(), inSeconds) - frameEndSeconds.begin());
+    }
+
+    std::uint32_t SpriteAnimation::GetFrameAt(const float inSeconds, const bool inLoop) const
+    {
+        if (!std::isfinite(inSeconds) || inSeconds < 0.0f)
+            throw std::runtime_error("Invalid animation presentation time.");
+        return FrameAt(inSeconds, inLoop);
+    }
+
+    float SpriteAnimation::GetFrameStartSeconds(const std::uint32_t inIndex) const
+    {
+        if (inIndex >= frameCount) throw std::runtime_error("Invalid animation frame index.");
+        return inIndex == 0 ? 0.0f : frameEndSeconds[inIndex - 1];
+    }
+
+    void SpriteAnimation::SetTime(const double inSeconds, const bool inLoop)
+    {
+        elapsedSeconds = inLoop ? std::fmod(inSeconds, static_cast<double>(GetDuration()))
+            : std::min(inSeconds, static_cast<double>(GetDuration()));
+        currentFrame = FrameAt(elapsedSeconds, false);
+        isFinished = !inLoop && elapsedSeconds >= GetDuration();
     }
 
     void SpriteAnimation::Update(const float inDeltaSeconds, const bool inLoop)
     {
-        if (!inLoop)
-        {
-            (void)AdvanceOnce(inDeltaSeconds);
-            return;
-        }
-
-        if (frameCount <= 1 || isFinished)
-        {
-            return;
-        }
-
-        elapsedSeconds += inDeltaSeconds;
-        while (elapsedSeconds >= frameSeconds)
-        {
-            elapsedSeconds -= frameSeconds;
-            if (currentFrame + 1 < frameCount)
-            {
-                ++currentFrame;
-            }
-            else
-            {
-                currentFrame = 0;
-            }
-        }
+        if (!std::isfinite(inDeltaSeconds) || inDeltaSeconds < 0.0f)
+            throw std::runtime_error("Invalid animation update interval.");
+        if (!inLoop) { (void)AdvanceOnce(inDeltaSeconds); return; }
+        if (isFinished) return;
+        SetTime(elapsedSeconds + inDeltaSeconds, true);
     }
 
     void SpriteAnimation::Reset()
     {
         currentFrame = 0;
-        elapsedSeconds = 0.0f;
+        elapsedSeconds = 0.0;
         isFinished = false;
     }
 
@@ -230,36 +291,21 @@ namespace ActionRPG
     {
         if (!std::isfinite(inSeconds) || inSeconds < 0.0f)
             throw std::runtime_error("Invalid animation presentation time.");
-        const double frame = std::floor(static_cast<double>(inSeconds) / frameSeconds);
-        currentFrame = inLoop ? static_cast<std::uint32_t>(std::fmod(frame, frameCount))
-            : static_cast<std::uint32_t>(std::min(frame, static_cast<double>(frameCount - 1)));
-        elapsedSeconds = std::fmod(inSeconds, frameSeconds);
-        isFinished = !inLoop && frame >= frameCount;
+        SetTime(inSeconds, inLoop);
     }
 
     float SpriteAnimation::AdvanceOnce(const float inDeltaSeconds)
     {
-        if (isFinished)
+        if (!std::isfinite(inDeltaSeconds) || inDeltaSeconds < 0.0f)
+            throw std::runtime_error("Invalid animation update interval.");
+        if (isFinished) return inDeltaSeconds;
+        const double remaining = static_cast<double>(GetDuration()) - elapsedSeconds;
+        if (inDeltaSeconds >= remaining)
         {
-            return inDeltaSeconds;
+            SetTime(GetDuration(), false);
+            return static_cast<float>(std::max(0.0, static_cast<double>(inDeltaSeconds) - remaining));
         }
-
-        float remainingSeconds = inDeltaSeconds;
-        while (remainingSeconds >= frameSeconds - elapsedSeconds)
-        {
-            remainingSeconds -= frameSeconds - elapsedSeconds;
-            elapsedSeconds = 0.0f;
-            if (currentFrame + 1 < frameCount)
-            {
-                ++currentFrame;
-            }
-            else
-            {
-                isFinished = true;
-                return remainingSeconds;
-            }
-        }
-        elapsedSeconds += remainingSeconds;
+        SetTime(elapsedSeconds + inDeltaSeconds, false);
         return 0.0f;
     }
 

@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "motions": {
+    "rusted_armor_slash": {
+      "image": "rusted_armor_slash.png",
+      "width": 1536,
+      "height": 1024,
+      "frameCount": 6,
+      "fps": 30,
+      "frameDurationsSeconds": [
+        0.02,
+        0.02,
+        0.025,
+        0.035,
+        0.045,
+        0.055
+      ],
+      "referenceHeight": 334,
+      "scaleToMovement": 1,
+      "loop": false,
+      "holdLastFrame": false,
+      "frames": [
+        {
+          "index": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 1,
+          "sourceRect": {
+            "x": 512,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 2,
+          "sourceRect": {
+            "x": 1024,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 3,
+          "sourceRect": {
+            "x": 0,
+            "y": 512,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 4,
+          "sourceRect": {
+            "x": 512,
+            "y": 512,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 5,
+          "sourceRect": {
+            "x": 1024,
+            "y": 512,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        }
+      ]
+    },
+    "citadel_warden_slash": {
+      "image": "citadel_warden_slash.png",
+      "width": 2048,
+      "height": 1024,
+      "frameCount": 8,
+      "fps": 25,
+      "frameDurationsSeconds": [
+        0.03,
+        0.02,
+        0.025,
+        0.035,
+        0.04,
+        0.045,
+        0.055,
+        0.07
+      ],
+      "referenceHeight": 301,
+      "scaleToMovement": 1,
+      "loop": false,
+      "holdLastFrame": false,
+      "frames": [
+        {
+          "index": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 1,
+          "sourceRect": {
+            "x": 512,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 2,
+          "sourceRect": {
+            "x": 1024,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 3,
+          "sourceRect": {
+            "x": 1536,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 4,
+          "sourceRect": {
+            "x": 0,
+            "y": 512,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 5,
+          "sourceRect": {
+            "x": 512,
+            "y": 512,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 6,
+          "sourceRect": {
+            "x": 1024,
+            "y": 512,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        },
+        {
+          "index": 7,
+          "sourceRect": {
+            "x": 1536,
+            "y": 512,
+            "width": 512,
+            "height": 512
+          },
+          "pivot": {
+            "x": 256,
+            "y": 256
+          }
+        }
+      ]
+    }
+  }
+}

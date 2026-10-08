@@ -617,20 +617,25 @@ namespace ActionRPG
                 && (slidePresentationSeconds < combatState->slideDurationSeconds || stopped));
     }
 
-    /** Capture normalized ground direction and buffed run speed once; the server owns hits/damage. */
+    /** Capture direction and buffed run speed once; run speed times the authored seconds gives total distance. */
     bool Character::PredictSlide(const std::uint32_t inSequence, const Vector2 inDirection,
-        const float inDurationSeconds)
+        const float inDurationSeconds, const float inDistancePerRunSpeedSeconds)
     {
         const float length = std::hypot(inDirection.x, inDirection.y);
         if (!CanStartSlide() || inSequence == 0 || !std::isfinite(length) || length <= 0.0f
-            || !std::isfinite(inDurationSeconds) || inDurationSeconds <= 0.0f
-            || !std::isfinite(runSpeed) || runSpeed <= 0.0f) return false;
+            || !std::isfinite(inDurationSeconds) || inDurationSeconds < 0.05f || inDurationSeconds > 2.0f
+            || !std::isfinite(inDistancePerRunSpeedSeconds) || inDistancePerRunSpeedSeconds < 0.05f
+            || inDistancePerRunSpeedSeconds > 5.0f || !std::isfinite(runSpeed) || runSpeed <= 0.0f) return false;
+        const float speed = runSpeed * inDistancePerRunSpeedSeconds / inDurationSeconds;
+        // Server limits: runSpeed 2000 * movement buff 10 * distance seconds 5 / minimum duration 0.05.
+        constexpr float MAX_SLIDE_SPEED = 2000000.0f;
+        if (!std::isfinite(speed) || speed <= 0.0f || speed > MAX_SLIDE_SPEED) return false;
         ClearPredictedAttackFacing();
         CancelAttack();
         bufferedActions.clear();
         pendingProjectileRequests.clear();
         slidePrediction = SlidePrediction{inSequence, {inDirection.x / length, inDirection.y / length},
-            runSpeed, inDurationSeconds, 0.0f, inDurationSeconds + 0.5f,
+            speed, inDurationSeconds, 0.0f, inDurationSeconds + 0.5f,
             inDirection.x == 0.0f ? facingLeft : inDirection.x < 0.0f};
         facingLeft = slidePrediction->facingLeft;
         if (slideAnimation) slideAnimation->Reset();

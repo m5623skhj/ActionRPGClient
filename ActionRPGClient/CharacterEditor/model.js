@@ -8,14 +8,14 @@
     ["jumpStart", "PlayerJumpStart"], ["jumpHold", "PlayerJumpHold"], ["jumpLand", "PlayerJumpLand"],
     ["airAttackStart", "PlayerAirShootStart"], ["airAttackFire", "PlayerAirShootFire"], ["airAttackEnd", "PlayerAirShootEnd"],
     ["hit", "PlayerHit"], ["airHitStart", "PlayerAirHitStart"], ["airHitFall", "PlayerAirHitFall"],
-    ["knockdown", "PlayerKnockdown"], ["getUp", "PlayerGetUp"]
+    ["knockdown", "PlayerKnockdown"], ["getUp", "PlayerGetUp"], ["slide", "PlayerSlide"]
   ];
   const LABELS = { idle: "대기", walk: "걷기", run: "달리기", move: "이동", attack: "공격",
     attackStart: "공격 준비", attackFire: "발사", attackEnd: "공격 회수", jumpStart: "점프 준비",
     jumpHold: "공중 유지", jumpLand: "착지", airAttackStart: "공중 공격 준비",
     airAttackFire: "공중 발사", airAttackEnd: "공중 공격 회수", hit: "피격",
     airHitStart: "공중 피격 시작", airHitFall: "피격 추락", airborne: "에어본", knockdown: "쓰러짐",
-    getUp: "기상", death: "사망" };
+    getUp: "기상", slide: "슬라이딩", death: "사망" };
   const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const finite = value => typeof value === "number" && Number.isFinite(value);
@@ -28,6 +28,43 @@
   const key = (characterId, motionId, index) => JSON.stringify([characterId, motionId, index]);
   const clone = value => JSON.parse(JSON.stringify(value));
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
+
+  // Durations are indexed by frame.index, independent of the frames array order.
+  function FrameDurations(motion) {
+    assert(object(motion) && Number.isInteger(motion.frameCount) && motion.frameCount > 0
+      && motion.frameCount <= 512 && positive(motion.fps) && motion.fps <= 240, "모션의 프레임 수/FPS 오류");
+    if (!own(motion, "frameDurationsSeconds")) return Array(motion.frameCount).fill(1 / motion.fps);
+    assert(Array.isArray(motion.frameDurationsSeconds) && motion.frameDurationsSeconds.length === motion.frameCount,
+      "frameDurationsSeconds는 frameCount개의 시간 배열이어야 합니다.");
+    return motion.frameDurationsSeconds.slice();
+  }
+
+  function FrameTimes(motion) {
+    const times = [0]; let representedTotal = 0;
+    for (const [index, duration] of FrameDurations(motion).entries()) {
+      const represented = Math.fround(duration);
+      assert(positive(duration) && Number.isFinite(represented) && represented > 0,
+        "프레임 " + index + ": 시간은 float로 표현 가능한 유한 양수여야 합니다.");
+      const previous = times[times.length - 1], next = previous + duration;
+      const representedNext = Math.fround(representedTotal + represented);
+      assert(Number.isFinite(next) && next > previous && Number.isFinite(representedNext)
+        && representedNext > representedTotal, "프레임 " + index + ": 누적 시간 범위 또는 정밀도 오류");
+      times.push(next); representedTotal = representedNext;
+    }
+    assert(times[times.length - 1] <= 60 && representedTotal <= 60, "모션 전체 시간은 float 누적값까지 60초 이하로 제한됩니다.");
+    return times;
+  }
+
+  // Search half-open frame intervals [T[index], T[index + 1]).
+  function FrameAtTime(times, seconds) {
+    let left = 0, right = times.length - 2;
+    while (left < right) {
+      const middle = Math.floor((left + right + 1) / 2);
+      if (times[middle] <= seconds) left = middle;
+      else right = middle - 1;
+    }
+    return left;
+  }
 
   function ValidateAnimations(document) {
     assert(object(document) && document.version === 1 && object(document.characters), "animations.json version 1 / characters 객체가 필요합니다.");
@@ -49,6 +86,7 @@
           && Array.isArray(motion.frames) && motion.frames.length === motion.frameCount, at + ": 프레임 수 오류");
         assert(positive(motion.fps) && motion.fps <= 240 && typeof motion.loop === "boolean"
           && typeof motion.holdLastFrame === "boolean", at + ": 재생 설정 오류");
+        try { FrameTimes(motion); } catch (error) { throw new Error(at + ": " + error.message); }
         if (own(motion, "scaleToMovement")) assert(positive(motion.scaleToMovement), at + ": 상대 배율 오류");
         if (own(motion, "renderSize")) assert(object(motion.renderSize) && positive(motion.renderSize.width)
           && positive(motion.renderSize.height), at + ": 게임 표시 크기 오류");
@@ -122,6 +160,7 @@
       for (const [motionId, motion] of Object.entries(character.motions)) {
         const output = { frameCount: motion.frameCount, fps: motion.fps, loop: motion.loop,
           holdLastFrame: motion.holdLastFrame, frames: [] };
+        if (own(motion, "frameDurationsSeconds")) output.frameDurationsSeconds = clone(motion.frameDurationsSeconds);
         if (motion.renderSize) output.renderSize = clone(motion.renderSize);
         if (own(motion, "scaleToMovement")) output.scaleToMovement = motion.scaleToMovement;
         for (const frame of [...motion.frames].sort((left, right) => left.index - right.index))
@@ -149,8 +188,10 @@
         assert(own(document.characters[characterId].motions, motionId) && object(motion) && Array.isArray(motion.frames)
           && motion.frameCount === source.frameCount && motion.fps === source.fps && motion.loop === source.loop
           && motion.holdLastFrame === source.holdLastFrame
+          && JSON.stringify(FrameDurations(motion)) === JSON.stringify(FrameDurations(source))
           && JSON.stringify(motion.renderSize || null) === JSON.stringify(source.renderSize || null)
           && (motion.scaleToMovement ?? null) === (source.scaleToMovement ?? null), "모션 정의가 변경되었습니다: " + motionId);
+        FrameTimes(motion);
         for (const frame of motion.frames) {
           const original = source.frames.find(item => item.index === frame.index);
           const rectKey = key(characterId, motionId, frame.index);
@@ -253,6 +294,11 @@
         const loop = ["idle", "walk", "run"].includes(motionId);
         const motion = { animationId, image, width: size.width, height: size.height, frameCount, fps: 1 / seconds,
           loop, holdLastFrame: !loop, renderSize: { width, height }, frames: [] };
+        if (own(animation, "frame_seconds_list")) {
+          const texts = animation.frame_seconds_list.split(",");
+          assert(texts.every(value => value.trim() !== ""), animationId + ": frame_seconds_list의 빈 시간 오류");
+          motion.frameDurationsSeconds = texts.map(Number);
+        }
         for (let index = 0; index < frameCount; ++index) {
           const column = index % columns, row = Math.floor(index / columns), frameWidth = size.width / columns;
           const top = rows === 2 ? (row === 0 ? 0 : size.height * ratio) : row * size.height / rows;
@@ -268,5 +314,5 @@
   }
 
   window.CharacterEditorModel = { ValidateAnimations, Entries, ValidateRect, Check, Export, ReadHurtRects,
-    ReadProject, ParseIni, ConvertPlayer, PLAYER_BINDINGS, LABELS, key, clone, own, safePath };
+    ReadProject, ParseIni, ConvertPlayer, FrameDurations, FrameTimes, FrameAtTime, PLAYER_BINDINGS, LABELS, key, clone, own, safePath };
 })();

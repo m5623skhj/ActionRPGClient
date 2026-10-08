@@ -13,7 +13,7 @@ HTML/CSS/JavaScript와 Windows 브라우저 런처 프로젝트로 구성됩니�
 | 바로 열기 | [index.html](index.html)을 Edge/Chrome에서 열기; 서버·npm 설치 불필요 |
 | Windows 런처 | [CharacterEditor.vcxproj](CharacterEditor.vcxproj), `artifacts/bin/x64/Debug/CharacterEditor.exe` (Release도 같은 구조) |
 | 입력 | animations.json과 참조 이미지, 또는 플레이어 INI·이미지; 편집 재개는 CharacterEditorProject 작업 JSON |
-| 작업 흐름 | 원본 불러오기 → 캐릭터/모션/프레임 선택 → 피격 사각형 편집 → 작업 저장·불러오기 → 정적 검사 → 게임용 JSON 출력 |
+| 작업 흐름 | 원본 불러오기 → 캐릭터/모션/프레임 선택 → 피격 사각형·재생 시간 편집 → 작업 저장·불러오기 → 정적 검사 → 게임용 JSON 출력 |
 | 상세 계약 | [FORMAT.md](FORMAT.md): sourceRect/pivot/배율, CharacterHurtRects v1, 로더·등록 경계 |
 
 작업 저장은 편집 재개용이며 피격 JSON 출력과 다릅니다. 출력에는 별도 승인 기록이나 자동 설치가 없습니다.
@@ -56,7 +56,7 @@ Visual Studio 솔루션에는 `CharacterEditor` 프로젝트가 추가됩니다.
 읽는 파일:
 
 - `Data/characters.ini`: 캐릭터 ID와 idle/walk 애니메이션 참조. `Default`도 원본의 기본 정의 ID로 표시합니다.
-- `Data/animations.ini`: 이미지 ID, columns/rows, frame_count, frame_seconds, 행 비율, 기준점, 게임 표시 크기.
+- `Data/animations.ini`: 이미지 ID, columns/rows, frame_count, frame_seconds, 선택 frame_seconds_list, 행 비율, 기준점, 게임 표시 크기.
 - `Data/assets.ini`: 이미지 ID → Assets 기준 상대 경로.
 - 해당 이미지 파일.
 - 선택 폴더에 있으면 `Game/Player.cpp`: `PLAYER_ANIMATIONS`가 변환기의 검토된 연결표와 일치하는지 확인.
@@ -68,14 +68,17 @@ Visual Studio 솔루션에는 `CharacterEditor` 프로젝트가 추가됩니다.
 
 변환하는 모션 ID:
 `idle`, `walk`, `run`, `attackStart`, `attackFire`, `attackEnd`, `jumpStart`, `jumpHold`, `jumpLand`,
-`airAttackStart`, `airAttackFire`, `airAttackEnd`, `hit`, `airHitStart`, `airHitFall`, `knockdown`, `getUp`.
+`airAttackStart`, `airAttackFire`, `airAttackEnd`, `hit`, `airHitStart`, `airHitFall`, `knockdown`, `getUp`, `slide`.
 
 `SpriteAnimation::Draw`와 같은 규칙으로 프레임을 계산합니다.
 2행 시트는 `first_row_ratio`를 적용하고 2행의 `second_row_anchor_y`, 프레임별 `anchor_xs`도 반영합니다.
 `render_width`와 `render_height`는 `renderSize`로 기록합니다. 프레임 번호는 0부터 시작합니다.
-변환 결과는 즉시 편집할 수 있고 **변환한 animations.json 저장**으로 독립 JSON을 출력합니다.
+변환 결과는 즉시 편집할 수 있고 **편집한 animations.json 저장**으로 독립 JSON을 출력합니다.
 이 버튼은 몬스터와 플레이어를 합친 전체 현재 애니메이션 문서도 저장합니다. 이미지는 포함하지 않습니다.
-게임의 원본 INI나 C++는 변경하지 않습니다.
+게임의 원본 INI나 C++는 변경하지 않습니다. INI 내보내기 기능은 없습니다.
+선택 `frame_seconds_list`는 쉼표로 나눈 0 기반 프레임 순서의 시간(초)이며 정확히 frame_count개여야 합니다.
+변환 시 `frameDurationsSeconds`로 보존하고, 없으면 기존 frame_seconds의 균등 시간을 사용합니다.
+frame_seconds는 배열이 있어도 호환용 기본 시간으로 유지합니다.
 
 ## 사각형 편집
 
@@ -92,10 +95,31 @@ Visual Studio 솔루션에는 `CharacterEditor` 프로젝트가 추가됩니다.
 피격 사각형은 해당 프레임 이미지 내부에 있어야 합니다. 기준점과 축을 설정하는 UI는 없습니다.
 게임 상태 우선순위, AI, HP, 이동 속도, 공격 영역, 무적 설정은 이번 범위에 없습니다.
 
+## 프레임별 재생 시간
+
+현재 프레임을 선택한 뒤 **현재 프레임 시간 (초)**를 입력하고 **현재 프레임 시간 적용**을 누릅니다.
+배열이 없던 모션은 다른 프레임에 기존 1/fps 시간을 채운 후 선택 프레임만 변경합니다.
+**기본 FPS 적용**은 배열을 지우지 않습니다. 배열이 있으면 재생·출력에서 배열이 우선합니다.
+**모션을 균등 시간으로 되돌리기**를 누르면 현재 모션의 배열을 제거하고 기본 FPS를 사용합니다.
+시간 변경과 배열 제거도 피격 영역 편집과 함께 실행 취소·다시 실행할 수 있습니다.
+이미지나 프레임 좌표는 변경하지 않습니다.
+
+프레임별 시간은 유한 양수이고 float로 변환한 값도 유한 양수여야 합니다.
+누적 시간은 유한하고 각 경계가 엄격히 증가해야 하며 float 누적 계산에서도 증가해야 합니다.
+공통 재생기와 동일하게 모션의 전체 시간은 배열 유무와 관계없이 60초 이하입니다.
+미리보기에는 선택 프레임의 시작 시각과 모션의 전체 시간을 표시합니다.
+재생은 누적 시간으로 현재 프레임을 선택하며 기존 반복·마지막 프레임 유지 규칙을 따릅니다.
+
+시간 편집은 전체 행동 시간과 타격 시점을 자동 보정하지 않습니다.
+기존 전투 타이밍을 유지하려면 준비·타격·복귀 각 구간의 합계를 유지하면서 내부 시간을 재배분하세요.
+단일 프레임·공중 물리 유지 상태의 시간을 임의로 변경하지 않도록 런타임 담당과 확인하세요.
+독립 이펙트를 포함한 입력 모션도 같은 시간 검증·저장 규칙을 따릅니다.
+캐릭터와 분리된 이펙트의 등록·발생 시점 편집은 해당 제작 도구와 런타임 계약을 따릅니다.
+
 ## 저장·불러오기·출력
 
 **작업 저장**은 `Character.character-project.json`을 저장합니다.
-`format=CharacterEditorProject`, `schemaVersion=1`이며 원본 애니메이션 스냅샷, 피격 사각형, 불러온 이미지 base64를 포함합니다.
+`format=CharacterEditorProject`, `schemaVersion=1`이며 원본 애니메이션과 편집한 시간 배열의 스냅샷, 피격 사각형, 불러온 이미지 base64를 포함합니다.
 미완성 작업이나 일부 이미지가 없는 작업도 저장할 수 있습니다. 다시 불러오면 원본 경로 없이 편집을 이어갈 수 있습니다.
 이미지가 없는 항목은 나중에 이미지 폴더를 불러오세요.
 
@@ -106,13 +130,13 @@ Visual Studio 솔루션에는 `CharacterEditor` 프로젝트가 추가됩니다.
 **게임용 JSON 출력**은 `Character.hurtrects.json`을 저장합니다.
 `format=CharacterHurtRects`, `schemaVersion=1`이며 모든 프레임의 영역이 유효하고 실제 이미지 크기가 선언과 일치해야 출력합니다.
 이미지 경로·이미지 데이터는 포함하지 않습니다. 자세한 계약은 [FORMAT.md](FORMAT.md)를 읽으세요.
-**피격 JSON 불러오기**는 현재 애니메이션의 ID·프레임·좌표·재생·표시 크기와 대조한 후 영역을 복원합니다.
+**피격 JSON 불러오기**는 현재 애니메이션의 ID·프레임·좌표·재생·프레임별 시간·표시 크기와 대조한 후 영역을 복원합니다.
 다른 원본의 피격 영역을 ID만 보고 자동 적용하지 않습니다.
 
 ## 검사·제한
 
 - animations.json version 1, 고유 캐릭터/모션 ID, 정확한 프레임 수와 고유 0 기반 index
-- sourceRect의 이미지 경계, pivot, 재생 정보, 상대 배율과 표시 크기
+- sourceRect의 이미지 경계, pivot, 재생 정보, 선택 시간 배열의 길이·유한 양수·float 범위·누적 증가, 상대 배율과 표시 크기
 - 실제 이미지 해석 여부와 PNG/JPEG/WebP 크기, 안전한 상대 경로
 - 사각형 수치·크기·프레임 경계, 원본에 없는 참조와 미지정 프레임
 

@@ -12,6 +12,8 @@
 namespace
 {
     using Json = nlohmann::json;
+    // runSpeed 2000 * movementMultiplier 10 * distance seconds 5 / duration 0.05.
+    constexpr float MAX_SLIDE_SPEED = 2000000.0f;
     float Number(const Json& inValue, const bool inSigned = false, const bool inUnbounded = false)
     {
         if (!inValue.is_number()) throw std::runtime_error("Invalid combat number.");
@@ -60,7 +62,7 @@ namespace
     {
         const float length = std::hypot(inState.slideDirectionX, inState.slideDirectionY);
         if (inState.slideDurationSeconds > 2.0f || inState.slideSeconds > 2.0f
-            || inState.slideSpeed > 20000.0f || length > 1.001f
+            || inState.slideSpeed > MAX_SLIDE_SPEED || length > 1.001f
             || (inState.slideActive && (inState.slideSequence == 0 || inState.slideDurationSeconds <= 0.0f
                 || inState.slideSeconds > inState.slideDurationSeconds + 0.001f
                 || inState.slideSpeed <= 0.0f || length < 0.999f
@@ -186,7 +188,7 @@ namespace ActionRPG
             player.slideDurationSeconds = Number(source.at("slideDurationSeconds"));
             player.slideDirectionX = Number(source.at("slideDirectionX"), true);
             player.slideDirectionY = Number(source.at("slideDirectionY"), true);
-            player.slideSpeed = Number(source.at("slideSpeed"));
+            player.slideSpeed = Number(source.at("slideSpeed"), false, true);
             player.shotSeconds = Number(source.at("shotSeconds")); player.jumpSeconds = Number(source.at("jumpSeconds"));
             player.shotCount = Integer(source.at("shotCount")); player.airShotCount = Integer(source.at("airShotCount"));
             if (player.shotCount > 5 || player.airShotCount > 5) throw std::runtime_error("Invalid shot count.");
@@ -378,7 +380,7 @@ namespace ActionRPG
             player.slideSequence = static_cast<std::uint32_t>(reader.UInt(4));
             player.slideSeconds = reader.Float(); player.slideDurationSeconds = reader.Float();
             player.slideDirectionX = reader.Float(true); player.slideDirectionY = reader.Float(true);
-            player.slideSpeed = reader.Float();
+            player.slideSpeed = reader.Float(false, true);
             if (shot > 3 || jump > 2 || player.shotCount > 5 || player.airShotCount > 5)
                 throw std::runtime_error("Invalid realtime player action.");
             player.shotPhase = static_cast<CombatShotPhase>(shot); player.jumpPhase = static_cast<CombatJumpPhase>(jump);

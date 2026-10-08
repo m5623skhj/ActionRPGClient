@@ -1068,6 +1068,8 @@ namespace ActionRPG
                     skillUi.CancelDrag();
                     commandQueue.Clear();
                     combatBuffer.Clear(); presentationSnapshot.reset();
+                    for (auto& room : dungeonMonsters)
+                        for (auto& monster : room.second) monster->ClearAttackEffect();
                 }
                 else if constexpr (std::is_same_v<EventType, DungeonRealtimeEvent>)
                 {
@@ -1169,7 +1171,7 @@ namespace ActionRPG
             {
                 MonsterSpawn spawn{state.instanceId, state.dataId, state.position, state.facingLeft, state.hp, state.maxHp};
                 auto created = std::make_unique<Monster>(*monsterTemplates.at(state.dataId), spawn);
-                created->ApplyCombatState(state, rules); monsters.push_back(std::move(created));
+                created->ApplyCombatState(state, rules, true, snapshot.mapEpoch); monsters.push_back(std::move(created));
             }
         }
         std::erase_if(monsters, [&presentMonsters](const auto& inMonster) { return !presentMonsters.contains(inMonster->GetInstanceId()); });
@@ -1196,6 +1198,8 @@ namespace ActionRPG
         if (snapshot.cleared)
         {
             player.ClearPredictedAttackFacing(); player.ClearSlideState(); combatBuffer.Clear();
+            for (auto& room : dungeonMonsters)
+                for (auto& monster : room.second) monster->ClearAttackEffect();
         }
         combatBuffer.Push(snapshot);
         lastCombatTick = snapshot.serverTick; hasCombatTick = true; dungeonCleared = snapshot.cleared;
@@ -1264,7 +1268,8 @@ namespace ActionRPG
             if (slide)
             {
                 const auto& definition = dungeonWorld->GetSlideDefinition(localCharacterId);
-                player.PredictSlide(packet.sequence, direction, definition.durationSeconds);
+                player.PredictSlide(packet.sequence, direction, definition.durationSeconds,
+                    definition.distancePerRunSpeedSeconds);
                 commandQueue.Clear();
                 break; // Consume X exactly once; no same-frame C/second X reservation.
             }
@@ -1293,7 +1298,7 @@ namespace ActionRPG
         if (const auto monsters = dungeonMonsters.find(dungeonMapId); monsters != dungeonMonsters.end())
             for (const auto& state : presentationSnapshot->monsters)
                 for (const auto& actor : monsters->second)
-                    if (actor->GetInstanceId() == state.instanceId) actor->ApplyCombatState(state, rules, true);
+                    if (actor->GetInstanceId() == state.instanceId) actor->ApplyCombatState(state, rules, true, presentationSnapshot->mapEpoch);
     }
 
     void GameWorld::RenderCombatProjectiles(D2DRenderer& inRenderer) const

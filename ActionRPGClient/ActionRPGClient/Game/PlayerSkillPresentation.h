@@ -4,6 +4,7 @@
 #include "Game/DungeonCombat.h"
 #include "Game/Camera.h"
 #include "Input/InputState.h"
+#include "Resources/SpriteAnimation.h"
 #include <d2d1_1.h>
 #include <wrl/client.h>
 #include <memory>
@@ -31,6 +32,7 @@ namespace ActionRPG
         struct Motion
         {
             nlohmann::json definition;
+            SpriteAnimation animation;
             Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
         };
         struct Variant

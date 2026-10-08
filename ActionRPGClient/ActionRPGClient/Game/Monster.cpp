@@ -85,6 +85,26 @@ namespace
                 throw std::runtime_error("Monster frame exceeds the declared image size.");
             clip.frames.push_back(parsed);
         }
+        const bool hasDurations = inMotion.contains("frameDurationsSeconds");
+        if (hasDurations && (!inMotion.at("frameDurationsSeconds").is_array()
+            || inMotion.at("frameDurationsSeconds").size() != count))
+            throw std::runtime_error("Invalid monster frame duration count.");
+        float previous{};
+        double previousExact{};
+        for (std::uint32_t index = 0; index < count; ++index)
+        {
+            const float duration = hasDurations ? Number(inMotion.at("frameDurationsSeconds").at(index), true) : clip.frameSeconds;
+            const float next = previous + duration;
+            const double nextExact = previousExact + (hasDurations
+                ? inMotion.at("frameDurationsSeconds").at(index).get<double>() : duration);
+            if (!std::isfinite(next) || next <= previous || next > 60.0f
+                || !std::isfinite(nextExact) || nextExact > 60.0
+                || static_cast<float>(nextExact) <= static_cast<float>(previousExact))
+                throw std::runtime_error("Invalid monster frame timeline.");
+            clip.frameDurationsSeconds.push_back(duration);
+            previous = next;
+            previousExact = nextExact;
+        }
         return clip;
     }
 
@@ -96,6 +116,8 @@ namespace
         if (first > last || last >= inClip.frames.size()) throw std::runtime_error("Invalid monster motion range.");
         auto clip = inClip;
         clip.frames.assign(inClip.frames.begin() + first, inClip.frames.begin() + last + 1);
+        clip.frameDurationsSeconds.assign(inClip.frameDurationsSeconds.begin() + first,
+            inClip.frameDurationsSeconds.begin() + last + 1);
         clip.loop = false;
         clip.holdLastFrame = true;
         return clip;
@@ -157,6 +179,8 @@ namespace ActionRPG
                 auto& launch = definition.clips.at(Motion::AirborneLaunch);
                 const auto& hold = definition.clips.at(Motion::AirborneHold);
                 launch.frames.insert(launch.frames.end(), hold.frames.begin(), hold.frames.end());
+                launch.frameDurationsSeconds.insert(launch.frameDurationsSeconds.end(),
+                    hold.frameDurationsSeconds.begin(), hold.frameDurationsSeconds.end());
                 const auto& attack = motions.at("attack");
                 for (const auto& name : { "start", "active", "end" })
                     (void)Slice(definition.clips.at(Motion::Attack), attack.at("phases").at(name));
@@ -172,6 +196,62 @@ namespace ActionRPG
                 definition.clips.emplace(Motion::Idle, std::move(idleClip));
             }
             definitions.emplace(dataId, std::move(definition));
+        }
+        const auto effects = ReadJson(inAssetCatalog.GetAssetPath("Data/MonsterAttackEffects.json"));
+        if (effects.at("format") != "MonsterAttackEffects" || effects.at("schemaVersion") != 1
+            || !effects.at("effects").is_array() || effects.at("effects").size() > definitions.size())
+            throw std::runtime_error("Invalid monster effect catalog.");
+        const auto metadataPath = effects.at("metadata").get<std::string>();
+        const auto metadata = ReadJson(inAssetCatalog.GetAssetPath(metadataPath));
+        if (metadata.at("version") != 1) throw std::runtime_error("Unsupported monster effect metadata.");
+        const auto folder = std::filesystem::path(metadataPath).parent_path().generic_string() + "/";
+        std::unordered_set<std::string> effectOwners;
+        for (const auto& source : effects.at("effects"))
+        {
+            const auto id = source.at("monsterId").get<std::string>();
+            auto target = std::find_if(definitions.begin(), definitions.end(),
+                [&id](const auto& value) { return value.second.monsterId == id; });
+            if (target == definitions.end() || !effectOwners.insert(id).second
+                || !target->second.clips.contains(Motion::Attack))
+                throw std::runtime_error("Unknown or duplicate monster effect owner.");
+            auto& definition = target->second;
+            const auto& motion = metadata.at("motions").at(source.at("motionId").get<std::string>());
+            const float renderHeight = Number(source.at("renderHeight"), true);
+            if (renderHeight > 1000.0f) throw std::runtime_error("Monster effect is too large.");
+            MonsterAttackEffectDefinition effect;
+            effect.clip = ReadClip(motion, folder, renderHeight / Number(motion.at("referenceHeight"), true), inAssetCatalog);
+            if (effect.clip.loop || effect.clip.holdLastFrame)
+                throw std::runtime_error("Monster attack effect must expire without looping.");
+            const auto eventFrame = Integer(source.at("eventFrame"));
+            const auto impactFrame = Integer(source.at("impactFrame"));
+            const auto& attack = definition.clips.at(Motion::Attack);
+            if (eventFrame >= attack.frames.size() || impactFrame >= effect.clip.frames.size())
+                throw std::runtime_error("Invalid monster effect event frame.");
+            const auto frameStart = [](const MonsterClipDefinition& inClip, const std::uint32_t inIndex)
+            {
+                double seconds{};
+                for (std::uint32_t index = 0; index < inIndex; ++index) seconds += inClip.frameDurationsSeconds[index];
+                return static_cast<float>(seconds);
+            };
+            const auto signedNumber = [](const Json& inValue)
+            {
+                if (!inValue.is_number()) throw std::runtime_error("Invalid monster effect offset.");
+                const float value = inValue.get<float>();
+                if (!std::isfinite(value) || std::abs(value) > 1000.0f)
+                    throw std::runtime_error("Invalid monster effect offset.");
+                return value;
+            };
+            const float startOffset = signedNumber(source.at("startOffsetSeconds"));
+            const float hitSeconds = frameStart(attack, eventFrame);
+            effect.startSeconds = hitSeconds + startOffset;
+            const float duration = frameStart(effect.clip, static_cast<std::uint32_t>(effect.clip.frames.size()));
+            if (effect.startSeconds < 0.0f || startOffset > 0.0f
+                || std::abs(effect.startSeconds + frameStart(effect.clip, impactFrame) - hitSeconds) > 0.0001f
+                || effect.startSeconds + duration > frameStart(attack, static_cast<std::uint32_t>(attack.frames.size())) + 0.0001f)
+                throw std::runtime_error("Monster effect timing differs from attack timing.");
+            effect.offset = {signedNumber(source.at("offset").at("x")), signedNumber(source.at("offset").at("y"))};
+            effect.offsetHeight = signedNumber(source.at("offset").at("height"));
+            definition.attackEffect = std::move(effect);
         }
     }
 
@@ -203,14 +283,26 @@ namespace ActionRPG
                 if (!bitmaps.contains(source.image))
                     bitmaps.emplace(source.image, inRenderer.LoadBitmap(inAssetCatalog.GetAssetPath(source.image)));
                 clips.emplace(clipMotion, Clip{SpriteAnimation(bitmaps.at(source.image), source.frames,
-                    source.frameSeconds, source.scale), source.loop, source.holdLastFrame});
+                    source.frameSeconds, source.scale, source.frameDurationsSeconds), source.loop, source.holdLastFrame});
             }
+        }
+        if (definition.attackEffect)
+        {
+            const auto& source = *definition.attackEffect;
+            const auto bitmap = inRenderer.LoadBitmap(inAssetCatalog.GetAssetPath(source.clip.image));
+            AttackEffect effect;
+            effect.animation = SpriteAnimation(bitmap, source.clip.frames, source.clip.frameSeconds,
+                source.clip.scale, source.clip.frameDurationsSeconds);
+            effect.startSeconds = source.startSeconds;
+            effect.offset = source.offset;
+            effect.offsetHeight = source.offsetHeight;
+            attackEffect = std::move(effect);
         }
         ConfigureSpawn(inSpawn);
     }
 
     Monster::Monster(const Monster& inTemplate, const MonsterSpawn& inSpawn)
-        : Character(inTemplate), instanceId(inSpawn.instanceId), dataId(inSpawn.dataId), clips(inTemplate.clips)
+        : Character(inTemplate), instanceId(inSpawn.instanceId), dataId(inSpawn.dataId), clips(inTemplate.clips), attackEffect(inTemplate.attackEffect)
     {
         if (dataId != inTemplate.dataId) throw std::runtime_error("Monster template ID mismatch.");
         ConfigureSpawn(inSpawn);
@@ -231,6 +323,7 @@ namespace ActionRPG
     void Monster::ResetActionState()
     {
         Character::ResetActionState();
+        ClearAttackEffect();
         bufferedPresentation = false; animationPresentationSeconds = 0.0f;
         serverState.reset(); serverPresentationSeconds = serverWallSeconds = localHitDurationSeconds = 0.0f;
         for (auto& entry : clips) entry.second.animation.Reset();
@@ -239,9 +332,63 @@ namespace ActionRPG
 
     void Monster::ClearPresentationHistory()
     {
+        ClearAttackEffect();
         serverState.reset(); serverPresentationSeconds = serverWallSeconds = animationPresentationSeconds = 0.0f;
         bufferedPresentation = false;
         if (motion != Motion::Death) PlayMotion(Motion::Idle);
+    }
+
+    void Monster::ClearAttackEffect()
+    {
+        if (!attackEffect) return;
+        attackEffect->visible = false;
+        attackEffect->consumed = true;
+    }
+
+    // An attack trail is presentation only. Its clock excludes authoritative hitstop.
+    void Monster::UpdateAttackEffect(const CombatMonsterState& inState, const std::uint32_t inMapEpoch)
+    {
+        if (!attackEffect) return;
+        auto& effect = *attackEffect;
+        if (effect.hasIdentity && effect.mapEpoch == inMapEpoch
+            && inState.actionSequence != effect.actionSequence
+            && inState.actionSequence - effect.actionSequence > std::numeric_limits<std::uint32_t>::max() / 2)
+            return;
+        if (!effect.hasIdentity || effect.mapEpoch != inMapEpoch || effect.actionSequence != inState.actionSequence)
+        {
+            effect.hasIdentity = true;
+            effect.mapEpoch = inMapEpoch;
+            effect.actionSequence = inState.actionSequence;
+            effect.lastActionSeconds = 0.0f;
+            effect.visible = effect.consumed = false;
+        }
+        const bool attack = inState.actionType == "UseSkill" && inState.animationId == "attack";
+        if (!attack || inState.hp == 0 || inState.reaction != CombatReaction::None || inState.actionComplete)
+        {
+            ClearAttackEffect();
+            return;
+        }
+        if (!inState.actionStarted || effect.consumed) return;
+        // Rebase to a newly learned stop boundary with the body, without spawning the trail again.
+        const bool correctedStop = serverState && inState.hitstopSequence != serverState->hitstopSequence;
+        effect.lastActionSeconds = correctedStop ? inState.actionSeconds
+            : std::max(effect.lastActionSeconds, inState.actionSeconds);
+        if (effect.lastActionSeconds < effect.startSeconds) return;
+        const float seconds = effect.lastActionSeconds - effect.startSeconds;
+        if (seconds >= effect.animation.GetDuration())
+        {
+            ClearAttackEffect();
+            return;
+        }
+        if (!effect.visible)
+        {
+            effect.facingLeft = inState.facingLeft;
+            effect.position = {inState.position.x + (effect.facingLeft ? -effect.offset.x : effect.offset.x),
+                inState.position.y + effect.offset.y};
+            effect.height = inState.height + effect.offsetHeight;
+            effect.visible = true;
+        }
+        effect.animation.Seek(seconds);
     }
 
     void Monster::PlayMotion(const MonsterMotion inMotion)
@@ -249,6 +396,7 @@ namespace ActionRPG
         if (!clips.contains(inMotion)) throw std::runtime_error("Unsupported monster motion.");
         if (motion == Motion::Death && inMotion != Motion::Death) return;
         motion = inMotion;
+        if (motion != Motion::Attack) ClearAttackEffect();
         clips.at(motion).animation.Reset();
     }
 
@@ -317,6 +465,12 @@ namespace ActionRPG
                     : clip.animation.GetDuration());
             }
             else clip.animation.Update(activeDelta, clip.loop);
+            if (attackEffect && attackEffect->hasIdentity)
+            {
+                auto state = *serverState;
+                state.actionSeconds += serverPresentationSeconds;
+                UpdateAttackEffect(state, attackEffect->mapEpoch);
+            }
             return;
         }
         if (serverState && bufferedPresentation)
@@ -340,7 +494,7 @@ namespace ActionRPG
     }
 
     // HP/reaction precede AI presentation. Repeated snapshots do not restart death or attacks.
-    void Monster::ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules, const bool inBuffered)
+    void Monster::ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules, const bool inBuffered, const std::uint32_t inMapEpoch)
     {
         if (inState.instanceId != instanceId || inState.dataId != dataId)
             throw std::runtime_error("Combat monster identity mismatch.");
@@ -400,6 +554,7 @@ namespace ActionRPG
                 animation.Seek(animationPresentationSeconds);
             }
         }
+        UpdateAttackEffect(inState, inMapEpoch);
         serverState = inState; serverRules = inRules; serverPresentationSeconds = serverWallSeconds = 0.0f;
     }
 
@@ -409,5 +564,11 @@ namespace ActionRPG
         inRenderer.FillEllipse(position.x, position.y, WIDTH * 0.42f, 12.0f,
             D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.45f));
         clips.at(motion).animation.Draw(inRenderer, position.x, position.y - GetHeight(), GetFacingLeft());
+        if (attackEffect && attackEffect->visible)
+        {
+            const auto effectPosition = inCamera.WorldToScreen(attackEffect->position);
+            attackEffect->animation.Draw(inRenderer, effectPosition.x,
+                effectPosition.y - attackEffect->height, attackEffect->facingLeft);
+        }
     }
 }

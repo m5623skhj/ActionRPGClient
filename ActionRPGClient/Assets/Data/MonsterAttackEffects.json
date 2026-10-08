@@ -1,0 +1,25 @@
+{
+  "format": "MonsterAttackEffects",
+  "schemaVersion": 1,
+  "metadata": "Images/Effects/Monsters/animations.json",
+  "effects": [
+    {
+      "monsterId": "rusted_armor_soldier",
+      "motionId": "rusted_armor_slash",
+      "eventFrame": 4,
+      "startOffsetSeconds": -0.04,
+      "impactFrame": 2,
+      "offset": { "x": 35, "y": 0, "height": 90 },
+      "renderHeight": 80
+    },
+    {
+      "monsterId": "fallen_citadel_warden",
+      "motionId": "citadel_warden_slash",
+      "eventFrame": 4,
+      "startOffsetSeconds": -0.05,
+      "impactFrame": 2,
+      "offset": { "x": 55, "y": 0, "height": 150 },
+      "renderHeight": 130
+    }
+  ]
+}

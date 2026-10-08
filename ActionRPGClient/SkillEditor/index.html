@@ -59,7 +59,11 @@
   <h2>모드별 모션·시점</h2><label>모션<select id="motion"></select></label>
   <div class="row"><label>실행 시작 프레임<input type="number" data-variant="eventFrame" min="0" step="1"></label>
    <label>직접 공격 종료 프레임<input type="number" data-variant="endFrame" min="0" step="1"></label></div>
-  <small>프레임은 0부터 시작합니다. 모션의 FPS로 서버 시간을 계산합니다.</small>
+  <small>프레임은 0부터 시작합니다. 실행·판정 시점은 프레임 시간의 누적 합계로 계산합니다.</small>
+  <div class="row"><label>본체 FPS<input id="motionFps" type="number" min="0.001" max="240" step="any"></label>
+   <label>현재 프레임 시간 (초)<input id="frameSeconds" type="number" min="0" step="any"></label></div>
+  <button id="uniformMotion">본체 전체를 1/FPS로 균등화</button><p id="timingInfo"></p>
+  <small>시간 배열이 있으면 FPS를 바꿔도 프레임 시간을 보존합니다. 균등화는 전체 시간을 덮어씁니다. 본체 시간 수정은 같은 모션을 참조하는 스킬에 함께 적용됩니다.</small>
   <section data-type="direct">
    <h2>현재 프레임 공격 영역</h2><p>캔버스에서 드래그하여 그립니다. 영역 안은 이동, 모서리는 크기 조절입니다.</p>
    <div class="row"><label>X (앞뒤)<input id="rectX" type="number" step="0.1"></label><label>바닥 높이<input id="rectY" type="number" step="0.1"></label></div>
@@ -80,6 +84,10 @@
    <div class="row"><label>열<input type="number" data-effect="columns" min="1"></label><label>행<input type="number" data-effect="rows" min="1"></label><label>프레임 수<input type="number" data-effect="frameCount" min="1"></label></div>
    <div class="row"><label>FPS<input type="number" data-effect="fps" min="1" max="240"></label><label>월드 배율<input type="number" data-effect="scale" min="0.01" max="20" step="0.01"></label></div>
    <div class="row"><label>기준점 X (0~1)<input type="number" data-effect="pivotX" min="0" max="1" step="0.01"></label><label>기준점 Y (0~1)<input type="number" data-effect="pivotY" min="0" max="1" step="0.01"></label></div>
+   <div class="row"><label>이펙트 편집 프레임<input id="effectFrameIndex" type="number" min="0" step="1" value="0"></label>
+    <label>이펙트 프레임 시간 (초)<input id="effectFrameSeconds" type="number" min="0" step="any"></label></div>
+   <button id="uniformEffect">이펙트 전체를 1/FPS로 균등화</button><p id="effectTimingInfo"></p>
+   <small>FPS 변경은 명시한 시간을 보존합니다. 프레임 수 변경으로 배열 길이가 달라지면 실행 취소하거나 균등화 후 다시 편집하세요.</small>
    <label>이펙트 시작 프레임<input type="number" data-effect="eventFrame" min="0"></label>
    <div class="row"><label>X<input type="number" data-effect="offset.x"></label><label>지면 Y<input type="number" data-effect="offset.y"></label><label>높이<input type="number" data-effect="offset.height"></label></div>
    <label><input type="checkbox" data-effect="loop">모션 동안 반복</label>

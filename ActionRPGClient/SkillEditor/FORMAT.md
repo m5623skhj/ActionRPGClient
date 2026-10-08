@@ -9,8 +9,10 @@ input은 `command` 문자열 배열과 `maxStepSeconds`입니다. type은 direct
 ground/air는 null(불허)이거나 모드별 정의입니다.
 
 모드의 공통 필드는 `motionId`, `frameCount`, `fps`, `durationSeconds`, `eventFrame`, `endFrame`입니다.
-durationSeconds는 frameCount/fps와 일치해야 합니다. 프레임은 0 기반, 시작 시간은 eventFrame/fps입니다.
-direct의 마지막 활성 시간은 (endFrame+1)/fps이며 한 시전의 중복 타격은 금지합니다.
+모션과 공용 모드에는 선택 frameDurationsSeconds 배열을 지정할 수 있습니다. 프레임 index 순서로 정확히 frameCount개이며 배열이 FPS보다 우선합니다. 누락된 기존 데이터는 각 프레임을 1/fps로 해석합니다.
+T[0]=0, T[i+1]=T[i]+frameDurationsSeconds[i]이며 durationSeconds는 T[frameCount]와 0.0001초 이내로 일치해야 합니다. 프레임은 0 기반, 실행 시작은 T[eventFrame], direct의 각 attackRects 구간은 [T[index],T[index+1])입니다. 마지막 활성 시간은 T[endFrame+1]이며 한 시전의 중복 타격은 금지합니다.
+각 시간은 유한한 양수이고 float 변환 후에도 유한한 양수여야 합니다. 누적 경계는 double과 float 누적 모두 엄격히 증가하며 유한해야 합니다. 본체·독립 이펙트 총시간은 공통 재생기와 같은 최대 60초이며 스킬 본체는 최소 0.001초입니다. 잘못된 길이·null·0·음수·시간 합계 불일치는 거절합니다.
+공용 PlayerSkills와 표시 motion의 명시 시간 배열은 동일하게 출력합니다. 기존 schemaVersion 1을 유지하지만 가변 시간을 적용하려면 양쪽 로더·런타임을 함께 갱신해야 합니다.
 
 | 유형 | execution | 모드별 추가 필드 |
 |---|---|---|
@@ -45,7 +47,8 @@ spawnWorld = (actorX + facingSign*spawn.x, actorY + spawn.y, actorHeight + spawn
 클라이언트 전용 루트는 `format=PlayerSkillVisuals`, `schemaVersion=1`, `skills` 배열입니다.
 각 항목은 id/characterId/ground/air입니다. 각 모드는 `{motion, effect}`이며 motion은 CharacterEditor의 검증된 프레임 정의입니다.
 effect는 null 또는 `{motion,eventFrame,offset:{x,y,height},loop}`입니다. PNG 바이트는 JSON이 아닌 Assets 상대 경로의 파일로 출력합니다.
-서버와 클라이언트 공용 JSON은 동일해야 하며, 표시 motion의 frameCount/fps는 공용 모드와 일치해야 합니다.
+독립 effect.motion에도 같은 frameDurationsSeconds 규칙을 적용합니다. 이펙트 시작 시간은 본체 T[eventFrame], 이펙트 프레임은 이펙트 자신의 누적 시간표로 선택합니다.
+서버와 클라이언트 공용 JSON은 동일해야 하며, 표시 motion의 frameCount/fps와 실제 시간표는 공용 모드와 일치해야 합니다.
 공용 JSON에는 이미지 경로와 바이트가 없습니다. 공용 C++ 로더는 알 수 없는 필드와 버전, 비정상 숫자·참조·범위를 거절합니다.
 
 ## 네트워크
@@ -102,7 +105,7 @@ PlayerSkills는 레벨 1의 실행 정의이며 편집기 출력에 성장·습�
 ## 작업 저장과 런타임 출력
 
 PlayerSkillEditorProject schemaVersion 1은 characters/animations/skills/hurtRects/images를 갖는 편집용 스냅샷입니다.
-이미지 data URL과 미완성 설정을 저장할 수 있으나 Build가 실패하면 런타임 ZIP은 출력하지 않습니다.
+이미지 data URL과 미완성 설정을 저장할 수 있으나 Build가 실패하면 런타임 ZIP은 출력하지 않습니다. 시간 배열은 작업 저장·불러오기에서 보존하며, 불러오기 시 배열의 길이·수치·합계를 검사합니다. FPS 변경은 명시 배열을 바꾸지 않고 전체 균등화 버튼만 1/fps로 덮어씁니다.
 PlayerSkills와 PlayerSkillVisuals는 작업 열기 형식이 아니며 별도 원본 모션과 작업 파일을 보존해야 합니다.
 PNG 시전 이펙트는 클라이언트 전용이고, 타격 피해·버프와 이미지 재생은 서로 다른 실행 정보입니다.
 습득 노드·아이콘 및 실행 디렉터리 설치는 ZIP의 범위 밖입니다.

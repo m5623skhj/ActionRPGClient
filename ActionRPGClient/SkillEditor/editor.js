@@ -2,7 +2,7 @@
   "use strict";
   const M = window.PlayerSkillModel, C = window.CharacterEditorModel, $ = id => document.getElementById(id);
   const canvas = $("canvas"), ctx = canvas.getContext("2d");
-  let project = M.NewProject(), images = Object.create(null), selectedId = "", frame = 0;
+  let project = M.NewProject(), images = Object.create(null), selectedId = "", frame = 0, effectFrame = 0;
   let dirty = false, busy = false, playing = false, elapsed = 0, lastTime = 0, drag = null, transform = null;
   let undo = [], redo = [], saveHandle = null;
   const MAX_JSON = 145 * 1024 * 1024, MAX_IMAGE = 15 * 1024 * 1024, MAX_IMAGES = 100 * 1024 * 1024;
@@ -14,7 +14,8 @@
   const tell = text => { $("status").textContent = text; };
   const changed = () => { dirty = true; $("dirty").textContent = "● 미저장 변경"; };
   const pause = () => { playing = false; $("play").textContent = "▶ 모션 재생"; };
-  function Remember() { undo.push(M.clone(project.skills)); if (undo.length > 30) undo.shift(); redo = []; }
+  const Snapshot = () => M.clone({ skills: project.skills, animations: project.animations });
+  function Remember() { undo.push(Snapshot()); if (undo.length > 30) undo.shift(); redo = []; }
   function Edit(action) { if (busy || !skill()) return; pause(); Remember(); action(); changed(); Refresh(); }
   function Read(object, path) { return path.split(".").reduce((value, key) => value?.[key], object); }
   function Write(object, path, value) {
@@ -63,7 +64,45 @@
       const velocity = M.Velocity(v, $("flip").checked, current.execution.speed);
       $("velocity").textContent = "축별 속도 X " + velocity.x.toFixed(1) + " / 지면 Y " + velocity.y.toFixed(1) + " / 높이 " + velocity.height.toFixed(1);
     }
-    Draw();
+    RefreshTiming(); Draw();
+  }
+  function RefreshTiming() {
+    const m = motion(), e = variant()?.effect;
+    for (const name of ["motionFps", "frameSeconds", "uniformMotion"]) $(name).disabled = busy || !m;
+    $("motionFps").value = m?.fps ?? "";
+    $("frameSeconds").value = m ? (m.frameDurationsSeconds?.[frame] ?? 1 / m.fps) : "";
+    $("timingInfo").textContent = "";
+    if (m) try {
+      const t = M.Timeline(m), v = variant();
+      const start = t.starts[v.eventFrame], end = t.starts[v.endFrame + 1];
+      $("timingInfo").textContent = "총 " + t.total.toPrecision(6) + "초 · 현재 [" + t.starts[frame].toPrecision(6)
+        + ", " + t.starts[frame + 1].toPrecision(6) + ")초 · 실행 " + (start ?? "미지정")
+        + "초" + (skill().type === "direct" ? " · 타격 종료 " + (end ?? "미지정") + "초" : "");
+    } catch (error) { $("timingInfo").textContent = error.message; }
+    const count = Number.isInteger(e?.frameCount) && e.frameCount > 0 ? e.frameCount : 1;
+    effectFrame = Math.max(0, Math.min(effectFrame, count - 1));
+    $("effectFrameIndex").max = count - 1; $("effectFrameIndex").value = effectFrame;
+    $("effectFrameSeconds").value = e ? (e.frameDurationsSeconds?.[effectFrame] ?? 1 / e.fps) : "";
+    for (const name of ["effectFrameIndex", "effectFrameSeconds", "uniformEffect"]) $(name).disabled = busy || !e;
+    $("effectTimingInfo").textContent = "";
+    if (e) try {
+      const t = M.Timeline(e, 60, 0), start = m ? M.Timeline(m).starts[e.eventFrame] : undefined;
+      $("effectTimingInfo").textContent = "이펙트 총 " + t.total.toPrecision(6) + "초 · 본체 기준 시작 " + (start ?? "미지정") + "초";
+    } catch (error) { $("effectTimingInfo").textContent = error.message; }
+  }
+  function ChangeTiming(target, isEffect, action) {
+    if (!target || busy) return;
+    try {
+      const next = M.clone(target); delete next.durationSeconds; action(next);
+      next.durationSeconds = M.Timeline(next, 60, isEffect ? 0 : 0.001).total;
+      Edit(() => Object.assign(target, next));
+    } catch (error) { Refresh(); tell(error.message); }
+  }
+  function UniformTiming(target, isEffect) {
+    ChangeTiming(target, isEffect, next => {
+      if (!Number.isInteger(next.frameCount) || next.frameCount < 1 || next.frameCount > 512) throw new Error("프레임 수를 먼저 확인하세요.");
+      next.frameDurationsSeconds = Array(next.frameCount).fill(1 / next.fps);
+    });
   }
   async function Task(action) {
     if (busy) return; if (drag) CancelDrag(); pause(); busy = true; document.body.classList.add("busy");
@@ -141,7 +180,10 @@
     const scope = element.dataset.bind ? skill() : element.dataset.variant ? variant() : variant()?.effect; if (!scope) return;
     const path = element.dataset.bind || element.dataset.variant || element.dataset.effect;
     const value = element.type === "checkbox" ? element.checked : element.type === "number" ? (element.value === "" ? null : Number(element.value)) : element.value;
-    Edit(() => Write(scope, path, value));
+    Edit(() => {
+      Write(scope, path, value);
+      if (element.dataset.effect && (path === "fps" || path === "frameCount")) delete scope.durationSeconds;
+    });
   };
   $("mode").onchange = () => { pause(); frame = 0; elapsed = 0; Refresh(); };
   $("enabled").onchange = () => {
@@ -160,7 +202,22 @@
   $("frame").oninput = () => { pause(); frame = Number($("frame").value); Refresh(); };
   $("previous").onclick = () => { pause(); frame--; Refresh(); };
   $("next").onclick = () => { pause(); frame++; Refresh(); };
-  $("play").onclick = () => { if (!motion() || busy) return; playing = !playing; elapsed = frame / motion().fps; $("play").textContent = playing ? "Ⅱ 일시 정지" : "▶ 모션 재생"; };
+  $("play").onclick = () => {
+    if (!motion() || busy) return;
+    try { elapsed = M.Timeline(motion()).starts[frame]; playing = !playing; $("play").textContent = playing ? "Ⅱ 일시 정지" : "▶ 모션 재생"; }
+    catch (error) { pause(); tell(error.message); }
+  };
+  $("motionFps").onchange = () => ChangeTiming(motion(), false, next => { next.fps = Number($("motionFps").value); });
+  $("frameSeconds").onchange = () => ChangeTiming(motion(), false, next => {
+    next.frameDurationsSeconds = M.Timeline(next).durations; next.frameDurationsSeconds[frame] = Number($("frameSeconds").value);
+  });
+  $("uniformMotion").onclick = () => UniformTiming(motion(), false);
+  $("effectFrameIndex").onchange = () => { pause(); effectFrame = Number($("effectFrameIndex").value);
+    if (!Number.isInteger(effectFrame)) effectFrame = 0; Refresh(); };
+  $("effectFrameSeconds").onchange = () => ChangeTiming(variant()?.effect, true, next => {
+    next.frameDurationsSeconds = M.Timeline(next, 60, 0).durations; next.frameDurationsSeconds[effectFrame] = Number($("effectFrameSeconds").value);
+  });
+  $("uniformEffect").onclick = () => UniformTiming(variant()?.effect, true);
   $("applyRect").onclick = () => Edit(() => { if (variant()?.attackRects) variant().attackRects[frame] = { x: Number($("rectX").value), y: Number($("rectY").value), width: Number($("rectW").value), height: Number($("rectH").value) }; });
   $("clearRect").onclick = () => Edit(() => { if (variant()?.attackRects) delete variant().attackRects[frame]; });
   $("copyRange").onclick = () => {
@@ -168,7 +225,9 @@
     if (!Number.isInteger(v.eventFrame) || !Number.isInteger(v.endFrame) || v.eventFrame < 0 || v.endFrame >= m.frameCount || v.endFrame < v.eventFrame) { tell("활성 프레임 범위를 확인하세요."); return; }
     Edit(() => { for (let index = v.eventFrame; index <= v.endFrame; ++index) v.attackRects[index] = M.clone(current); });
   };
-  function Restore(from, to) { if (!from.length || busy) return; pause(); to.push(M.clone(project.skills)); project.skills = from.pop(); selectedId = project.skills.some(value => value.id === selectedId) ? selectedId : project.skills[0]?.id || ""; changed(); Refresh(); }
+  function Restore(from, to) { if (!from.length || busy) return; pause(); to.push(Snapshot());
+    const saved = from.pop(); project.skills = saved.skills; project.animations = saved.animations;
+    selectedId = project.skills.some(value => value.id === selectedId) ? selectedId : project.skills[0]?.id || ""; changed(); Refresh(); }
   $("undo").onclick = () => Restore(undo, redo); $("redo").onclick = () => Restore(redo, undo);
   $("importPlayer").onclick = () => $("playerFiles").click();
   $("playerFiles").onchange = event => {
@@ -301,13 +360,15 @@
     ctx.strokeStyle = "#526984"; ctx.beginPath(); ctx.moveTo(0, transform.y); ctx.lineTo(canvas.width, transform.y); ctx.stroke();
     const current = skill(), v = variant(), m = motion(); if (!current || !v || !m) return;
     const height = mode() === "air" ? Math.max(0, Math.min(1000, Number($("previewHeight").value) || 0)) : 0, flip = $("flip").checked;
+    let timing; try { timing = M.Timeline(m); } catch (_) { return; }
+    const seconds = playing ? elapsed : timing.starts[frame];
     DrawMotion(m, frame, 0, height, flip);
     if ($("hurtVisible").checked && project.hurtRects) {
       const hurt = project.hurtRects[C.key(current.characterId, v.motionId, frame)], f = m.frames.find(value => value.index === frame);
       if (hurt && f) { const scale = M.Scale(m, f), scaleX = m.renderSize ? m.renderSize.width / f.sourceRect.width : scale;
         Box({ x: (hurt.x - f.pivot.x) * scaleX, y: (f.pivot.y - hurt.y - hurt.height) * scale, width: hurt.width * scaleX, height: hurt.height * scale }, "#63aeff", height, flip); }
     }
-    if (current.type === "direct" && rect()) Box(rect(), frame >= v.eventFrame && frame <= v.endFrame ? "#ff925e" : "#72675d", height, flip, true);
+    if (current.type === "direct" && rect()) Box(rect(), seconds >= timing.starts[v.eventFrame] && seconds < timing.starts[v.endFrame + 1] ? "#ff925e" : "#72675d", height, flip, true);
     if (current.type === "projectile" && v.spawn) {
       const sign = flip ? -1 : 1, velocity = M.Velocity(v, flip, current.execution.speed);
       const start = Screen(sign * v.spawn.x, height + v.spawn.height - v.spawn.y), duration = Math.min(0.35, current.execution.range / current.execution.speed);
@@ -319,9 +380,10 @@
     }
     if (v.effect) {
       try {
-        const effect = v.effect, effectMotion = M.EffectMotion(effect, images), seconds = (playing ? elapsed : frame / m.fps) - effect.eventFrame / m.fps;
-        if (seconds >= 0 && ((effect.loop && (!playing || elapsed < m.frameCount / m.fps)) || (!effect.loop && seconds < effectMotion.frameCount / effectMotion.fps))) {
-          const index = Math.floor(seconds * effectMotion.fps) % effectMotion.frameCount;
+        const effect = v.effect, effectMotion = M.EffectMotion(effect, images), effectTiming = M.Timeline(effectMotion, 60, 0);
+        const effectSeconds = seconds - timing.starts[effect.eventFrame];
+        if (effectSeconds >= 0 && ((effect.loop && seconds < timing.total) || (!effect.loop && effectSeconds < effectTiming.total))) {
+          const index = M.FrameAt(effectTiming, effectSeconds, effect.loop);
           DrawMotion(effectMotion, index, (flip ? -1 : 1) * effect.offset.x, height + effect.offset.height - effect.offset.y, flip);
         }
       } catch (_) { /* Incomplete effect definitions remain editable and fail export validation. */ }
@@ -374,12 +436,15 @@
   function Tick(time) {
     const delta = lastTime ? Math.min(.1, (time - lastTime) / 1000) : 0; lastTime = time;
     const m = motion(); if (playing && m && !busy && !drag) {
-      let duration = m.frameCount / m.fps;
-      try { const effect = variant()?.effect; if (effect && !effect.loop) { const effectMotion = M.EffectMotion(effect, images);
-        duration = Math.max(duration, effect.eventFrame / m.fps + effectMotion.frameCount / effectMotion.fps); } } catch (_) { /* Draft effect. */ }
-      elapsed += delta; if (elapsed >= duration) elapsed = 0; frame = Math.min(m.frameCount - 1, Math.floor(elapsed * m.fps));
-      $("frame").value = frame; $("frameText").textContent = "프레임 " + frame + " / " + (m.frameCount - 1); Draw();
-      const r = rect(); for (const [name, key] of [["rectX", "x"], ["rectY", "y"], ["rectW", "width"], ["rectH", "height"]]) $(name).value = r?.[key] ?? "";
+      try {
+        const timing = M.Timeline(m); let duration = timing.total;
+        try { const effect = variant()?.effect; if (effect && !effect.loop) { const effectMotion = M.EffectMotion(effect, images);
+          if (!Number.isInteger(effect.eventFrame) || effect.eventFrame < 0 || effect.eventFrame >= m.frameCount) throw new Error("이펙트 시작 프레임 오류");
+          duration = Math.max(duration, timing.starts[effect.eventFrame] + M.Timeline(effectMotion, 60, 0).total); } } catch (_) { /* Draft effect. */ }
+        elapsed = (elapsed + delta) % duration; frame = M.FrameAt(timing, elapsed);
+        $("frame").value = frame; $("frameText").textContent = "프레임 " + frame + " / " + (m.frameCount - 1); RefreshTiming(); Draw();
+        const r = rect(); for (const [name, key] of [["rectX", "x"], ["rectY", "y"], ["rectW", "width"], ["rectH", "height"]]) $(name).value = r?.[key] ?? "";
+      } catch (error) { pause(); tell(error.message); }
     }
     requestAnimationFrame(Tick);
   }

@@ -28,10 +28,19 @@ namespace ActionRPG
     {
         std::string image;
         std::vector<SpriteFrame> frames;
+        std::vector<float> frameDurationsSeconds;
         float frameSeconds{ 1.0f };
         float scale{ 1.0f };
         bool loop{};
         bool holdLastFrame{};
+    };
+
+    struct MonsterAttackEffectDefinition
+    {
+        MonsterClipDefinition clip;
+        float startSeconds{};
+        Vector2 offset{};
+        float offsetHeight{};
     };
 
     struct MonsterVisualDefinition
@@ -39,6 +48,7 @@ namespace ActionRPG
         std::string monsterId;
         std::string idleAnimationSection;
         std::map<MonsterMotion, MonsterClipDefinition> clips;
+        std::optional<MonsterAttackEffectDefinition> attackEffect;
     };
 
     // Loaded once; runtime IDs are checked against this immutable client registry.
@@ -63,6 +73,7 @@ namespace ActionRPG
         void Render(D2DRenderer& inRenderer, const Camera& inCamera) const override;
         void ApplyHit(CharacterHitType inType) override;
         void ClearPresentationHistory();
+        void ClearAttackEffect();
         void ResetActionState() override;
         [[nodiscard]] bool IsHitReacting() const override;
         [[nodiscard]] MonsterMotion GetMotion() const { return motion; }
@@ -70,7 +81,7 @@ namespace ActionRPG
         // Flight height and phase come from authoritative state, not a timed atlas preview.
         void ApplyPresentationState(MonsterMotion inMotion, Vector2 inPosition,
             bool inFacingLeft, float inHeight);
-        void ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules, bool inBuffered = false);
+        void ApplyCombatState(const CombatMonsterState& inState, const CombatRules& inRules, bool inBuffered = false, std::uint32_t inMapEpoch = 0);
         [[nodiscard]] std::uint32_t GetHp() const { return serverState ? serverState->hp : 0; }
         [[nodiscard]] std::uint32_t GetMaxHp() const { return serverState ? serverState->maxHp : 0; }
         [[nodiscard]] std::uint64_t GetInstanceId() const { return instanceId; }
@@ -83,10 +94,21 @@ namespace ActionRPG
             bool holdLastFrame{};
         };
         void ConfigureSpawn(const MonsterSpawn& inSpawn);
+        void UpdateAttackEffect(const CombatMonsterState& inState, std::uint32_t inMapEpoch);
+        struct AttackEffect
+        {
+            SpriteAnimation animation;
+            float startSeconds{};
+            Vector2 offset{}, position{};
+            float offsetHeight{}, height{}, lastActionSeconds{};
+            bool facingLeft{}, visible{}, consumed{}, hasIdentity{};
+            std::uint32_t actionSequence{}, mapEpoch{};
+        };
         std::uint64_t instanceId{};
         std::uint32_t dataId{};
         MonsterMotion motion{ MonsterMotion::Idle };
         std::map<MonsterMotion, Clip> clips;
+        std::optional<AttackEffect> attackEffect;
         std::optional<CombatMonsterState> serverState;
         CombatRules serverRules;
         bool bufferedPresentation{};

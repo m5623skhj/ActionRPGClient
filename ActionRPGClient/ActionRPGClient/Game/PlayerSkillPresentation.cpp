@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <stdexcept>
+#include <utility>
 
 namespace ActionRPG
 {
@@ -53,13 +54,22 @@ namespace ActionRPG
                 output.motion = LoadMotion(variant.at("motion"), inAssets, inRenderer);
                 Contract::Require(output.motion->definition.at("frameCount") == timeline.at("frameCount")
                     && output.motion->definition.at("fps") == timeline.at("fps"), "Visual timing mismatch.");
+                const auto count = timeline.at("frameCount").get<std::uint32_t>();
+                for (std::uint32_t index = 0; index <= count; ++index)
+                {
+                    const double expected = Contract::FrameStartSeconds(timeline, index);
+                    const float actual = index == count ? output.motion->animation.GetDuration()
+                        : output.motion->animation.GetFrameStartSeconds(index);
+                    Contract::Require(std::abs(Contract::FrameStartSeconds(output.motion->definition, index) - expected) <= 0.0001
+                        && std::abs(actual - expected) <= 0.0001, "Visual frame timeline differs from gameplay.");
+                }
                 if (!variant.at("effect").is_null())
                 {
                     const auto& effect = variant.at("effect");
                     Contract::Keys(effect, { "motion", "eventFrame", "offset", "loop" });
                     output.effect = LoadMotion(effect.at("motion"), inAssets, inRenderer);
                     const auto index = Contract::Integer(effect.at("eventFrame"), 0, timeline.at("frameCount").get<std::uint32_t>() - 1);
-                    output.effectSeconds = index / timeline.at("fps").get<float>();
+                    output.effectSeconds = static_cast<float>(Contract::FrameStartSeconds(timeline, index));
                     Contract::Point(effect.at("offset"));
                     output.offsetX = effect.at("offset").at("x").get<float>();
                     output.offsetY = effect.at("offset").at("y").get<float>();
@@ -92,6 +102,28 @@ namespace ActionRPG
             Contract::Number(inMotion.at("renderSize").at("height"), 0.01, 10000);
         }
         else Contract::Number(inMotion.value("scaleToMovement", 1.0), 0.01, 20);
+        if (inMotion.contains("frameDurationsSeconds"))
+            Contract::Require(inMotion.at("frameDurationsSeconds").is_array()
+                && inMotion.at("frameDurationsSeconds").size() == count, "Visual frame duration count mismatch.");
+        const double total = Contract::MotionDurationSeconds(inMotion);
+        Contract::Require(std::isfinite(total) && total > 0.0 && total <= 60.0, "Visual duration exceeds limit.");
+        if (inMotion.contains("durationSeconds"))
+            Contract::Require(std::abs(Contract::Number(inMotion.at("durationSeconds"), 0.001, 60) - total) <= 0.0001,
+                "Visual duration differs from timeline.");
+        std::vector<float> durations;
+        std::vector<SpriteFrame> frames(count);
+        double previous{};
+        for (std::uint32_t index = 0; index < count; ++index)
+        {
+            const double duration = Contract::FrameDurationSeconds(inMotion, index);
+            const float value = static_cast<float>(duration);
+            const double next = previous + duration;
+            Contract::Require(std::isfinite(duration) && value > 0.0f && std::isfinite(value)
+                && std::isfinite(next) && next > previous
+                && static_cast<float>(next) > static_cast<float>(previous), "Invalid visual frame duration.");
+            durations.push_back(value);
+            previous = next;
+        }
         std::unordered_set<std::uint32_t> indexes;
         for (const auto& frame : inMotion.at("frames"))
         {
@@ -100,7 +132,11 @@ namespace ActionRPG
             const double x = Contract::Number(rectangle.at("x"), 0, width), y = Contract::Number(rectangle.at("y"), 0, height);
             const double w = Contract::Number(rectangle.at("width"), 0.01, width), h = Contract::Number(rectangle.at("height"), 0.01, height);
             Contract::Require(x + w <= width + 0.001 && y + h <= height + 0.001, "Visual frame exceeds image.");
-            Contract::Number(pivot.at("x"), 0, w); Contract::Number(pivot.at("y"), 0, h);
+            const float pivotX = static_cast<float>(Contract::Number(pivot.at("x"), 0, w));
+            const float pivotY = static_cast<float>(Contract::Number(pivot.at("y"), 0, h));
+            frames[frame.at("index").get<std::uint32_t>()] = {
+                D2D1::RectF(static_cast<float>(x), static_cast<float>(y), static_cast<float>(x + w), static_cast<float>(y + h)),
+                D2D1::Point2F(pivotX, pivotY)};
         }
         auto bitmap = bitmaps.find(path);
         if (bitmap == bitmaps.end())
@@ -114,6 +150,8 @@ namespace ActionRPG
         const auto size = bitmap->second->GetPixelSize();
         Contract::Require(size.width == width && size.height == height, "Actual image dimensions differ.");
         auto result = std::make_shared<Motion>(); result->definition = inMotion; result->bitmap = bitmap->second;
+        result->animation = SpriteAnimation(bitmap->second, std::move(frames),
+            1.0f / inMotion.at("fps").get<float>(), 1.0f, std::move(durations));
         return result;
     }
     void PlayerSkillPresentation::ValidateServer(const PlayerSkills::Catalog& inCatalog) const
@@ -143,9 +181,7 @@ namespace ActionRPG
         float inY, bool inFacingLeft, D2DRenderer& inRenderer)
     {
         const auto& motion = inMotion.definition;
-        const auto count = motion.at("frameCount").get<std::uint32_t>();
-        auto index = static_cast<std::uint32_t>(std::max(0.0f, inSeconds) * motion.at("fps").get<float>());
-        index = inLoop ? index % count : std::min(index, count - 1);
+        const auto index = inMotion.animation.GetFrameAt(std::max(0.0f, inSeconds), inLoop);
         const auto frame = std::find_if(motion.at("frames").begin(), motion.at("frames").end(), [index](const auto& value) { return value.at("index") == index; });
         const auto& rectangle = frame->at("sourceRect"), pivot = frame->at("pivot");
         const float x = rectangle.at("x").get<float>(), y = rectangle.at("y").get<float>();
@@ -167,8 +203,7 @@ namespace ActionRPG
         if (!variant.motion) return false;
         const float seconds = inSeconds; // Player supplies the monotonic clock for this cast.
         const auto position = inCamera.WorldToScreen(inGround);
-        const auto& motion = variant.motion->definition;
-        const bool showMotion = seconds < motion.at("frameCount").get<float>() / motion.at("fps").get<float>();
+        const bool showMotion = seconds < variant.motion->animation.GetDuration();
         if (showMotion)
         {
             inRenderer.FillEllipse(position.x, position.y, 24, 8, D2D1::ColorF(0.0f, 0.0f, 0.0f, .3f));
@@ -176,9 +211,8 @@ namespace ActionRPG
         }
         if (variant.effect && seconds >= variant.effectSeconds)
         {
-            const auto& effect = variant.effect->definition;
             const float effectTime = seconds - variant.effectSeconds;
-            if ((variant.loop && showMotion) || (!variant.loop && effectTime < effect.at("frameCount").get<float>() / effect.at("fps").get<float>()))
+            if ((variant.loop && showMotion) || (!variant.loop && effectTime < variant.effect->animation.GetDuration()))
             {
                 const auto effectPosition = inCamera.WorldToScreen({ inGround.x + (inState.facingLeft ? -variant.offsetX : variant.offsetX), inGround.y + variant.offsetY });
                 Draw(*variant.effect, effectTime, variant.loop, effectPosition.x, effectPosition.y - inHeight - variant.offsetHeight, inState.facingLeft, inRenderer);
