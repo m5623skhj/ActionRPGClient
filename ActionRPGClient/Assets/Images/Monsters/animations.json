@@ -9,118 +9,118 @@
       "motions": {
         "move": {
           "image": "rusted_armor_soldier_move.png",
-          "width": 1586,
-          "height": 992,
+          "width": 1536,
+          "height": 1024,
           "frameCount": 8,
           "fps": 10,
-          "frameDurationsSeconds": [0.11,0.105,0.075,0.11,0.11,0.105,0.075,0.11],
+          "frameDurationsSeconds": [0.11, 0.105, 0.075, 0.11, 0.11, 0.105, 0.075, 0.11],
           "loop": true,
           "holdLastFrame": false,
           "standingHeight": 449,
-          "scaleToMovement": 1.0,
+          "scaleToMovement": 1,
           "frames": [
             {
               "index": 0,
               "sourceRect": {
-                "x": 68,
-                "y": 31,
-                "width": 269,
-                "height": 455
+                "x": 40,
+                "y": 44,
+                "width": 295,
+                "height": 459
               },
               "pivot": {
-                "x": 141,
-                "y": 451
+                "x": 144,
+                "y": 452
               }
             },
             {
               "index": 1,
               "sourceRect": {
-                "x": 475,
-                "y": 29,
-                "width": 235,
-                "height": 457
+                "x": 459,
+                "y": 63,
+                "width": 275,
+                "height": 441
               },
               "pivot": {
-                "x": 143,
-                "y": 453
+                "x": 139,
+                "y": 433
               }
             },
             {
               "index": 2,
               "sourceRect": {
-                "x": 865,
-                "y": 29,
-                "width": 236,
-                "height": 457
+                "x": 840,
+                "y": 43,
+                "width": 275,
+                "height": 460
               },
               "pivot": {
-                "x": 139,
+                "x": 144,
                 "y": 453
               }
             },
             {
               "index": 3,
               "sourceRect": {
-                "x": 1254,
-                "y": 29,
-                "width": 285,
-                "height": 456
+                "x": 1206,
+                "y": 46,
+                "width": 319,
+                "height": 458
               },
               "pivot": {
-                "x": 169,
-                "y": 452
+                "x": 167,
+                "y": 450
               }
             },
             {
               "index": 4,
               "sourceRect": {
-                "x": 73,
-                "y": 518,
-                "width": 252,
-                "height": 456
+                "x": 32,
+                "y": 531,
+                "width": 314,
+                "height": 457
               },
               "pivot": {
-                "x": 132,
-                "y": 452
+                "x": 152,
+                "y": 449
               }
             },
             {
               "index": 5,
               "sourceRect": {
-                "x": 475,
-                "y": 518,
-                "width": 237,
-                "height": 455
+                "x": 449,
+                "y": 549,
+                "width": 291,
+                "height": 438
               },
               "pivot": {
-                "x": 134,
-                "y": 451
+                "x": 152,
+                "y": 430
               }
             },
             {
               "index": 6,
               "sourceRect": {
-                "x": 861,
-                "y": 518,
-                "width": 255,
-                "height": 456
+                "x": 841,
+                "y": 526,
+                "width": 270,
+                "height": 461
               },
               "pivot": {
                 "x": 139,
-                "y": 452
+                "y": 453
               }
             },
             {
               "index": 7,
               "sourceRect": {
-                "x": 1258,
-                "y": 518,
-                "width": 282,
-                "height": 452
+                "x": 1190,
+                "y": 526,
+                "width": 335,
+                "height": 461
               },
               "pivot": {
-                "x": 159,
-                "y": 448
+                "x": 179,
+                "y": 453
               }
             }
           ]
@@ -131,62 +131,62 @@
           "height": 1254,
           "frameCount": 4,
           "fps": 14,
-          "frameDurationsSeconds": [0.045,0.09,0.075,0.0757142857142857],
+          "frameDurationsSeconds": [0.045, 0.09, 0.075, 0.0757142857142857],
           "loop": false,
           "holdLastFrame": true,
-          "standingHeight": 550,
-          "scaleToMovement": 0.816364,
+          "standingHeight": 543,
+          "scaleToMovement": 0.826888,
           "frames": [
             {
               "index": 0,
               "sourceRect": {
-                "x": 195,
-                "y": 103,
-                "width": 374,
-                "height": 525
+                "x": 215,
+                "y": 81,
+                "width": 391,
+                "height": 539
               },
               "pivot": {
-                "x": 200,
-                "y": 521
+                "x": 185,
+                "y": 531
               }
             },
             {
               "index": 1,
               "sourceRect": {
-                "x": 681,
-                "y": 120,
-                "width": 440,
-                "height": 508
+                "x": 709,
+                "y": 115,
+                "width": 461,
+                "height": 501
               },
               "pivot": {
-                "x": 227,
-                "y": 504
+                "x": 241,
+                "y": 493
               }
             },
             {
               "index": 2,
               "sourceRect": {
-                "x": 241,
-                "y": 654,
-                "width": 376,
-                "height": 556
+                "x": 222,
+                "y": 704,
+                "width": 431,
+                "height": 489
               },
               "pivot": {
-                "x": 192,
-                "y": 552
+                "x": 188,
+                "y": 481
               }
             },
             {
               "index": 3,
               "sourceRect": {
-                "x": 737,
-                "y": 656,
-                "width": 331,
-                "height": 554
+                "x": 759,
+                "y": 640,
+                "width": 375,
+                "height": 551
               },
               "pivot": {
-                "x": 192,
-                "y": 550
+                "x": 186,
+                "y": 543
               }
             }
           ]
@@ -197,7 +197,7 @@
           "height": 887,
           "frameCount": 8,
           "fps": 10,
-          "frameDurationsSeconds": [0.065,0.135,0.1,0.1,0.065,0.135,0.125,0.075],
+          "frameDurationsSeconds": [0.065, 0.135, 0.1, 0.1, 0.065, 0.135, 0.125, 0.075],
           "loop": false,
           "holdLastFrame": true,
           "standingHeight": 364,
@@ -334,118 +334,118 @@
         },
         "attack": {
           "image": "rusted_armor_soldier_attack.png",
-          "width": 1586,
-          "height": 992,
+          "width": 1536,
+          "height": 1024,
           "frameCount": 8,
           "fps": 14,
-          "frameDurationsSeconds": [0.06,0.08,0.105,0.0407142857142857,0.035,0.045,0.085,0.1207142857142857],
+          "frameDurationsSeconds": [0.06, 0.08, 0.105, 0.0407142857142857, 0.035, 0.045, 0.085, 0.1207142857142857],
           "loop": false,
           "holdLastFrame": true,
-          "standingHeight": 381,
-          "scaleToMovement": 1.178478,
+          "standingHeight": 272,
+          "scaleToMovement": 1.650735,
           "frames": [
             {
               "index": 0,
               "sourceRect": {
-                "x": 88,
-                "y": 104,
-                "width": 234,
-                "height": 387
+                "x": 79,
+                "y": 176,
+                "width": 239,
+                "height": 280
               },
               "pivot": {
-                "x": 116,
-                "y": 383
+                "x": 111,
+                "y": 272
               }
             },
             {
               "index": 1,
               "sourceRect": {
-                "x": 446,
-                "y": 22,
-                "width": 281,
-                "height": 469
+                "x": 483,
+                "y": 123,
+                "width": 228,
+                "height": 331
               },
               "pivot": {
-                "x": 161,
-                "y": 465
+                "x": 107,
+                "y": 325
               }
             },
             {
               "index": 2,
               "sourceRect": {
                 "x": 856,
-                "y": 88,
-                "width": 268,
-                "height": 403
+                "y": 96,
+                "width": 265,
+                "height": 358
               },
               "pivot": {
-                "x": 152,
-                "y": 399
+                "x": 124,
+                "y": 352
               }
             },
             {
               "index": 3,
               "sourceRect": {
-                "x": 1255,
-                "y": 109,
-                "width": 271,
-                "height": 382
+                "x": 1229,
+                "y": 140,
+                "width": 260,
+                "height": 316
               },
               "pivot": {
-                "x": 155,
-                "y": 378
+                "x": 141,
+                "y": 308
               }
             },
             {
               "index": 4,
               "sourceRect": {
-                "x": 61,
-                "y": 569,
-                "width": 356,
-                "height": 383
+                "x": 59,
+                "y": 644,
+                "width": 344,
+                "height": 270
               },
               "pivot": {
-                "x": 147,
-                "y": 379
+                "x": 131,
+                "y": 262
               }
             },
             {
               "index": 5,
               "sourceRect": {
-                "x": 447,
-                "y": 575,
-                "width": 381,
-                "height": 377
+                "x": 448,
+                "y": 689,
+                "width": 347,
+                "height": 225
               },
               "pivot": {
-                "x": 179,
-                "y": 373
+                "x": 130,
+                "y": 217
               }
             },
             {
               "index": 6,
               "sourceRect": {
-                "x": 866,
-                "y": 569,
-                "width": 289,
-                "height": 383
+                "x": 835,
+                "y": 640,
+                "width": 243,
+                "height": 280
               },
               "pivot": {
-                "x": 145,
-                "y": 379
+                "x": 125,
+                "y": 272
               }
             },
             {
               "index": 7,
               "sourceRect": {
-                "x": 1279,
-                "y": 569,
-                "width": 249,
-                "height": 384
+                "x": 1217,
+                "y": 641,
+                "width": 242,
+                "height": 279
               },
               "pivot": {
                 "x": 131,
-                "y": 380
+                "y": 271
               }
             }
           ],
@@ -471,7 +471,7 @@
           "height": 887,
           "frameCount": 8,
           "fps": 10,
-          "frameDurationsSeconds": [0.09,0.11,0.085,0.065,0.07,0.11,0.12,0.15],
+          "frameDurationsSeconds": [0.09, 0.11, 0.085, 0.065, 0.07, 0.11, 0.12, 0.15],
           "loop": false,
           "holdLastFrame": true,
           "standingHeight": 401,
@@ -591,118 +591,118 @@
       "motions": {
         "move": {
           "image": "fallen_citadel_warden_move.png",
-          "width": 1586,
-          "height": 992,
+          "width": 1536,
+          "height": 1024,
           "frameCount": 8,
           "fps": 8,
-          "frameDurationsSeconds": [0.14,0.135,0.09,0.135,0.14,0.135,0.09,0.135],
+          "frameDurationsSeconds": [0.14, 0.135, 0.09, 0.135, 0.14, 0.135, 0.09, 0.135],
           "loop": true,
           "holdLastFrame": false,
-          "standingHeight": 423,
-          "scaleToMovement": 1.0,
+          "standingHeight": 392,
+          "scaleToMovement": 1.079082,
           "frames": [
             {
               "index": 0,
               "sourceRect": {
-                "x": 31,
-                "y": 54,
-                "width": 372,
-                "height": 429
+                "x": 11,
+                "y": 87,
+                "width": 375,
+                "height": 400
               },
               "pivot": {
-                "x": 212,
-                "y": 425
+                "x": 186,
+                "y": 393
               }
             },
             {
               "index": 1,
               "sourceRect": {
-                "x": 427,
-                "y": 55,
-                "width": 372,
-                "height": 427
+                "x": 396,
+                "y": 113,
+                "width": 375,
+                "height": 374
               },
               "pivot": {
-                "x": 215,
-                "y": 423
+                "x": 190,
+                "y": 367
               }
             },
             {
               "index": 2,
               "sourceRect": {
-                "x": 828,
-                "y": 54,
-                "width": 372,
-                "height": 428
+                "x": 786,
+                "y": 95,
+                "width": 359,
+                "height": 392
               },
               "pivot": {
-                "x": 204,
-                "y": 424
+                "x": 195,
+                "y": 385
               }
             },
             {
               "index": 3,
               "sourceRect": {
-                "x": 1238,
-                "y": 54,
-                "width": 341,
-                "height": 422
+                "x": 1156,
+                "y": 86,
+                "width": 374,
+                "height": 401
               },
               "pivot": {
-                "x": 207,
-                "y": 418
+                "x": 213,
+                "y": 394
               }
             },
             {
               "index": 4,
               "sourceRect": {
-                "x": 34,
-                "y": 512,
-                "width": 368,
-                "height": 436
+                "x": 11,
+                "y": 568,
+                "width": 381,
+                "height": 393
               },
               "pivot": {
-                "x": 200,
-                "y": 432
+                "x": 186,
+                "y": 386
               }
             },
             {
               "index": 5,
               "sourceRect": {
-                "x": 430,
-                "y": 525,
-                "width": 387,
-                "height": 423
+                "x": 404,
+                "y": 585,
+                "width": 369,
+                "height": 376
               },
               "pivot": {
-                "x": 206,
-                "y": 419
+                "x": 182,
+                "y": 369
               }
             },
             {
               "index": 6,
               "sourceRect": {
-                "x": 830,
-                "y": 519,
-                "width": 372,
-                "height": 434
+                "x": 782,
+                "y": 568,
+                "width": 370,
+                "height": 400
               },
               "pivot": {
-                "x": 197,
-                "y": 430
+                "x": 199,
+                "y": 392
               }
             },
             {
               "index": 7,
               "sourceRect": {
-                "x": 1229,
-                "y": 520,
-                "width": 351,
-                "height": 430
+                "x": 1158,
+                "y": 563,
+                "width": 375,
+                "height": 405
               },
               "pivot": {
-                "x": 208,
-                "y": 426
+                "x": 211,
+                "y": 397
               }
             }
           ]
@@ -713,62 +713,62 @@
           "height": 1254,
           "frameCount": 4,
           "fps": 12,
-          "frameDurationsSeconds": [0.055,0.115,0.09,0.0733333333333333],
+          "frameDurationsSeconds": [0.055, 0.115, 0.09, 0.0733333333333333],
           "loop": false,
           "holdLastFrame": true,
-          "standingHeight": 547,
-          "scaleToMovement": 0.773309,
+          "standingHeight": 359,
+          "scaleToMovement": 1.178273,
           "frames": [
             {
               "index": 0,
               "sourceRect": {
-                "x": 129,
-                "y": 89,
-                "width": 479,
-                "height": 541
+                "x": 81,
+                "y": 165,
+                "width": 427,
+                "height": 376
               },
               "pivot": {
-                "x": 251,
-                "y": 537
+                "x": 247,
+                "y": 369
               }
             },
             {
               "index": 1,
               "sourceRect": {
-                "x": 650,
-                "y": 79,
-                "width": 534,
-                "height": 551
+                "x": 759,
+                "y": 171,
+                "width": 432,
+                "height": 370
               },
               "pivot": {
-                "x": 258,
-                "y": 547
+                "x": 250,
+                "y": 363
               }
             },
             {
               "index": 2,
               "sourceRect": {
-                "x": 129,
-                "y": 683,
-                "width": 514,
-                "height": 528
+                "x": 88,
+                "y": 828,
+                "width": 436,
+                "height": 319
               },
               "pivot": {
-                "x": 264,
-                "y": 524
+                "x": 230,
+                "y": 312
               }
             },
             {
               "index": 3,
               "sourceRect": {
-                "x": 703,
-                "y": 658,
-                "width": 489,
-                "height": 553
+                "x": 782,
+                "y": 781,
+                "width": 394,
+                "height": 367
               },
               "pivot": {
-                "x": 226,
-                "y": 549
+                "x": 205,
+                "y": 359
               }
             }
           ]
@@ -779,7 +779,7 @@
           "height": 887,
           "frameCount": 8,
           "fps": 8,
-          "frameDurationsSeconds": [0.09,0.16,0.125,0.125,0.085,0.165,0.155,0.095],
+          "frameDurationsSeconds": [0.09, 0.16, 0.125, 0.125, 0.085, 0.165, 0.155, 0.095],
           "loop": false,
           "holdLastFrame": true,
           "standingHeight": 394,
@@ -916,118 +916,118 @@
         },
         "attack": {
           "image": "fallen_citadel_warden_attack.png",
-          "width": 1584,
-          "height": 993,
+          "width": 1536,
+          "height": 1024,
           "frameCount": 8,
           "fps": 10,
-          "frameDurationsSeconds": [0.08,0.11,0.16,0.05,0.045,0.065,0.13,0.16],
+          "frameDurationsSeconds": [0.08, 0.11, 0.16, 0.05, 0.045, 0.065, 0.13, 0.16],
           "loop": false,
           "holdLastFrame": true,
-          "standingHeight": 270,
-          "scaleToMovement": 1.566667,
+          "standingHeight": 259,
+          "scaleToMovement": 1.633205,
           "frames": [
             {
               "index": 0,
               "sourceRect": {
-                "x": 45,
-                "y": 183,
-                "width": 311,
-                "height": 274
+                "x": 50,
+                "y": 188,
+                "width": 308,
+                "height": 267
               },
               "pivot": {
-                "x": 166,
-                "y": 270
+                "x": 155,
+                "y": 260
               }
             },
             {
               "index": 1,
               "sourceRect": {
                 "x": 469,
-                "y": 84,
-                "width": 258,
-                "height": 373
+                "y": 111,
+                "width": 261,
+                "height": 344
               },
               "pivot": {
-                "x": 156,
-                "y": 369
+                "x": 146,
+                "y": 337
               }
             },
             {
               "index": 2,
               "sourceRect": {
-                "x": 861,
-                "y": 163,
-                "width": 281,
-                "height": 294
+                "x": 826,
+                "y": 95,
+                "width": 279,
+                "height": 360
               },
               "pivot": {
-                "x": 170,
-                "y": 290
+                "x": 164,
+                "y": 353
               }
             },
             {
               "index": 3,
               "sourceRect": {
-                "x": 1271,
-                "y": 130,
-                "width": 250,
-                "height": 327
+                "x": 1228,
+                "y": 111,
+                "width": 255,
+                "height": 344
               },
               "pivot": {
-                "x": 174,
-                "y": 323
+                "x": 152,
+                "y": 337
               }
             },
             {
               "index": 4,
               "sourceRect": {
-                "x": 20,
-                "y": 624,
-                "width": 435,
-                "height": 266
+                "x": 52,
+                "y": 623,
+                "width": 361,
+                "height": 273
               },
               "pivot": {
-                "x": 185,
-                "y": 262
+                "x": 148,
+                "y": 265
               }
             },
             {
               "index": 5,
               "sourceRect": {
-                "x": 458,
-                "y": 620,
-                "width": 358,
-                "height": 270
+                "x": 445,
+                "y": 661,
+                "width": 355,
+                "height": 234
               },
               "pivot": {
-                "x": 161,
-                "y": 266
+                "x": 145,
+                "y": 226
               }
             },
             {
               "index": 6,
               "sourceRect": {
-                "x": 837,
-                "y": 615,
-                "width": 324,
-                "height": 275
+                "x": 824,
+                "y": 642,
+                "width": 323,
+                "height": 255
               },
               "pivot": {
-                "x": 193,
-                "y": 271
+                "x": 156,
+                "y": 247
               }
             },
             {
               "index": 7,
               "sourceRect": {
-                "x": 1238,
-                "y": 621,
-                "width": 303,
-                "height": 269
+                "x": 1209,
+                "y": 638,
+                "width": 296,
+                "height": 259
               },
               "pivot": {
-                "x": 177,
-                "y": 265
+                "x": 161,
+                "y": 251
               }
             }
           ],
@@ -1053,7 +1053,7 @@
           "height": 887,
           "frameCount": 8,
           "fps": 8,
-          "frameDurationsSeconds": [0.12,0.16,0.11,0.09,0.075,0.115,0.14,0.19],
+          "frameDurationsSeconds": [0.12, 0.16, 0.11, 0.09, 0.075, 0.115, 0.14, 0.19],
           "loop": false,
           "holdLastFrame": true,
           "standingHeight": 418,
