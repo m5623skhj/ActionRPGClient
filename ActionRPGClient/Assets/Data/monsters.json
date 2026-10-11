@@ -4,11 +4,19 @@
     {
       "dataId": 1,
       "monsterId": "Dummy",
+      "portrait": {
+        "image": "Images/Monsters/dummy.png",
+        "sourceRect": { "x": 0, "y": 8, "width": 64, "height": 64 }
+      },
       "idleAnimationSection": "DummyIdle"
     },
     {
       "dataId": 2,
       "monsterId": "rusted_armor_soldier",
+      "portrait": {
+        "image": "Images/Monsters/rusted_armor_soldier_idle.png",
+        "sourceRect": { "x": 478, "y": 90, "width": 320, "height": 320 }
+      },
       "renderHeight": 200,
       "metadata": "Images/Monsters/animations.json",
       "idle": {
@@ -21,6 +29,10 @@
     {
       "dataId": 3,
       "monsterId": "fallen_citadel_warden",
+      "portrait": {
+        "image": "Images/Monsters/fallen_citadel_warden_idle.png",
+        "sourceRect": { "x": 476, "y": 80, "width": 336, "height": 336 }
+      },
       "renderHeight": 330,
       "metadata": "Images/Monsters/animations.json",
       "idle": {
