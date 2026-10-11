@@ -87,6 +87,10 @@ FX는 피해 성공 표시나 추가 판정이 아닌 휘두르기 궤적입니�
 
 실시간 공통 actor의 reactionSequence 뒤에는 hitRecovery:f32, reactionDurationSeconds:f32, hitstopRemainingSeconds:f32, hitstopSequence:u32, hitstopStartTimeMs:u64, hitstopDurationSeconds:f32를 추가합니다(28바이트). 플레이어 기본 레코드는 슬라이딩 25바이트를 포함해 129바이트입니다. 기존 SKL1 확장과 ID 7/8의 필드 순서는 유지하며 버전 1·2로 읽지 않습니다. 던전 world.version=1, 맵 version=5, PlayerSkills.schemaVersion=1은 유지합니다.
 
+아이템 사용 표시(2026-10-09): 기본 투사체 레코드와 SKL1 순서는 유지하고 IUS1/ITP1 확장을 추가합니다. 파서는 태그를 반복 소비하고 중복·알 수 없는 태그, 잘린 데이터, 중복/미등록 참조 ID와 잘못된 수치를 거절합니다. IUS1은 playerCount:u16 뒤에 playerId:u64, itemUseSequence:u32, itemUseDefinitionId:text16, itemUseMotionId:text16, elapsed:f32, duration:f32를 전달합니다. ITP1은 projectileCount:u16 뒤에 projectileId:u64, itemDefinitionId:text16, visual:text16을 전달합니다. text16은 u16 길이와 UTF-8 본문이며 모든 수치는 기존 little-endian입니다. JSON도 같은 actor/투사체 필드를 읽고 최신 실시간 상태를 오래된 JSON으로 되돌리지 않습니다.
+
+돌멩이는 서버 직선 투사체(speed 600/range 480/radius 6/forward 20/height 64/피해 10)이며 Stone 표시에서 기존 PlayerRock 색상·하이라이트만 재사용합니다. 마을의 로컬 생성·포물선 계산·피해 경로를 호출하지 않습니다. 별도 itemUseSequence/elapsed로 AttackFire 3프레임(0.025+0.045+0.08=0.15초)을 Seek하며 shotPhase/발사 이벤트와 분리합니다. 원격 동작 시간은 기존 서버 시간 보간에 맞춰 진행하고 동일 순서 번호의 반복 수신으로 되감지 않습니다. 사망·피격·슬라이딩 표시가 우선합니다. 첫 프레임의 총구 섬광은 기존 PNG에 포함되어 있어 재사용 시 함께 보이며, 이 작업에서 PNG를 수정하지 않았습니다.
+
 [DungeonProtocol.h](ActionRPGClient/Network/DungeonProtocol.h)는 YAML 생성 결과입니다. ID 1~10을 유지하고 11~13에 실시간, 14에 플레이어 스킬 입력을 추가했습니다.
 
 | ID | 계약 |

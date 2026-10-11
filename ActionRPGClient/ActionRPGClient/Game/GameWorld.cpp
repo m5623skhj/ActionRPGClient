@@ -450,12 +450,14 @@ namespace ActionRPG
         const auto inventoryAction = inventoryUi.Update(inDeltaSeconds, inventoryInput,
             camera.GetViewportWidth(), camera.GetViewportHeight(), inventoryVisible);
         if (inventoryAction.requestState) townClient.RequestInventoryState(inventoryAction.requestId);
+        if (inventoryAction.requestUseStatus) townClient.RequestUseStatus(inventoryAction.useStatusRequestId);
         if (inventoryAction.operation != InventoryOperation::None)
         {
             const char* action = inventoryAction.operation == InventoryOperation::Equip ? "Equip"
                 : inventoryAction.operation == InventoryOperation::Unequip ? "Unequip" : "Use";
             townClient.ChangeInventory(inventoryAction.requestId, inventoryAction.expectedRevision,
-                action, inventoryAction.instanceId, inventoryAction.quantity);
+                action, inventoryAction.instanceId, inventoryAction.quantity,
+                inventoryAction.throwItem ? std::optional<bool>(player.GetFacingLeft()) : std::nullopt);
         }
         InputState gameplayInput = inInput;
         const bool gameplayBlocked = dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
@@ -719,6 +721,7 @@ namespace ActionRPG
                         if (inEvent.kind == InventoryEvent::Kind::State) inventoryUi.HandleState(inEvent.payload);
                         else if (inEvent.kind == InventoryEvent::Kind::Definitions) inventoryUi.HandleDefinitions(inEvent.payload);
                         else if (inventoryUi.HandleOperation(inEvent.payload)) townClient.RequestSkillState();
+                        if (inventoryUi.ConsumeCombatRefresh()) dungeonClient.RequestCombatRefresh();
                     }
                     catch (const std::exception&)
                     {
@@ -1398,7 +1401,15 @@ namespace ActionRPG
             const float height = projectile.height + projectile.heightDirection * distance;
             if (height < 0.0f) continue;
             const auto position = camera.WorldToScreen({projectile.position.x + projectile.direction * distance, projectile.position.y + projectile.directionY * distance});
-            inRenderer.FillEllipse(position.x, position.y - height, projectile.radius, projectile.radius, D2D1::ColorF(1.0f, 0.85f, 0.25f));
+            if (projectile.visual == "Stone")
+            {
+                // PlayerRock's existing stone palette, with server-owned position/radius.
+                inRenderer.FillEllipse(position.x, position.y - height, projectile.radius, projectile.radius,
+                    D2D1::ColorF(0.30f, 0.27f, 0.24f));
+                inRenderer.FillEllipse(position.x - projectile.radius * 0.25f, position.y - height - projectile.radius * 0.25f,
+                    projectile.radius * 0.35f, projectile.radius * 0.35f, D2D1::ColorF(0.62f, 0.56f, 0.48f));
+            }
+            else inRenderer.FillEllipse(position.x, position.y - height, projectile.radius, projectile.radius, D2D1::ColorF(1.0f, 0.85f, 0.25f));
         }
     }
 

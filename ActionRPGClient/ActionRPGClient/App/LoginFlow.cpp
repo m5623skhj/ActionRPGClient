@@ -236,6 +236,17 @@ namespace ActionRPG
                 const auto id = UInt64(body.at("characterId"));
                 const auto revision = UInt64(body.at("revision"));
                 const auto result = body.at("result").get<std::string>();
+                if (event.kind == CharacterEvent::Kind::Select && result == "Pending")
+                {
+                    if (!pendingCharacter || id != pendingCharacter->id || revision < pendingCharacter->revision)
+                        throw std::runtime_error("Invalid pending character recovery.");
+                    // Diagnostic use identity is separate from the outstanding selection request.
+                    if (body.contains("pendingUseRequestId")) (void)HexId(body.at("pendingUseRequestId"), 64);
+                    // The server retries recovery and publishes the final select/enter response.
+                    characterDeadline = std::chrono::steady_clock::time_point::max();
+                    message = L"이전 아이템 사용 결과를 복구하는 중입니다. 서버 완료를 기다립니다. ESC 취소";
+                    continue;
+                }
                 if (result != "Succeeded")
                 {
                     characterRequest = CharacterRequest::None;

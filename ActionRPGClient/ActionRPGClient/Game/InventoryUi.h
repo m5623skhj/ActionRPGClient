@@ -27,12 +27,14 @@ namespace ActionRPG
     // Presentation data only. The server owns quantities, restrictions and persistent IDs.
     struct InventoryItemView
     {
-        std::string instanceId;
+        std::string instanceId, definitionId;
         std::wstring name, description, requirements, equipReason;
         std::string icon;
         std::uint32_t quantity{}, maxStack{};
         std::optional<EquipmentSlot> equipmentSlot;
-        bool canEquip{};
+        bool canEquip{}, throwItem{};
+        std::uint32_t useRequiredLevel{};
+        float useCooldownSeconds{};
     };
 
     struct InventorySnapshotView
@@ -48,7 +50,8 @@ namespace ActionRPG
         std::uint64_t expectedRevision{};
         std::string requestId, instanceId;
         std::uint32_t quantity{};
-        bool requestState{};
+        bool requestState{}, requestUseStatus{}, throwItem{};
+        std::string useStatusRequestId;
     };
 
     // Owned and updated exclusively by GameWorld on the game thread.
@@ -64,6 +67,7 @@ namespace ActionRPG
         void ResolveRequest(const std::string& inRequestId, std::wstring inMessage, bool inStateCurrent);
         void SetConnected(bool inConnected);
         void Invalidate(std::wstring inMessage);
+        [[nodiscard]] bool ConsumeCombatRefresh() { const bool value = combatRefresh; combatRefresh = false; return value; }
         void Reset();
         void Close();
         [[nodiscard]] InventoryUiAction Update(float inDeltaSeconds, const InputState& inInput,
@@ -71,16 +75,28 @@ namespace ActionRPG
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inDungeon) const;
 
     private:
+        enum class CooldownState { None, Pending, Active };
+        struct CooldownView
+        {
+            CooldownState state{CooldownState::None};
+            std::uint64_t serverTimeMs{}, readyAtMs{};
+            float remainingSeconds{};
+        };
+        using CooldownMap = std::unordered_map<std::string, CooldownView>;
+        [[nodiscard]] static std::optional<CooldownMap> ParseCooldowns(const nlohmann::json& inBody);
+        void ApplyCooldowns(std::optional<CooldownMap> inCooldowns);
+        [[nodiscard]] const CooldownView* FindCooldown(const InventoryItemView& inItem) const;
         struct Assembly
         {
             std::string requestId;
             std::uint64_t characterId{}, revision{};
             nlohmann::json inventory;
             std::vector<std::optional<nlohmann::json>> definitions;
+            std::optional<CooldownMap> cooldowns;
         };
         void CompleteState();
         std::optional<Assembly> assembly;
-        std::uint64_t expectedCharacterId{};
+        std::uint64_t expectedCharacterId{}, latestServerRevision{};
         std::uint32_t characterDefinitionId{}, characterLevel{};
         std::string stateRequestId;
         struct Layout
@@ -106,8 +122,12 @@ namespace ActionRPG
         std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> icons;
         std::size_t tab{};
         std::string hovered, pendingRequest;
+        InventoryOperation pendingOperation{InventoryOperation::None};
         D2D1_RECT_F hoveredRect{};
-        bool ready{}, connected{}, stateRequested{};
+        bool ready{}, connected{}, stateRequested{}, cooldownsKnown{}, combatRefresh{}, useStatusPending{}, useOutcomeUncertain{};
+        CooldownMap cooldowns;
+        float useStatusSeconds{}, cooldownRefreshSeconds{};
+        std::wstring useNotice;
         float pendingSeconds{}, stateWaitSeconds{}, tooltipScroll{}, mouseX{};
         std::wstring status{L"인벤토리 상태를 기다리는 중"};
     };

@@ -128,6 +128,7 @@ namespace ActionRPG
         void CancelAttackRecovery();
         void PrepareCommandSkill();
         [[nodiscard]] bool HasCombatState() const { return combatState.has_value(); }
+        [[nodiscard]] bool IsItemUseMotionActive() const;
         [[nodiscard]] bool GetFacingLeft() const { return facingLeft; }
         [[nodiscard]] bool IsHitstopped() const;
         [[nodiscard]] bool IsCombatDead() const { return combatState && combatState->hp == 0; }

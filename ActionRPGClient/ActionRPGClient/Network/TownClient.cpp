@@ -397,12 +397,23 @@ namespace ActionRPG
     }
 
     void TownClient::ChangeInventory(std::string inRequestId, const std::uint64_t inRevision, std::string inAction,
-        std::string inInstanceId, const std::uint32_t inCount)
+        std::string inInstanceId, const std::uint32_t inCount, const std::optional<bool> inFacingLeft)
+    {
+        nlohmann::json body{{"requestId", std::move(inRequestId)}, {"revision", std::to_string(inRevision)},
+            {"action", std::move(inAction)}, {"instanceId", std::move(inInstanceId)}, {"count", inCount}};
+        if (inFacingLeft) body["facingLeft"] = *inFacingLeft;
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(),
+            packet = TownProtocol::Encode(TownProtocol::InventoryOperationRequest{body.dump()})]() mutable
+        {
+            if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
+        });
+    }
+
+    void TownClient::RequestUseStatus(std::string inRequestId)
     {
         asio::post(impl->strand, [this, attempt = impl->attempt.load(),
             packet = TownProtocol::Encode(TownProtocol::InventoryOperationRequest{
-                nlohmann::json{{"requestId", std::move(inRequestId)}, {"revision", std::to_string(inRevision)},
-                    {"action", std::move(inAction)}, {"instanceId", std::move(inInstanceId)}, {"count", inCount}}.dump()})]() mutable
+                nlohmann::json{{"action", "UseStatus"}, {"requestId", std::move(inRequestId)}}.dump()})]() mutable
         {
             if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet));
         });

@@ -720,7 +720,8 @@ namespace ActionRPG
             || combatState->shotSequence != inState.shotSequence || combatState->jumpSequence != inState.jumpSequence
             || combatState->shotPhase != inState.shotPhase || combatState->jumpPhase != inState.jumpPhase
             || combatState->shotCount != inState.shotCount || combatState->airShotCount != inState.airShotCount
-            || combatState->slideActive != inState.slideActive || combatState->slideSequence != inState.slideSequence;
+            || combatState->slideActive != inState.slideActive || combatState->slideSequence != inState.slideSequence
+            || combatState->itemUseSequence != inState.itemUseSequence || combatState->itemUseMotionId != inState.itemUseMotionId;
         bufferedPresentation = false;
         if (newStop || !combatState || combatState->slideSequence != inState.slideSequence || !inState.slideActive)
             slidePresentationSeconds = inState.slideSeconds;
@@ -781,6 +782,14 @@ namespace ActionRPG
         movementAnimationScale = isMoving ? std::clamp(inState.presentationSpeed / speed, 0.25f, 2.0f) : 1.0f;
     }
 
+    bool Character::IsItemUseMotionActive() const
+    {
+        return combatState && combatState->hasItemUseState && combatState->hp > 0
+            && combatState->reaction == CombatReaction::None && !IsSliding()
+            && combatState->itemUseMotionId == "AttackFire"
+            && combatState->itemUseElapsedSeconds + combatPresentationSeconds < combatState->itemUseDurationSeconds;
+    }
+
     const SpriteAnimation& Character::GetCombatAnimation() const
     {
         const auto& state = *combatState;
@@ -791,6 +800,7 @@ namespace ActionRPG
             return state.verticalSpeed > 0.0f ? airHitStartAnimation : airHitFallAnimation;
         if (state.reaction == CombatReaction::Rising) return getUpAnimation;
         if (IsSliding() && slideAnimation) return *slideAnimation;
+        if (IsItemUseMotionActive()) return attackFireAnimation;
         if (state.jumpPhase == CombatJumpPhase::Prepare) return jumpStartAnimation;
         if (state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
             return IsRunning() ? runAnimation : walkAnimation;
@@ -896,7 +906,7 @@ namespace ActionRPG
             height = std::max(0.0f, height + state.verticalSpeed * combatPresentationSeconds
                 - 0.5f * combatRules.gravity * combatPresentationSeconds * combatPresentationSeconds);
         auto& animation = GetCombatAnimation();
-        if (state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
+        if (!IsItemUseMotionActive() && state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
         {
             animation.Update(activeDelta * (bufferedPresentation ? movementAnimationScale : 1.0f));
             return;
@@ -917,6 +927,12 @@ namespace ActionRPG
         {
             elapsed = GetSlidePresentationSeconds();
             duration = slidePrediction ? slidePrediction->durationSeconds : state.slideDurationSeconds;
+        }
+        else if (IsItemUseMotionActive())
+        {
+            // Seek only: never drive the firing state machine or queue a bullet.
+            elapsed += state.itemUseElapsedSeconds;
+            duration = state.itemUseDurationSeconds;
         }
         else if (state.jumpPhase == CombatJumpPhase::Prepare)
         { elapsed += state.jumpSeconds; duration = combatRules.jumpPrepareSeconds; }

@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <sstream>
+#include <iomanip>
 #include <utility>
 
 namespace
@@ -16,6 +18,23 @@ namespace
     constexpr std::array<const wchar_t*, 4> CATEGORY_NAMES{L"장비", L"재료", L"소모품", L"퀘스트"};
     constexpr std::array<const wchar_t*, 7> EQUIPMENT_NAMES{L"무기", L"상의", L"하의", L"신발", L"반지", L"목걸이", L"팔찌"};
     constexpr float REQUEST_TIMEOUT_SECONDS = 10.0f;
+    constexpr float USE_STATUS_INTERVAL_SECONDS = 1.0f;
+
+    bool IsItemId(const std::string& inId)
+    {
+        const auto letter = [](char value) { return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z'); };
+        return !inId.empty() && inId.size() <= 64 && letter(inId.front())
+            && std::all_of(inId.begin(), inId.end(), [&](char value)
+                { return letter(value) || (value >= '0' && value <= '9') || value == '_' || value == '.' || value == '-'; })
+            && inId != "__proto__" && inId != "prototype" && inId != "constructor";
+    }
+
+    std::wstring SecondsText(float inSeconds)
+    {
+        std::wostringstream text;
+        text << std::fixed << std::setprecision(1) << std::max(0.0f, inSeconds);
+        return text.str();
+    }
 
     bool Contains(const D2D1_RECT_F& inRect, float inX, float inY)
     {
@@ -50,11 +69,15 @@ namespace ActionRPG
     void InventoryUi::Reset()
     {
         state = {};
+        cooldowns.clear(); cooldownsKnown = combatRefresh = useStatusPending = useOutcomeUncertain = false;
+        useStatusSeconds = cooldownRefreshSeconds = 0.0f;
+        useNotice.clear();
         assembly.reset();
-        expectedCharacterId = characterDefinitionId = characterLevel = 0;
+        expectedCharacterId = latestServerRevision = characterDefinitionId = characterLevel = 0;
         stateRequestId.clear();
         hovered.clear();
         pendingRequest.clear();
+        pendingOperation = InventoryOperation::None;
         ready = connected = stateRequested = false;
         pendingSeconds = stateWaitSeconds = tooltipScroll = 0.0f;
         tab = 0;
@@ -81,6 +104,75 @@ namespace ActionRPG
         }
     }
 
+    // Validate the whole snapshot before replacing any trusted cooldown state.
+    std::optional<InventoryUi::CooldownMap> InventoryUi::ParseCooldowns(const nlohmann::json& inBody)
+    {
+        using namespace CharacterInventoryJson;
+        if (!inBody.contains("cooldownsComplete")) return std::nullopt;
+        if (!inBody.at("cooldownsComplete").is_boolean()) throw std::runtime_error("Invalid cooldown completeness.");
+        if (!inBody.at("cooldownsComplete").get<bool>())
+        {
+            if (!inBody.at("cooldowns").is_null()) throw std::runtime_error("Incomplete cooldown snapshot must be null.");
+            return std::nullopt;
+        }
+        const auto& rows = inBody.at("cooldowns");
+        if (!rows.is_array()) throw std::runtime_error("Invalid cooldown snapshot.");
+        CooldownMap next;
+        for (const auto& row : rows)
+        {
+            const auto id = row.at("definitionId").get<std::string>();
+            CooldownView value;
+            value.serverTimeMs = UInt64(row.at("cooldownServerTimeMs"));
+            const auto state = row.at("cooldownState").get<std::string>();
+            if (state == "Pending")
+            {
+                value.state = CooldownState::Pending;
+                if (!row.at("cooldownReadyAtMs").is_null() || !row.at("cooldownRemainingMs").is_null())
+                    throw std::runtime_error("Pending cooldown has no final deadline.");
+            }
+            else if (state == "Active")
+            {
+                value.state = CooldownState::Active;
+                value.readyAtMs = UInt64(row.at("cooldownReadyAtMs"));
+                const auto remaining = UInt32(row.at("cooldownRemainingMs"), 0, 86400000);
+                if ((remaining > 0 && value.readyAtMs <= value.serverTimeMs)
+                    || (value.readyAtMs > value.serverTimeMs && value.readyAtMs - value.serverTimeMs > 86400000))
+                    throw std::runtime_error("Invalid cooldown deadline.");
+                value.remainingSeconds = static_cast<float>(std::min<std::uint64_t>(remaining,
+                    value.readyAtMs > value.serverTimeMs ? value.readyAtMs - value.serverTimeMs : 0)) / 1000.0f;
+            }
+            else if (state == "None")
+            {
+                if (!row.at("cooldownReadyAtMs").is_null() || UInt32(row.at("cooldownRemainingMs"), 0, 0) != 0)
+                    throw std::runtime_error("Invalid empty cooldown.");
+            }
+            else throw std::runtime_error("Unknown cooldown state.");
+            if (!IsItemId(id) || !next.emplace(id, value).second)
+                throw std::runtime_error("Invalid or duplicate cooldown definition.");
+        }
+        return next;
+    }
+
+    void InventoryUi::ApplyCooldowns(std::optional<CooldownMap> inCooldowns)
+    {
+        if (!inCooldowns) { cooldownsKnown = false; return; }
+        // TCP events are ordered. Still retain newer per-definition server samples.
+        for (auto& [id, value] : *inCooldowns)
+            if (const auto found = cooldowns.find(id); found != cooldowns.end() && (found->second.serverTimeMs > value.serverTimeMs
+                || (found->second.serverTimeMs == value.serverTimeMs && found->second.state == value.state
+                    && found->second.readyAtMs == value.readyAtMs)))
+                value = found->second;
+        cooldowns = std::move(*inCooldowns);
+        cooldownsKnown = true;
+        cooldownRefreshSeconds = 0.0f;
+    }
+
+    const InventoryUi::CooldownView* InventoryUi::FindCooldown(const InventoryItemView& inItem) const
+    {
+        const auto found = cooldowns.find(inItem.definitionId);
+        return found == cooldowns.end() ? nullptr : &found->second;
+    }
+
     void InventoryUi::HandleState(const std::string_view inPayload)
     {
         using namespace CharacterInventoryJson;
@@ -99,13 +191,14 @@ namespace ActionRPG
             }
             return;
         }
-        if (id == 0 || id != expectedCharacterId || revision < state.revision) return;
+        if (id == 0 || id != expectedCharacterId || revision < state.revision || revision < latestServerRevision) return;
         const auto batchCount = UInt32(body.at("definitionBatchCount"), 0, 167);
         const auto& inventory = body.at("inventory");
         if (!inventory.is_object() || !inventory.at("items").is_array()
             || inventory.at("items").size() > 167) throw std::runtime_error("Invalid inventory state.");
+        auto nextCooldowns = ParseCooldowns(body);
         assembly = Assembly{request, id, revision, inventory,
-            std::vector<std::optional<Json>>(batchCount)};
+            std::vector<std::optional<Json>>(batchCount), std::move(nextCooldowns)};
         ready = false;
         stateRequested = true;
         stateRequestId = request;
@@ -141,6 +234,12 @@ namespace ActionRPG
         using namespace CharacterInventoryJson;
         if (!assembly || std::any_of(assembly->definitions.begin(), assembly->definitions.end(),
             [](const auto& value) { return !value.has_value(); })) return;
+        if (assembly->revision < latestServerRevision)
+        {
+            assembly.reset();
+            stateRequested = false;
+            return;
+        }
         constexpr std::array<const char*, 4> CATEGORIES{"Equipment", "Material", "Consumable", "Quest"};
         constexpr std::array<const char*, 7> SLOTS{"Weapon", "Top", "Bottom", "Shoes", "Ring", "Necklace", "Bracelet"};
         std::unordered_map<std::string, Json> definitions;
@@ -170,6 +269,7 @@ namespace ActionRPG
             if (categoryIt == CATEGORIES.end()) throw std::runtime_error("Invalid item category.");
             const auto category = static_cast<std::uint32_t>(categoryIt - CATEGORIES.begin());
             InventoryItemView item;
+            item.definitionId = definitionId;
             item.instanceId = HexId(row.at("instanceId"), 32);
             item.quantity = UInt32(row.at("count"), 1, UINT32_MAX);
             item.maxStack = UInt32(definition.at("maxStack"), 1, UINT32_MAX);
@@ -206,6 +306,22 @@ namespace ActionRPG
                 if (!allowed) item.equipReason = L"이 캐릭터는 장착할 수 없습니다";
                 else if (characterLevel < level) item.equipReason = L"장착에 필요한 레벨이 부족합니다";
             }
+            if (category == 2 && definition.contains("effects"))
+            {
+                const auto& effects = definition.at("effects");
+                if (!effects.is_array() || effects.size() > 1) throw std::runtime_error("Invalid consumable effects.");
+                for (const auto& effect : effects)
+                {
+                    const auto type = effect.at("type").get<std::string>();
+                    if (type != "RestoreHp" && type != "Throw") throw std::runtime_error("Unsupported item use effect.");
+                    item.throwItem = type == "Throw";
+                    item.useRequiredLevel = UInt32(definition.at("useRequiredLevel"), 1, 1000000);
+                    const auto& cooldown = definition.at("useCooldownSeconds");
+                    if (!cooldown.is_number() || !std::isfinite(cooldown.get<float>())
+                        || cooldown < 0 || cooldown > 86400) throw std::runtime_error("Invalid item cooldown definition.");
+                    item.useCooldownSeconds = cooldown.get<float>();
+                }
+            }
             const auto container = UInt32(row.at("container"), 0, 4);
             const auto slot = UInt32(row.at("slot"), 0, container == 4 ? 6 : 39);
             if (container != 4 && container != category) throw std::runtime_error("Item category mismatch.");
@@ -213,7 +329,9 @@ namespace ActionRPG
             if (destination) throw std::runtime_error("Duplicate inventory slot.");
             destination = std::move(item);
         }
+        auto nextCooldowns = std::move(assembly->cooldowns);
         ApplyState(std::move(next));
+        ApplyCooldowns(std::move(nextCooldowns));
         assembly.reset();
     }
 
@@ -223,18 +341,89 @@ namespace ActionRPG
         const auto body = Json::parse(inPayload);
         const auto request = HexId(body.at("requestId"), 64);
         const auto id = UInt64(body.at("characterId"));
-        (void)UInt64(body.at("revision"));
-        if (request != pendingRequest || id != expectedCharacterId) return false;
+        const auto revision = UInt64(body.at("revision"));
+        if (request != pendingRequest || id != expectedCharacterId || revision < latestServerRevision) return false;
+        auto nextCooldowns = ParseCooldowns(body);
         const auto result = body.at("result").get<std::string>();
+        const bool isUse = pendingOperation == InventoryOperation::Use;
+        if (isUse)
+        {
+            if (body.contains("inventory"))
+            {
+                const auto& inventory = body.at("inventory");
+                if (!inventory.is_object() || !inventory.at("items").is_array() || inventory.at("items").size() > 167)
+                    throw std::runtime_error("Invalid operation inventory snapshot.");
+            }
+            const auto action = body.at("action").get<std::string>();
+            if (action == "UseStatus") { useStatusPending = false; useStatusSeconds = 0.0f; }
+            const auto useState = body.at("useState").get<std::string>();
+            if ((action != "Use" && action != "UseStatus")
+                || (useState != "None" && useState != "Pending" && useState != "Applied"
+                    && useState != "Cancelled" && useState != "ConsumedUnknown"))
+                throw std::runtime_error("Invalid use result.");
+            if ((result == "ConsumedUnknown" && useState != "ConsumedUnknown")
+                || (result == "Cancelled" && useState != "Cancelled")
+                || (result == "Succeeded" && useState != "Applied"))
+                throw std::runtime_error("Inconsistent use result.");
+            latestServerRevision = std::max(latestServerRevision, revision);
+            const bool definiteRejection = result == "InvalidRequest" || result == "InvalidQuantity"
+                || result == "NotImplemented" || result == "RevisionConflict" || result == "Cooldown"
+                || result == "LevelRestricted" || result == "NotInDungeon" || result == "Dead"
+                || result == "FullHealth" || result == "ActionUnavailable" || result == "ItemNotFound"
+                || result == "NotUsable" || result == "UseLedgerFull";
+            // A successful status lookup with no receipt is explicit non-execution.
+            // A bare rejection only completes the original, still-certain pre-reserve Use.
+            // After Pending, timeout or disconnect, require a terminal receipt or a successful no-receipt query.
+            const bool initialRejection = action == "Use" && !useOutcomeUncertain && definiteRejection;
+            const bool noReceipt = action == "UseStatus" && result == "None" && useState == "None"
+                && body.contains("inventory");
+            const bool terminal = result == "Succeeded" || result == "Cancelled" || result == "ConsumedUnknown";
+            if (result != "Pending" && useState != "Pending" && !terminal
+                && !(useState == "None" && (initialRejection || noReceipt)))
+            {
+                useOutcomeUncertain = true;
+                ApplyCooldowns(std::move(nextCooldowns));
+                status = result == "StaleOwner"
+                    ? L"캐릭터 소유권을 확인하지 못했습니다. 사용 결과는 미확정이며 재접속 후 캐릭터를 다시 선택해 주세요"
+                    : L"아이템 사용 결과를 확인하지 못했습니다. 같은 요청의 상태를 다시 조회합니다";
+                return false;
+            }
+            if (result == "Pending" || useState == "Pending")
+            {
+                useOutcomeUncertain = true;
+                ApplyCooldowns(std::move(nextCooldowns));
+                status = useState == "ConsumedUnknown"
+                    ? L"아이템은 소비됐으나 효과 확인 불가… 서버 정리 완료를 기다립니다"
+                    : L"아이템 사용 처리 중… 최종 결과를 기다립니다";
+                return false;
+            }
+        }
         std::wstring text = L"요청이 거절됐습니다. 상태를 다시 확인합니다";
-        if (result == "Succeeded") text = L"처리됐습니다. 확정 상태를 받는 중";
+        if (result == "Succeeded") text = L"처리됐습니다. 서버 확정 상태를 확인합니다";
+        else if (result == "Cancelled") text = L"사용이 취소됐습니다. 서버 확정 아이템 상태를 확인합니다";
+        else if (result == "ConsumedUnknown") text = L"아이템은 소비됐으나 효과 적용 여부를 확인할 수 없습니다";
         else if (result == "RevisionConflict") text = L"상태가 변경됐습니다. 최신 상태를 받는 중";
         else if (result == "InventoryFull") text = L"장비 가방에 빈 칸이 없습니다";
-        else if (result == "EquipmentRequirements") text = L"장착 조건을 충족하지 않습니다";
+        else if (result == "EquipmentRequirements" || result == "LevelRequirement" || result == "LevelRestricted") text = L"필요 레벨 또는 사용 조건을 충족하지 않습니다";
         else if (result == "InvalidQuantity") text = L"수량을 확인해 주세요";
         else if (result == "NotImplemented") text = L"아직 지원하지 않는 기능입니다";
-        const bool unchanged = result == "InventoryFull" || result == "EquipmentRequirements"
-            || result == "InvalidQuantity" || result == "NotImplemented";
+        else if (result == "NotUsable") text = L"사용할 수 없는 아이템입니다";
+        else if (result == "None") text = L"해당 사용 기록이 없습니다. 서버 아이템 상태를 확인합니다";
+        else if (result == "Cooldown") text = L"아이템 재사용 대기 중입니다";
+        else if (result == "NotInDungeon") text = L"던전 안에서만 사용할 수 있습니다";
+        else if (result == "Dead") text = L"사망 상태에서는 사용할 수 없습니다";
+        else if (result == "FullHealth") text = L"HP가 가득 차 있어 사용하지 않았습니다";
+        else if (result == "ActionUnavailable") text = L"현재 동작 중에는 투척할 수 없습니다";
+        else if (result == "Busy") text = L"서버가 이전 작업을 처리 중입니다";
+        else if (result == "UseLedgerFull") text = L"현재 던전의 아이템 사용 기록 한도에 도달했습니다";
+        if (isUse)
+        {
+            useNotice = text;
+            combatRefresh = result == "Succeeded" || result == "ConsumedUnknown";
+        }
+        ApplyCooldowns(std::move(nextCooldowns));
+        const bool unchanged = !isUse && (result == "InventoryFull" || result == "EquipmentRequirements"
+            || result == "InvalidQuantity" || result == "NotImplemented");
         ResolveRequest(request, std::move(text), unchanged);
         return result == "RevisionConflict";
     }
@@ -257,11 +446,19 @@ namespace ActionRPG
     {
         if (!inConnected)
         {
+            if (pendingOperation == InventoryOperation::Use && !pendingRequest.empty()) useOutcomeUncertain = true;
+            useStatusPending = false;
             ready = stateRequested = false;
-            pendingRequest.clear();
+            if (pendingOperation != InventoryOperation::Use)
+            {
+                pendingRequest.clear();
+                pendingOperation = InventoryOperation::None;
+            }
             assembly.reset();
             Close();
-            status = L"연결이 끊겼습니다. 표시된 상태는 다시 확인해야 합니다";
+            status = pendingRequest.empty()
+                ? L"연결이 끊겼습니다. 표시된 상태는 다시 확인해야 합니다"
+                : L"연결이 끊겼습니다. 아이템 사용 결과는 아직 확인되지 않았습니다";
         }
         connected = inConnected;
     }
@@ -297,6 +494,7 @@ namespace ActionRPG
         {
             hovered.clear();
             pendingRequest.clear();
+            pendingOperation = InventoryOperation::None;
             icons.clear();
         }
         if (!sameCharacter || inState.revision != state.revision) Close();
@@ -314,7 +512,8 @@ namespace ActionRPG
         };
         for (const auto& bag : state.bags) for (const auto& item : bag) if (item) loadIcon(*item);
         for (const auto& item : state.equipment) if (item) loadIcon(*item);
-        if (pendingRequest.empty()) status = L"마우스 오버: 정보 / 우클릭: 사용·장착·해제 / 휠: 정보 스크롤";
+        if (pendingRequest.empty()) status = useNotice.empty()
+            ? L"마우스 오버: 정보 / 우클릭: 사용·장착·해제 / 휠: 정보 스크롤" : useNotice;
     }
 
     void InventoryUi::ResolveRequest(const std::string& inRequestId, std::wstring inMessage,
@@ -322,7 +521,9 @@ namespace ActionRPG
     {
         if (inRequestId.empty() || pendingRequest != inRequestId) return;
         pendingRequest.clear();
+        pendingOperation = InventoryOperation::None;
         pendingSeconds = 0.0f;
+        useStatusPending = useOutcomeUncertain = false;
         status = std::move(inMessage);
         if (!inStateCurrent) { ready = false; stateRequested = false; }
     }
@@ -356,11 +557,24 @@ namespace ActionRPG
         if (inOperation == InventoryOperation::Unequip && !equipped) return {};
         if (inOperation == InventoryOperation::Use && (equipped || item->equipmentSlot || inQuantity != 1 || item->quantity == 0))
             return {};
+        if (inOperation == InventoryOperation::Use)
+        {
+            if (!cooldownsKnown) { status = L"아이템 재사용 상태를 확인하는 중입니다"; return {}; }
+            if (item->useRequiredLevel > characterLevel) { status = L"아이템 사용에 필요한 레벨이 부족합니다"; return {}; }
+            const auto cooldown = FindCooldown(*item);
+            if (cooldown && (cooldown->state == CooldownState::Pending || cooldown->remainingSeconds > 0.0f))
+            { status = L"아이템 사용 처리 중이거나 재사용 대기 중입니다"; return {}; }
+        }
         try { pendingRequest = CharacterInventoryJson::NewRequestId(); }
         catch (const std::exception&) { status = L"요청을 생성하지 못했습니다. 다시 시도해 주세요"; return {}; }
-        pendingSeconds = 0.0f;
+        pendingOperation = inOperation;
+        pendingSeconds = useStatusSeconds = 0.0f;
+        useStatusPending = useOutcomeUncertain = false;
+        useNotice.clear();
         status = L"서버 응답 대기 중… 아이템은 확정 응답 후 변경됩니다";
-        return {inOperation, state.revision, pendingRequest, inId, inQuantity, false};
+        InventoryUiAction action{inOperation, state.revision, pendingRequest, inId, inQuantity, false};
+        action.throwItem = item->throwItem;
+        return action;
     }
 
     /** Keep 8x5 bags and seven equipment cells visible without reserving a fixed detail panel. */
@@ -427,19 +641,48 @@ namespace ActionRPG
         const float inWidth, const float inHeight, const bool inVisible)
     {
         InventoryUiAction action;
-        if (!pendingRequest.empty())
+        const float elapsed = std::max(0.0f, inDeltaSeconds);
+        for (auto& [id, cooldown] : cooldowns)
+            if (cooldown.state == CooldownState::Active) cooldown.remainingSeconds = std::max(0.0f, cooldown.remainingSeconds - elapsed);
+        cooldownRefreshSeconds += elapsed;
+        if (connected && pendingOperation == InventoryOperation::Use && !pendingRequest.empty())
+        {
+            useStatusSeconds += elapsed;
+            if (useStatusSeconds >= (useStatusPending ? REQUEST_TIMEOUT_SECONDS : USE_STATUS_INTERVAL_SECONDS))
+            {
+                action.requestUseStatus = true;
+                action.useStatusRequestId = pendingRequest;
+                useStatusSeconds = 0.0f;
+                useStatusPending = true;
+            }
+        }
+        if (!pendingRequest.empty() && pendingSeconds < REQUEST_TIMEOUT_SECONDS)
         {
             pendingSeconds += std::max(0.0f, inDeltaSeconds);
             if (pendingSeconds >= REQUEST_TIMEOUT_SECONDS)
             {
-                pendingRequest.clear();
-                ready = stateRequested = false;
-                Close();
-                status = L"처리 결과를 확인하지 못했습니다. 상태를 다시 요청합니다";
+                if (pendingOperation == InventoryOperation::Use)
+                {
+                    // Keep the original identity locked: timeout does not prove non-execution.
+                    useOutcomeUncertain = true;
+                    status = L"아이템 사용 결과가 아직 확인되지 않았습니다";
+                }
+                else
+                {
+                    pendingRequest.clear();
+                    pendingOperation = InventoryOperation::None;
+                    ready = stateRequested = false;
+                    Close();
+                    status = L"처리 결과를 확인하지 못했습니다. 상태를 다시 요청합니다";
+                }
             }
         }
         if (inInput.cancelDrag) { Close(); return action; }
         if (!inVisible) { Close(); return action; }
+        if (connected && inVisible && !stateRequested && pendingRequest.empty()
+            && ((!cooldownsKnown && cooldownRefreshSeconds >= USE_STATUS_INTERVAL_SECONDS)
+                || cooldownRefreshSeconds >= REQUEST_TIMEOUT_SECONDS))
+            ready = false;
         if (connected && !ready && stateRequested)
         {
             stateWaitSeconds += std::max(0.0f, inDeltaSeconds);
@@ -516,6 +759,17 @@ namespace ActionRPG
             if (!equipped && !item->canEquip) text += item->equipReason + L"\n";
         }
         text += L"수량: " + std::to_wstring(item->quantity) + L" / 최대 스택 " + std::to_wstring(item->maxStack) + L"\n";
+        if (item->useRequiredLevel != 0)
+            text += L"사용 레벨: " + std::to_wstring(item->useRequiredLevel)
+                + L"\n기본 쿨타임: " + SecondsText(item->useCooldownSeconds) + L"초\n";
+        if (item->useRequiredLevel > characterLevel) text += L"사용에 필요한 레벨이 부족합니다\n";
+        if (!item->equipmentSlot && !cooldownsKnown) text += L"재사용 상태 확인 중\n";
+        else if (const auto cooldown = FindCooldown(*item))
+        {
+            if (cooldown->state == CooldownState::Pending) text += L"사용 처리 중 (쿨타임 미확정)\n";
+            else if (cooldown->remainingSeconds > 0.0f)
+                text += L"재사용 대기: " + SecondsText(cooldown->remainingSeconds) + L"초\n";
+        }
         if (!connected) return text + L"연결이 끊겼습니다";
         if (!ready) return text + L"최신 상태 확인 중";
         if (!pendingRequest.empty()) return text + L"서버 응답 대기 중";
@@ -542,15 +796,27 @@ namespace ActionRPG
         art.left = (art.left + art.right - size) * 0.5f;
         art.right = art.left + size;
         art.bottom = art.top + size;
+        const auto cooldown = FindCooldown(*inItem);
+        const bool cooling = cooldown && (cooldown->state == CooldownState::Pending || cooldown->remainingSeconds > 0.0f);
+        const bool unusable = !ready || !connected || (!inItem->equipmentSlot && (!cooldownsKnown
+            || cooling || inItem->useRequiredLevel > characterLevel));
         const auto icon = icons.find(inItem->icon);
         if (icon != icons.end() && icon->second)
-            inRenderer.DrawUiIcon(icon->second.Get(), art, !ready);
+            inRenderer.DrawUiIcon(icon->second.Get(), art, unusable);
         else inRenderer.DrawUiText(inItem->name.substr(0, 2), art, D2D1::ColorF(0.90f, 0.90f, 0.92f), 12.0f, false, true);
         if (!inItem->equipmentSlot)
         {
             const auto count = D2D1::RectF(inRect.left + 1.0f, inRect.bottom - 14.0f, inRect.right - 1.0f, inRect.bottom);
             inRenderer.FillRectangle(count.left, count.top, count.right, count.bottom, D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.90f));
             inRenderer.DrawUiText(std::to_wstring(inItem->quantity), count, D2D1::ColorF(1.0f, 1.0f, 0.92f), 11.0f, false, true);
+        }
+        if (cooling)
+        {
+            const auto label = cooldown->state == CooldownState::Pending
+                ? std::wstring(L"처리 중") : SecondsText(cooldown->remainingSeconds);
+            const auto rect = D2D1::RectF(inRect.left + 2.0f, art.top + 2.0f, inRect.right - 2.0f, art.top + 18.0f);
+            inRenderer.FillRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
+            inRenderer.DrawUiText(label, rect, D2D1::ColorF(1.0f, 0.9f, 0.6f), 11.0f, false, true);
         }
     }
 

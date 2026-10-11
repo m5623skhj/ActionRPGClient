@@ -54,6 +54,10 @@ namespace ActionRPG
         std::uint32_t shotSequence{}, jumpSequence{};
         std::uint32_t characterId{}, skillSequence{};
         std::string skillId;
+        bool hasItemUseState{};
+        std::uint32_t itemUseSequence{};
+        std::string itemUseDefinitionId, itemUseMotionId;
+        float itemUseElapsedSeconds{}, itemUseDurationSeconds{};
         bool skillActive{}, skillAirborne{};
         float skillSeconds{}, movementMultiplier{1.0f};
         std::vector<CombatBuffState> buffs;
@@ -78,7 +82,7 @@ namespace ActionRPG
         Vector2 position{};
         float height{}, direction{}, heightDirection{};
         float directionY{}, speed{}, radius{4.0f}, ageSeconds{};
-        std::string skillId;
+        std::string skillId, itemDefinitionId, visual;
     };
     struct DungeonCombatSnapshot
     {

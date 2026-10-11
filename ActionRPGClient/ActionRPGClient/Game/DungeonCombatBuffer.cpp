@@ -193,6 +193,8 @@ namespace ActionRPG
                 player.presentationSpeed = 0.0f;
             }
             if (!player.skillId.empty()) player.skillSeconds += actionAge;
+            if (player.hasItemUseState && !player.itemUseMotionId.empty())
+                player.itemUseElapsedSeconds = std::min(player.itemUseDurationSeconds, player.itemUseElapsedSeconds + actionAge);
             for (auto& buff : player.buffs) buff.remainingSeconds = std::max(0.0f, buff.remainingSeconds - age);
             player.hp = hp; player.maxHp = maxHp;
         }

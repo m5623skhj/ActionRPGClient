@@ -236,7 +236,7 @@ namespace ActionRPG
         if (townSkill && skillPresentation
             && skillPresentation->Render(*townSkill, GetGroundPosition(), GetHeight(), townSkill->skillSeconds, inRenderer, inCamera)) return;
         const auto state = GetCombatPlayerState();
-        if (state && !IsSliding() && !HasPendingSlide() && skillPresentation && !state->skillId.empty()
+        if (state && !IsItemUseMotionActive() && !IsSliding() && !HasPendingSlide() && skillPresentation && !state->skillId.empty()
             && state->hp != 0 && state->reaction == CombatReaction::None)
         {
             const float seconds = state->skillSeconds + GetCombatElapsedSeconds();

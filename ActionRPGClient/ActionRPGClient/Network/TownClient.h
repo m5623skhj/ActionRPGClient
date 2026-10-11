@@ -5,6 +5,7 @@
 #include "Network/AuthSettings.h"
 #include <chrono>
 #include <memory>
+#include <optional>
 
 #include <cstdint>
 #include <string>
@@ -60,7 +61,8 @@ namespace ActionRPG
         void SelectCharacter(std::string inRequestId, std::uint64_t inCharacterId, std::uint64_t inOwnerGeneration);
         void RequestInventoryState(std::string inRequestId);
         void ChangeInventory(std::string inRequestId, std::uint64_t inRevision, std::string inAction,
-            std::string inInstanceId, std::uint32_t inCount);
+            std::string inInstanceId, std::uint32_t inCount, std::optional<bool> inFacingLeft = std::nullopt);
+        void RequestUseStatus(std::string inRequestId);
         [[nodiscard]] std::vector<CharacterEvent> ConsumeCharacterEvents();
         // These two accessors belong to the game thread; network workers only publish tagged events.
         void SetSelectedCharacterId(std::uint64_t inId) { selectedCharacterId = inId; }

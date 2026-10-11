@@ -24,6 +24,22 @@ namespace
             throw std::runtime_error("Invalid combat number.");
         return value;
     }
+    void ValidateItemUse(const ActionRPG::CombatPlayerState& inPlayer)
+    {
+        if ((!inPlayer.itemUseDefinitionId.empty() && !ActionRPG::PlayerSkills::Catalog::IsId(inPlayer.itemUseDefinitionId))
+            || (inPlayer.itemUseSequence != 0 && inPlayer.itemUseDefinitionId.empty())
+            || (inPlayer.itemUseMotionId != "" && inPlayer.itemUseMotionId != "AttackFire")
+            || inPlayer.itemUseDurationSeconds > 5.0f || inPlayer.itemUseElapsedSeconds > 600.0f
+            || (!inPlayer.itemUseMotionId.empty() && (inPlayer.itemUseSequence == 0 || inPlayer.itemUseDurationSeconds <= 0.0f)))
+            throw std::runtime_error("Invalid item use motion.");
+    }
+    void ValidateItemProjectile(const ActionRPG::CombatProjectileState& inProjectile)
+    {
+        if ((!inProjectile.itemDefinitionId.empty() && !ActionRPG::PlayerSkills::Catalog::IsId(inProjectile.itemDefinitionId))
+            || (inProjectile.visual != "" && inProjectile.visual != "Stone")
+            || (inProjectile.itemDefinitionId.empty() != inProjectile.visual.empty()))
+            throw std::runtime_error("Invalid item projectile visual.");
+    }
     double TickInterval(const Json& inValue, const double inFallback)
     {
         if (!inValue.contains("tickIntervalSeconds")) return inFallback;
@@ -243,6 +259,16 @@ namespace ActionRPG
                 }
                 player.hasSkillState=true;
             }
+            if (source.contains("itemUseSequence"))
+            {
+                player.hasItemUseState = true;
+                player.itemUseSequence = Integer(source.at("itemUseSequence"));
+                player.itemUseDefinitionId = Text(source.at("itemUseDefinitionId"), true);
+                player.itemUseMotionId = Text(source.at("itemUseMotionId"), true);
+                player.itemUseElapsedSeconds = Number(source.at("itemUseElapsedSeconds"));
+                player.itemUseDurationSeconds = Number(source.at("itemUseDurationSeconds"));
+                ValidateItemUse(player);
+            }
             result.players.push_back(std::move(player));
         }
         ids.clear();
@@ -285,6 +311,12 @@ namespace ActionRPG
                     || std::abs(projectile.directionY) > 1 || projectile.speed < 1 || projectile.speed > 5000
                     || (!projectile.skillId.empty() && projectile.speed > 4000)
                     || projectile.radius < 0.1f || projectile.radius > 100) throw std::runtime_error("Invalid skill projectile.");
+            }
+            if (source.contains("itemDefinitionId"))
+            {
+                projectile.itemDefinitionId = Text(source.at("itemDefinitionId"), true);
+                projectile.visual = Text(source.at("visual"), true);
+                ValidateItemProjectile(projectile);
             }
             result.projectiles.push_back(projectile);
         }
@@ -415,10 +447,46 @@ namespace ActionRPG
                 throw std::runtime_error("Invalid realtime projectile.");
             result.projectiles.push_back(projectile);
         }
-        if (!reader.Finished())
+        std::unordered_set<std::uint64_t> extensionTags;
+        while (!reader.Finished())
         {
-            if (reader.UInt(4) != 0x314c4b53 || reader.UInt(2) != playerCount)
-                throw std::runtime_error("Unsupported skill extension.");
+            const auto tag = reader.UInt(4);
+            if (!extensionTags.insert(tag).second) throw std::runtime_error("Duplicate realtime extension.");
+            if (tag == 0x31535549) // IUS1: item use actor presentation; little endian.
+            {
+                const auto count = reader.UInt(2);
+                if (count > playerCount) throw std::runtime_error("Invalid item use actor count.");
+                std::unordered_set<std::uint64_t> seen;
+                for (std::uint64_t index = 0; index < count; ++index)
+                {
+                    const auto id = reader.UInt(8);
+                    const auto found = std::find_if(result.players.begin(), result.players.end(), [id](const auto& actor) { return actor.playerId == id; });
+                    if (found == result.players.end() || !seen.insert(id).second) throw std::runtime_error("Invalid item use actor ID.");
+                    found->hasItemUseState = true;
+                    found->itemUseSequence = static_cast<std::uint32_t>(reader.UInt(4));
+                    found->itemUseDefinitionId = reader.Text(true); found->itemUseMotionId = reader.Text(true);
+                    found->itemUseElapsedSeconds = reader.Float(); found->itemUseDurationSeconds = reader.Float();
+                    ValidateItemUse(*found);
+                }
+                continue;
+            }
+            if (tag == 0x31505449) // ITP1: item visuals attached to existing authoritative projectiles.
+            {
+                const auto count = reader.UInt(2);
+                if (count > projectileCount) throw std::runtime_error("Invalid item projectile count.");
+                std::unordered_set<std::uint64_t> seen;
+                for (std::uint64_t index = 0; index < count; ++index)
+                {
+                    const auto id = reader.UInt(8);
+                    const auto found = std::find_if(result.projectiles.begin(), result.projectiles.end(), [id](const auto& actor) { return actor.id == id; });
+                    if (found == result.projectiles.end() || !seen.insert(id).second) throw std::runtime_error("Invalid item projectile ID.");
+                    found->itemDefinitionId = reader.Text(true); found->visual = reader.Text(true);
+                    ValidateItemProjectile(*found);
+                }
+                continue;
+            }
+            if (tag != 0x314c4b53 || reader.UInt(2) != playerCount)
+                throw std::runtime_error("Unsupported realtime extension.");
             std::unordered_set<std::uint64_t> skillPlayers;
             for (std::uint64_t index = 0; index < playerCount; ++index)
             {
