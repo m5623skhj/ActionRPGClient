@@ -17,9 +17,9 @@ namespace
 {
     constexpr std::array<const wchar_t*, 4> CATEGORY_NAMES{L"장비", L"재료", L"소모품", L"퀘스트"};
     constexpr std::array<const wchar_t*, 7> EQUIPMENT_NAMES{L"무기", L"상의", L"하의", L"신발", L"반지", L"목걸이", L"팔찌"};
-    constexpr float ITEM_CELL_SIZE = 48.0f;
-    constexpr float ITEM_ICON_PADDING = 4.0f;
-    constexpr float ITEM_CELL_GAP = 6.0f;
+    constexpr float ITEM_CELL_SIZE = 32.0f;
+    constexpr float ITEM_ICON_PADDING = 3.0f;
+    constexpr float ITEM_CELL_GAP = 4.0f;
     constexpr float REQUEST_TIMEOUT_SECONDS = 10.0f;
     constexpr float USE_STATUS_INTERVAL_SECONDS = 1.0f;
 
@@ -36,6 +36,20 @@ namespace
     {
         std::wostringstream text;
         text << std::fixed << std::setprecision(1) << std::max(0.0f, inSeconds);
+        return text.str();
+    }
+
+    // Keep large stacks inside the compact cell; the tooltip retains the exact count.
+    std::wstring SlotQuantityText(std::uint32_t inQuantity)
+    {
+        if (inQuantity < 1000) return std::to_wstring(inQuantity);
+        const double unit = inQuantity >= 1000000000 ? 1000000000.0 : inQuantity >= 1000000 ? 1000000.0 : 1000.0;
+        const wchar_t suffix = inQuantity >= 1000000000 ? L'B' : inQuantity >= 1000000 ? L'M' : L'K';
+        const double value = inQuantity / unit;
+        const bool decimal = value < 100.0;
+        const double factor = decimal ? 10.0 : 1.0;
+        std::wostringstream text;
+        text << std::fixed << std::setprecision(decimal ? 1 : 0) << std::floor(value * factor) / factor << suffix;
         return text.str();
     }
 
@@ -585,11 +599,10 @@ namespace ActionRPG
     InventoryUi::Layout InventoryUi::CalculateLayout(float inWidth, float inHeight) const
     {
         Layout result;
-        result.compact = inWidth < 960.0f;
         constexpr float CELL = ITEM_CELL_SIZE, GAP = ITEM_CELL_GAP, BAG_WIDTH = 8.0f * CELL + 7.0f * GAP;
-        const float width = std::min(574.0f, inWidth - 24.0f);
+        const float width = std::min(BAG_WIDTH + 2 * CELL + GAP + 46.0f, inWidth - 24.0f);
         const float availableHeight = std::max(140.0f, std::min(inHeight - 24.0f, skillBarBounds.top - 20.0f));
-        const float height = std::min(384.0f, availableHeight);
+        const float height = std::min(5 * CELL + 4 * GAP + 120.0f, availableHeight);
         const float left = (inWidth - width) * 0.5f, top = 12.0f + (availableHeight - height) * 0.5f;
         result.panel = D2D1::RectF(left, top, left + width, top + height);
         const float x = left + 12, gridTop = top + 76, bottom = top + height - 30;
@@ -711,7 +724,7 @@ namespace ActionRPG
             const auto layout = CalculateLayout(inWidth, inHeight);
             bagScroll = std::clamp(bagScroll, 0.0f, layout.maxScroll);
             if (inInput.shiftHeld && Contains(layout.viewport, inInput.mouseX, inInput.mouseY))
-                bagScroll = std::clamp(bagScroll - inInput.mouseWheelDelta / 120.0f * 54.0f, 0.0f, layout.maxScroll);
+                bagScroll = std::clamp(bagScroll - inInput.mouseWheelDelta / 120.0f * (ITEM_CELL_SIZE + ITEM_CELL_GAP), 0.0f, layout.maxScroll);
         }
         if (inBarVisible)
         {
@@ -769,8 +782,8 @@ namespace ActionRPG
     D2D1_RECT_F InventoryUi::QuickslotBounds(const D2D1_RECT_F& inSkillBar)
     {
         constexpr float cell = ITEM_CELL_SIZE;
-        return D2D1::RectF(inSkillBar.left + 8.0f, inSkillBar.bottom + 4.0f,
-            inSkillBar.left + 8.0f + 4.0f * cell + 3.0f * ITEM_CELL_GAP, inSkillBar.bottom + 4.0f + cell);
+        return D2D1::RectF(inSkillBar.left + 4.0f, inSkillBar.bottom + 4.0f,
+            inSkillBar.left + 4.0f + 4.0f * cell + 3.0f * ITEM_CELL_GAP, inSkillBar.bottom + 4.0f + cell);
     }
 
     std::array<D2D1_RECT_F, 4> InventoryUi::QuickslotRectangles(const D2D1_RECT_F& inSkillBar)
@@ -926,12 +939,12 @@ namespace ActionRPG
         inRenderer.DrawRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom,
             D2D1::ColorF(inItem && inItem->instanceId == hovered ? 1.0f : 0.40f,
                 inItem && inItem->instanceId == hovered ? 0.75f : 0.47f, 0.52f));
-        // Every view uses a 48px cell and a centered 40px icon. Labels are overlays, never layout padding.
+        // Every view uses a 32px cell and a centered 26px icon. Labels are overlays, never layout padding.
         const auto art = D2D1::RectF(inRect.left + ITEM_ICON_PADDING, inRect.top + ITEM_ICON_PADDING,
             inRect.right - ITEM_ICON_PADDING, inRect.bottom - ITEM_ICON_PADDING);
         if (!inItem)
         {
-            if (!inLabel.empty()) inRenderer.DrawUiText(inLabel, inRect, D2D1::ColorF(0.80f, 0.83f, 0.90f), 14, false, true);
+            if (!inLabel.empty()) inRenderer.DrawUiText(inLabel, inRect, D2D1::ColorF(0.80f, 0.83f, 0.90f), 9, false, true);
             return;
         }
         const auto cooldown = FindCooldown(*inItem);
@@ -950,28 +963,30 @@ namespace ActionRPG
         else inRenderer.DrawUiText(inItem->name.substr(0, 2), art, D2D1::ColorF(0.90f, 0.90f, 0.92f), 12.0f, false, true);
         if (!inLabel.empty())
         {
-            const float width = std::min(ITEM_CELL_SIZE - 2, std::max(14.0f, inLabel.size() * 10.0f + 4));
-            const auto label = D2D1::RectF(inRect.left + 1, inRect.top + 1, inRect.left + 1 + width, inRect.top + 15);
+            const float width = std::min(ITEM_CELL_SIZE - 2, std::max(10.0f, inLabel.size() * 8.0f + 4));
+            const auto label = D2D1::RectF(inRect.left + 1, inRect.top + 1, inRect.left + 1 + width, inRect.top + 11);
             inRenderer.FillRectangle(label.left, label.top, label.right, label.bottom, D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.65f));
-            inRenderer.DrawUiText(inLabel, label, D2D1::ColorF(0.90f, 0.90f, 0.92f), 12, false, true);
+            inRenderer.DrawUiText(inLabel, label, D2D1::ColorF(0.90f, 0.90f, 0.92f), 8, false, true);
         }
         if (!inItem->equipmentSlot)
         {
-            const auto quantity = std::to_wstring(inItem->quantity);
-            const float width = std::min(ITEM_CELL_SIZE - 2, quantity.size() * 8.0f + 4);
-            const auto count = D2D1::RectF(inRect.right - 1 - width, inRect.bottom - 14, inRect.right - 1, inRect.bottom - 1);
+            const auto quantity = SlotQuantityText(inItem->quantity);
+            const float width = std::min(ITEM_CELL_SIZE - 2, quantity.size() * 5.0f + 4);
+            const auto count = D2D1::RectF(inRect.right - 1 - width, inRect.bottom - 11, inRect.right - 1, inRect.bottom - 1);
             inRenderer.FillRectangle(count.left, count.top, count.right, count.bottom, D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.90f));
-            inRenderer.DrawUiText(quantity, count, D2D1::ColorF(1.0f, 1.0f, 0.92f), 11.0f, false, true);
+            inRenderer.DrawUiText(quantity, count, D2D1::ColorF(1.0f, 1.0f, 0.92f), 8.0f, false, true);
         }
         if (cooling)
         {
             const auto label = cooldown->state == CooldownState::Pending
-                ? std::wstring(L"처리 중") : SecondsText(cooldown->remainingSeconds);
-            const float width = cooldown->state == CooldownState::Pending ? 40.0f : 32.0f;
+                ? std::wstring(L"대기") : cooldown->remainingSeconds >= 60.0f
+                    ? std::to_wstring(static_cast<std::uint32_t>(std::ceil(cooldown->remainingSeconds / 60.0f))) + L"m"
+                    : SecondsText(cooldown->remainingSeconds);
+            const float width = ITEM_CELL_SIZE - 2.0f;
             const float x = (inRect.left + inRect.right - width) * 0.5f;
-            const auto rect = D2D1::RectF(x, inRect.top + 16, x + width, inRect.top + 32);
+            const auto rect = D2D1::RectF(x, inRect.top + 11, x + width, inRect.top + 21);
             inRenderer.FillRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
-            inRenderer.DrawUiText(label, rect, D2D1::ColorF(1.0f, 0.9f, 0.6f), 11.0f, false, true);
+            inRenderer.DrawUiText(label, rect, D2D1::ColorF(1.0f, 0.9f, 0.6f), 8.0f, false, true);
         }
     }
 
@@ -981,9 +996,9 @@ namespace ActionRPG
         const auto layout = CalculateLayout(inWidth, inHeight);
         inRenderer.FillRectangle(layout.panel.left, layout.panel.top, layout.panel.right, layout.panel.bottom,
             D2D1::ColorF(0.035f, 0.05f, 0.075f, 0.98f));
-        inRenderer.DrawUiText(inDungeon ? L"인벤토리 · 던전 전투는 계속됩니다" : L"인벤토리",
+        inRenderer.DrawUiText(inDungeon ? L"인벤토리 · 전투 진행 중" : L"인벤토리",
             D2D1::RectF(layout.panel.left + 12.0f, layout.panel.top + 8.0f, layout.panel.right - 120.0f, layout.panel.top + 38.0f),
-            D2D1::ColorF(0.96f, 0.91f, 0.80f), layout.compact ? 16.0f : 20.0f);
+            D2D1::ColorF(0.96f, 0.91f, 0.80f), 16.0f);
         inRenderer.DrawUiText(L"ESC 메뉴로", D2D1::RectF(layout.panel.right - 116.0f, layout.panel.top + 10.0f,
             layout.panel.right - 12.0f, layout.panel.top + 36.0f), D2D1::ColorF(0.80f, 0.82f, 0.87f), 13.0f, false, true);
         for (std::size_t index = 0; index < layout.tabs.size(); ++index)

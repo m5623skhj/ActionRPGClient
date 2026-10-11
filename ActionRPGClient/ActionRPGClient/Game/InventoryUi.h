@@ -114,7 +114,6 @@ namespace ActionRPG
             std::array<D2D1_RECT_F, 4> tabs;
             std::array<D2D1_RECT_F, 40> bags;
             std::array<D2D1_RECT_F, 7> equipment;
-            bool compact{};
         };
         [[nodiscard]] Layout CalculateLayout(float inWidth, float inHeight) const;
         [[nodiscard]] const InventoryItemView* FindItem(const std::string& inId, bool* inEquipped = nullptr) const;

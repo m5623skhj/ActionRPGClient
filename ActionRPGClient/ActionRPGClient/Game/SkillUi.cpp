@@ -66,7 +66,10 @@ namespace ActionRPG
             check(section, {"slotWidth","slotHeight","iconLeft","iconTop","iconSize","keyLeft","keyTop","keyWidth","keyHeight","cooldownLeft","cooldownTop","cooldownWidth","cooldownHeight","gap","padding","bottomMargin","keyFontSize","cooldownFontSize"});
             const auto& bar = settings.at(section);
             PlayerSkills::Catalog::Require(Number(bar,"iconLeft")+Number(bar,"iconSize") <= Number(bar,"slotWidth")
-                && Number(bar,"iconTop")+Number(bar,"iconSize") <= Number(bar,"keyTop")
+                && Number(bar,"iconTop")+Number(bar,"iconSize") <= Number(bar,"slotHeight")
+                && Number(bar,"keyLeft")+Number(bar,"keyWidth") <= Number(bar,"slotWidth")
+                && Number(bar,"cooldownLeft")+Number(bar,"cooldownWidth") <= Number(bar,"slotWidth")
+                && Number(bar,"cooldownTop")+Number(bar,"cooldownHeight") <= Number(bar,"slotHeight")
                 && Number(bar,"keyTop")+Number(bar,"keyHeight") <= Number(bar,"slotHeight"), "Skill slot content exceeds its frame.");
         }
         for (const auto section : {"normalWindow","compactWindow"}) check(section, {"width","height","margin","barGap","padding","headerHeight","footerHeight","contentGap","columnGap","treeRatio","tabHeight","detailIconSize","learnButtonHeight"});
@@ -446,7 +449,9 @@ namespace ActionRPG
                 draw.FillRectangle(cd.left,cd.top,cd.right,cd.bottom,Color("cooldownBacking"));
                 draw.DrawUiText(CooldownText(seconds),cd,Color("cooldownText"),Number(bar,"cooldownFontSize"),false,true);
             }
-            draw.DrawUiText(std::wstring(1,KEYS[i]),Offset(rect,Number(bar,"keyLeft"),Number(bar,"keyTop"),Number(bar,"keyWidth"),Number(bar,"keyHeight")),Color("text"),Number(bar,"keyFontSize"),false,true);
+            const auto key=Offset(rect,Number(bar,"keyLeft"),Number(bar,"keyTop"),Number(bar,"keyWidth"),Number(bar,"keyHeight"));
+            draw.FillRectangle(key.left,key.top,key.right,key.bottom,Color("cooldownBacking"));
+            draw.DrawUiText(std::wstring(1,KEYS[i]),key,Color("text"),Number(bar,"keyFontSize"),false,true);
         }
         if (editing && !dragging.empty()) DrawIcon(draw,dragging,D2D1::RectF(mouseX-Number(bar,"iconSize")/2,mouseY-Number(bar,"iconSize")/2,mouseX+Number(bar,"iconSize")/2,mouseY+Number(bar,"iconSize")/2),false);
     }

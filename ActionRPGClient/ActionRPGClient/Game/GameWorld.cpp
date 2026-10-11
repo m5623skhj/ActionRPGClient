@@ -484,7 +484,7 @@ namespace ActionRPG
             && (systemUiPage==SystemUiPage::Closed || systemUiPage==SystemUiPage::Skills);
         const auto hudSkillBar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
         const auto hudQuickBar = InventoryUi::QuickslotBounds(hudSkillBar);
-        const auto hudMenu = D2D1::RectF(hudQuickBar.right + 8.0f, hudQuickBar.top, hudSkillBar.right - 8.0f, hudQuickBar.bottom);
+        const auto hudMenu = D2D1::RectF(hudQuickBar.right + 4.0f, hudQuickBar.top, hudSkillBar.right - 4.0f, hudQuickBar.bottom);
         const bool hudInteractive = systemUiPage == SystemUiPage::Closed && !partyKickedNotice && !hadKickedNotice
             && !dungeonCleared && !completionStopping && !pendingPartyInvitation && !isDungeonSelectionOpen;
         if (hudInteractive && interfaceInput.leftMousePressed && ContainsPoint(hudMenu, interfaceInput.clickX, interfaceInput.clickY))
@@ -1646,9 +1646,9 @@ namespace ActionRPG
             }
         }
         const auto skillBar = skillUi.GetHotbarBounds(width, height), itemBar = InventoryUi::QuickslotBounds(skillBar);
-        const float radius = width < 1100 || height < 640 ? 36.0f : 48.0f;
-        const float centerY = skillBar.top + (skillBar.bottom - skillBar.top) * 0.55f;
-        const float leftX = skillBar.left - radius - 12, rightX = skillBar.right + radius + 12;
+        const float radius = 28.0f;
+        const float centerY = (skillBar.top + itemBar.bottom) * 0.5f;
+        const float leftX = skillBar.left - radius - 8, rightX = skillBar.right + radius + 8;
         inRenderer.FillRectangle(leftX - radius - 8, skillBar.top - 8, rightX + radius + 8, itemBar.bottom + 4, panel);
         inRenderer.DrawRectangle(leftX - radius - 8, skillBar.top - 8, rightX + radius + 8, itemBar.bottom + 4, iron);
         const auto orb = [&](const float x, const HudGauge& gauge, const wchar_t* label, const D2D1_COLOR_F& color)
@@ -1666,18 +1666,18 @@ namespace ActionRPG
                 inRenderer.FillEllipse(x - inner * 0.24f, centerY - inner * 0.24f, inner * 0.6f, inner * 0.56f, D2D1::ColorF(1, 1, 1, 0.10f));
                 inRenderer.PopAxisAlignedClip();
             }
-            inRenderer.DrawUiText(label, D2D1::RectF(x - radius, centerY - radius + 7, x + radius, centerY - radius + 25), textColor, 14, false, true);
-            inRenderer.DrawUiText(percent(gauge), D2D1::RectF(x - radius, centerY - 9, x + radius, centerY + 11), textColor, 14, false, true);
+            inRenderer.DrawUiText(label, D2D1::RectF(x - radius, centerY - radius + 4, x + radius, centerY - radius + 17), textColor, 11, false, true);
+            inRenderer.DrawUiText(percent(gauge), D2D1::RectF(x - radius, centerY - 7, x + radius, centerY + 8), textColor, 11, false, true);
             const auto amount = gauge.known ? std::to_wstring(gauge.value) + L"/" + std::to_wstring(gauge.maximum) : std::wstring(L"미제공");
-            inRenderer.DrawUiText(amount, D2D1::RectF(x - radius, centerY + radius + 3, x + radius, centerY + radius + 24), textColor, 14, false, true);
+            inRenderer.DrawUiText(amount, D2D1::RectF(x - radius, centerY + radius + 2, x + radius, centerY + radius + 14), textColor, 10, false, true);
         };
         const bool inDungeon = dungeonEntryState == DungeonEntryState::Entered;
         orb(leftX, inDungeon ? dungeonHp : townHp, L"HP", D2D1::ColorF(0xBE2434));
         orb(rightX, inDungeon ? dungeonMp : townMp, L"MP", D2D1::ColorF(0x286FC2));
-        const auto menu = D2D1::RectF(itemBar.right + 8, itemBar.top, skillBar.right - 8, itemBar.bottom);
+        const auto menu = D2D1::RectF(itemBar.right + 4, itemBar.top, skillBar.right - 4, itemBar.bottom);
         inRenderer.FillRectangle(menu.left, menu.top, menu.right, menu.bottom, D2D1::ColorF(0x202630));
         inRenderer.DrawRectangle(menu.left, menu.top, menu.right, menu.bottom, brass);
-        inRenderer.DrawUiText(L"메뉴 · ESC", menu, textColor, 14, false, true);
+        inRenderer.DrawUiText(L"메뉴 · ESC", menu, textColor, 11, false, true);
         if (dungeonCleared) inRenderer.DrawUiText(L"DUNGEON CLEAR", D2D1::RectF(width * 0.5f - 150, 148, width * 0.5f + 150, 182), brass, 22, false, true);
         else if (inDungeon && player.IsCombatDead()) inRenderer.DrawUiText(L"YOU ARE DOWN", D2D1::RectF(24, 148, 300, 182), D2D1::ColorF(0xBE2434), 20);
         if (rejectedActionSeconds > 0.0f)
