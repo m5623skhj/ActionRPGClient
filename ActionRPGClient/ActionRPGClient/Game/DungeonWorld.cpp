@@ -1,5 +1,7 @@
 #include "Game/DungeonWorld.h"
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include "Network/CharacterInventoryJson.h"
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
@@ -71,7 +73,31 @@ namespace ActionRPG
             if (!result.slideDefinitions.contains(id)) throw std::runtime_error("Missing slide character.");
         if (world.contains("playerSkills")) result.playerSkills = PlayerSkills::Catalog::Parse(world.at("playerSkills"));
         result.entryMapId = world.at("entryMapId").get<std::string>();
-        result.spawn = Position(world.at("players").at(std::to_string(inPlayerId)));
+        const auto& initial = world.at("players").at(std::to_string(inPlayerId));
+        result.spawn = Position(initial);
+        if (initial.contains("hp"))
+        {
+            auto& hud = result.initialPlayerHud.emplace();
+            hud.playerId = inPlayerId; hud.hasHudState = true;
+            hud.hp = CharacterInventoryJson::UInt32(initial.at("hp"), 0, UINT32_MAX);
+            hud.maxHp = CharacterInventoryJson::UInt32(initial.at("maxHp"), 1, UINT32_MAX);
+            if (initial.at("mp").is_null() != initial.at("maxMp").is_null()) throw std::runtime_error("Invalid initial MP.");
+            hud.mpKnown = !initial.at("mp").is_null();
+            if (hud.mpKnown)
+            {
+                hud.mp = CharacterInventoryJson::UInt32(initial.at("mp"), 0, UINT32_MAX);
+                hud.maxMp = CharacterInventoryJson::UInt32(initial.at("maxMp"), 0, UINT32_MAX);
+            }
+            const auto id = [](const nlohmann::json& value)
+            {
+                if (!value.is_number_integer() || (!value.is_number_unsigned() && value.get<std::int64_t>() < 0))
+                    throw std::runtime_error("Invalid initial hit identity.");
+                return value.get<std::uint64_t>();
+            };
+            hud.lastHitSequence = id(initial.at("lastHitSequence")); hud.lastHitMonsterId = id(initial.at("lastHitMonsterId"));
+            if (hud.hp > hud.maxHp || hud.mp > hud.maxMp || (hud.lastHitMonsterId != 0 && hud.lastHitSequence == 0))
+                throw std::runtime_error("Invalid initial resources.");
+        }
         std::unordered_set<std::uint64_t> monsterIds;
         for (const auto& [id, source] : world.at("maps").items())
         {
@@ -115,6 +141,19 @@ namespace ActionRPG
                 spawn.position = Position(monster.at("position"));
                 spawn.facingLeft = monster.at("facingLeft").get<bool>();
                 spawn.hp = monster.at("hp").get<std::uint32_t>(); spawn.maxHp = monster.at("maxHp").get<std::uint32_t>();
+                if (monster.contains("name"))
+                {
+                    spawn.name = monster.at("name").get<std::string>(); spawn.isBoss = monster.at("isBoss").get<bool>();
+                    if (!monster.at("level").is_null())
+                    {
+                        const auto& level = monster.at("level");
+                        if (!level.is_number_integer() || level <= 0 || level > UINT32_MAX) throw std::runtime_error("Invalid monster level.");
+                        spawn.level = level.get<std::uint32_t>();
+                    }
+                    if (spawn.name.empty() || spawn.name.size() > 128
+                        || std::any_of(spawn.name.begin(), spawn.name.end(), [](unsigned char c) { return c < 32 || c == 127; }))
+                        throw std::runtime_error("Invalid monster name.");
+                }
                 if (!inMonsters.Contains(spawn.dataId) || spawn.instanceId == 0 || !monsterIds.insert(spawn.instanceId).second
                     || spawn.maxHp == 0 || spawn.hp > spawn.maxHp) throw std::runtime_error("Invalid monster instance.");
                 room.monsters.push_back(spawn);

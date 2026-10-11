@@ -4,6 +4,7 @@
 #include <initguid.h>
 #include <d2d1effects_2.h>
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -57,15 +58,31 @@ namespace ActionRPG
         defaultTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     }
 
+    void D2DRenderer::SetViewport(const std::uint32_t inPhysicalWidth, const std::uint32_t inPhysicalHeight,
+        const std::uint32_t inLogicalWidth, const std::uint32_t inLogicalHeight)
+    {
+        if (!inPhysicalWidth || !inPhysicalHeight || !inLogicalWidth || !inLogicalHeight) return;
+        logicalWidth = static_cast<float>(inLogicalWidth);
+        logicalHeight = static_cast<float>(inLogicalHeight);
+        viewportScale = std::min(inPhysicalWidth / logicalWidth, inPhysicalHeight / logicalHeight);
+        viewportLeft = (inPhysicalWidth - logicalWidth * viewportScale) * 0.5f;
+        viewportTop = (inPhysicalHeight - logicalHeight * viewportScale) * 0.5f;
+    }
+
     void D2DRenderer::BeginFrame(const D2D1_COLOR_F& inClearColor)
     {
         d2dContext->BeginDraw();
         d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
-        d2dContext->Clear(inClearColor);
+        d2dContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+        d2dContext->SetTransform(D2D1::Matrix3x2F::Scale(viewportScale, viewportScale)
+            * D2D1::Matrix3x2F::Translation(viewportLeft, viewportTop));
+        PushAxisAlignedClip(D2D1::RectF(0, 0, logicalWidth, logicalHeight));
+        FillRectangle(0, 0, logicalWidth, logicalHeight, inClearColor);
     }
 
     void D2DRenderer::EndFrame()
     {
+        PopAxisAlignedClip();
         const HRESULT drawResult = d2dContext->EndDraw();
         if (drawResult == D2DERR_RECREATE_TARGET)
         {

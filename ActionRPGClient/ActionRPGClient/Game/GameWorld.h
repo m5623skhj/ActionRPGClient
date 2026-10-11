@@ -51,6 +51,7 @@ namespace ActionRPG
         // Collision/network producers may enqueue hits; Update applies them on the game thread.
         void QueuePlayerHit(CharacterHitType inType);
         [[nodiscard]] std::wstring_view GetDungeonStatusText() const;
+        [[nodiscard]] D2D1_RECT_F GetGameplayTextBounds() const;
         [[nodiscard]] bool ConsumeExitRequested() noexcept;
         [[nodiscard]] SessionMenuAction ConsumeSessionAction() noexcept
         {
@@ -99,7 +100,8 @@ namespace ActionRPG
             PartyCreate,
             ExitConfirmation,
             Skills,
-            Inventory
+            Inventory,
+            ScreenSettings
         };
 
         enum class SystemMenuAction
@@ -110,7 +112,8 @@ namespace ActionRPG
             Inventory,
             Logout,
             SwitchAccount,
-            SelectTown
+            SelectTown,
+            ScreenSettings
         };
 
         struct SystemMenuEntry
@@ -130,12 +133,27 @@ namespace ActionRPG
             const DungeonCombatSnapshot& inCurrent, bool inLocalPlayer);
         void RenderCombatProjectiles(D2DRenderer& inRenderer) const;
         void RenderCombatHud(D2DRenderer& inRenderer) const;
+        void ApplyTownResources(std::string_view inPayload);
+        void ApplyHudSnapshot(const DungeonCombatSnapshot& inSnapshot, const CombatPlayerState& inSelf);
+        struct HudGauge
+        {
+            std::uint32_t value{}, maximum{};
+            float trailingRatio{}, holdSeconds{};
+            bool known{};
+            void Set(std::uint32_t inValue, std::uint32_t inMaximum);
+            void Update(float inDeltaSeconds);
+            [[nodiscard]] float Ratio() const { return maximum == 0 ? 0.0f : static_cast<float>(value) / maximum; }
+        };
+        HudGauge townHp, townMp, dungeonHp, dungeonMp, targetHp;
+        std::uint64_t targetMonsterId{}, lastHudHitSequence{};
         void ProcessPlayerHits();
         void UpdateDungeonCompletion(float inDeltaSeconds, const InputState& inInput);
         void RenderDungeonCompletion(D2DRenderer& inRenderer) const;
         void ProcessDungeonCompletion();
         void UpdateDungeonSelection(const InputState& inInput);
         void UpdateSystemInterface(const InputState& inInput);
+        void UpdateScreenSettings(const InputState& inInput);
+        void RenderScreenSettings(D2DRenderer& inRenderer) const;
         void UpdatePartyInterface(const InputState& inInput);
         [[nodiscard]] bool IsDungeonUiRestricted() const noexcept
         { return dungeonEntryState != DungeonEntryState::Idle; }
@@ -197,6 +215,13 @@ namespace ActionRPG
         TownClient& townClient;
         DungeonClient& dungeonClient;
         MonsterCatalog monsterCatalog;
+        struct MonsterPortrait
+        {
+            Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
+            D2D1_RECT_F sourceRect{}; // Bitmap DIPs, matching D2D DrawBitmap.
+            D2D1_SIZE_F sourcePixels{}; // Preserve the authored aspect even with differing bitmap X/Y DPI.
+        };
+        std::unordered_map<std::uint32_t, MonsterPortrait> monsterPortraits;
         DungeonCombatBuffer combatBuffer;
         std::optional<DungeonCombatSnapshot> presentationSnapshot;
         std::uint32_t appliedMapEpoch{}, pendingMapEpoch{};
@@ -253,6 +278,9 @@ namespace ActionRPG
         std::vector<SystemMenuEntry> systemMenuEntries;
         SystemUiPage systemUiPage = SystemUiPage::Closed;
         float systemMenuScrollOffset{};
+        std::uint32_t screenWidthDraft = 1280;
+        bool fullscreenDraft{}, screenApplyRequested{};
+        std::wstring screenSettingsNotice;
         float uiMouseX{};
         float uiMouseY{};
         bool uiClickConsumed{};

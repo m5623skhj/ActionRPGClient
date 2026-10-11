@@ -27,20 +27,13 @@ namespace ActionRPG
         {
             return;
         }
-        inRenderer.DrawText(
+        const auto hints = world.GetGameplayTextBounds();
+        inRenderer.DrawUiText(
             L"Move: Arrow Keys    Jump: C    Shoot: X    Rock: V    Skill: Left/Right x2 + Z",
-            20.0f,
-            16.0f,
-            1080.0f,
-            48.0f,
-            D2D1::ColorF(0.92f, 0.95f, 1.0f));
-        inRenderer.DrawText(
-            world.GetDungeonStatusText(),
-            20.0f,
-            50.0f,
-            500.0f,
-            32.0f,
-            D2D1::ColorF(0.65f, 0.82f, 1.0f));
+            hints, D2D1::ColorF(0.92f, 0.95f, 1.0f), 14);
+        inRenderer.DrawUiText(world.GetDungeonStatusText(),
+            D2D1::RectF(hints.left, hints.bottom + 6, hints.right, hints.bottom + 38),
+            D2D1::ColorF(0.65f, 0.82f, 1.0f), 14);
     }
 
     void Game::Resize(const float inViewportWidth, const float inViewportHeight)

@@ -23,6 +23,8 @@ namespace ActionRPG
         D2DRenderer(const D2DRenderer&) = delete;
         D2DRenderer& operator=(const D2DRenderer&) = delete;
 
+        void SetViewport(std::uint32_t inPhysicalWidth, std::uint32_t inPhysicalHeight,
+            std::uint32_t inLogicalWidth, std::uint32_t inLogicalHeight);
         void BeginFrame(const D2D1_COLOR_F& inClearColor);
         void EndFrame();
 
@@ -48,6 +50,8 @@ namespace ActionRPG
             const D2D1_COLOR_F& inColor);
 
     private:
+        float logicalWidth = 1280.0f, logicalHeight = 720.0f;
+        float viewportScale = 1.0f, viewportLeft{}, viewportTop{};
         GraphicsDevice& graphicsDevice;
         ID2D1DeviceContext* d2dContext{};
         Microsoft::WRL::ComPtr<IWICImagingFactory2> wicFactory;

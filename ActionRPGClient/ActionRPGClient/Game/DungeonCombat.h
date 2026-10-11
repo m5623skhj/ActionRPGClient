@@ -43,6 +43,9 @@ namespace ActionRPG
     struct CombatPlayerState : CombatActorState
     {
         std::uint64_t playerId{};
+        bool hasHudState{}, mpKnown{};
+        std::uint32_t mp{}, maxMp{};
+        std::uint64_t lastHitSequence{}, lastHitMonsterId{};
         CombatShotPhase shotPhase{ CombatShotPhase::None };
         CombatJumpPhase jumpPhase{ CombatJumpPhase::Grounded };
         float shotSeconds{}, jumpSeconds{};
@@ -71,6 +74,9 @@ namespace ActionRPG
     {
         std::uint64_t instanceId{};
         std::uint32_t dataId{};
+        bool hasHudState{}, levelKnown{}, isBoss{};
+        std::uint32_t level{};
+        std::string name;
         std::string aiNodeId, actionType, animationId;
         bool actionStarted{}, actionComplete{};
         std::uint32_t actionSequence{};

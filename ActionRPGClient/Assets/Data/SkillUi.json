@@ -1,8 +1,8 @@
 {
   "format": "SkillUi", "schemaVersion": 1,
   "layout": {"referenceWidth":1280,"referenceHeight":720,"minimumWidth":640,"minimumHeight":360,"compactWidth":1100,"compactHeight":640,"stackedWidth":960,"dragThreshold":6,"learnTimeoutSeconds":10},
-  "normalBar": {"slotWidth":64,"slotHeight":80,"iconLeft":4,"iconTop":4,"iconSize":56,"keyLeft":4,"keyTop":60,"keyWidth":56,"keyHeight":16,"cooldownLeft":4,"cooldownTop":20,"cooldownWidth":56,"cooldownHeight":24,"gap":8,"padding":8,"bottomMargin":16,"keyFontSize":14,"cooldownFontSize":18},
-  "compactBar": {"slotWidth":56,"slotHeight":72,"iconLeft":4,"iconTop":4,"iconSize":48,"keyLeft":4,"keyTop":52,"keyWidth":48,"keyHeight":16,"cooldownLeft":4,"cooldownTop":18,"cooldownWidth":48,"cooldownHeight":22,"gap":6,"padding":8,"bottomMargin":12,"keyFontSize":14,"cooldownFontSize":16},
+  "normalBar": {"slotWidth":64,"slotHeight":80,"iconLeft":4,"iconTop":4,"iconSize":56,"keyLeft":4,"keyTop":60,"keyWidth":56,"keyHeight":16,"cooldownLeft":4,"cooldownTop":20,"cooldownWidth":56,"cooldownHeight":24,"gap":8,"padding":8,"bottomMargin":56,"keyFontSize":14,"cooldownFontSize":18},
+  "compactBar": {"slotWidth":56,"slotHeight":72,"iconLeft":4,"iconTop":4,"iconSize":48,"keyLeft":4,"keyTop":52,"keyWidth":48,"keyHeight":16,"cooldownLeft":4,"cooldownTop":18,"cooldownWidth":48,"cooldownHeight":22,"gap":6,"padding":8,"bottomMargin":56,"keyFontSize":14,"cooldownFontSize":16},
   "normalWindow": {"width":960,"height":552,"margin":32,"barGap":24,"padding":20,"headerHeight":40,"footerHeight":32,"contentGap":16,"columnGap":24,"treeRatio":0.6,"tabHeight":28,"detailIconSize":96,"learnButtonHeight":32},
   "compactWindow": {"width":960,"height":552,"margin":12,"barGap":12,"padding":12,"headerHeight":36,"footerHeight":28,"contentGap":12,"columnGap":20,"treeRatio":0.6,"tabHeight":28,"detailIconSize":96,"learnButtonHeight":32},
   "node": {"width":96,"height":96,"iconLeft":20,"iconTop":8,"iconSize":56,"nameLeft":8,"nameTop":68,"nameWidth":80,"nameHeight":24,"columnGap":24,"rowGap":24},

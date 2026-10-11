@@ -11,6 +11,13 @@
 
 namespace ActionRPG
 {
+    struct ScreenSettings
+    {
+        std::uint32_t width = 1280;
+        std::uint32_t height = 720;
+        bool fullscreen{};
+    };
+
     class GameWindow final
     {
     public:
@@ -21,8 +28,13 @@ namespace ActionRPG
         GameWindow(const GameWindow&) = delete;
         GameWindow& operator=(const GameWindow&) = delete;
 
-        static void SetMinimumClientSize(std::uint32_t inWidth, std::uint32_t inHeight);
+        [[nodiscard]] static ScreenSettings GetScreenSettings();
+        [[nodiscard]] static bool CanUseWindowed(std::uint32_t inWidth, std::uint32_t inHeight);
+        [[nodiscard]] static bool RequestScreenSettings(const ScreenSettings& inSettings);
+        [[nodiscard]] bool ConsumePresentationChange();
+        [[nodiscard]] static bool IsScreenSettingsPending();
         static void ConsumeUiPointer(InputState& inInput);
+        static void ResetInput();
         [[nodiscard]] bool ProcessMessages();
         [[nodiscard]] bool ConsumeResize(std::uint32_t& outWidth, std::uint32_t& outHeight);
         [[nodiscard]] InputState ConsumeInputState();
@@ -36,6 +48,9 @@ namespace ActionRPG
             LPARAM inLParam);
         LRESULT HandleMessage(UINT inMessage, WPARAM inWParam, LPARAM inLParam);
         void RecordPressedKey(WPARAM inVirtualKey);
+        void ClearInput();
+        void MapPointer(float& inX, float& inY) const;
+        [[nodiscard]] bool ApplyPresentation(HMONITOR inMonitor);
         [[nodiscard]] bool IsKeyDown(unsigned int inVirtualKey) const;
 
     private:
@@ -56,7 +71,10 @@ namespace ActionRPG
         bool pendingLeftMousePressed{};
         bool leftMouseDown{}, pendingLeftMouseReleased{}, pendingRightMousePressed{}, pendingCancelDrag{};
         float pendingRightClickX{}, pendingRightClickY{};
-        std::uint32_t minimumWidth{}, minimumHeight{};
+        ScreenSettings screenSettings;
+        ScreenSettings requestedSettings;
+        HMONITOR requestedMonitor{};
+        bool presentationPending{}, presentationChanged{}, applyingPresentation{};
         std::wstring pendingTextInput;
         std::array<bool, 256> keyStates{};
         std::vector<InputKey> pendingPressedKeys;

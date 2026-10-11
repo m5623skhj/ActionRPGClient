@@ -197,6 +197,9 @@ namespace ActionRPG
                 player.itemUseElapsedSeconds = std::min(player.itemUseDurationSeconds, player.itemUseElapsedSeconds + actionAge);
             for (auto& buff : player.buffs) buff.remainingSeconds = std::max(0.0f, buff.remainingSeconds - age);
             player.hp = hp; player.maxHp = maxHp;
+            player.hasHudState = authoritative.hasHudState; player.mpKnown = authoritative.mpKnown;
+            player.mp = authoritative.mp; player.maxMp = authoritative.maxMp;
+            player.lastHitSequence = authoritative.lastHitSequence; player.lastHitMonsterId = authoritative.lastHitMonsterId;
         }
         for (auto& monster : result.monsters)
         {
@@ -219,6 +222,8 @@ namespace ActionRPG
             monster.presentationTimeMs = target;
             if (IsCombatHitstopped(monster, target)) monster.presentationMoving = false;
             monster.hp = hp; monster.maxHp = maxHp;
+            monster.hasHudState = authoritative.hasHudState; monster.name = authoritative.name;
+            monster.levelKnown = authoritative.levelKnown; monster.level = authoritative.level; monster.isBoss = authoritative.isBoss;
         }
         for (auto& projectile : result.projectiles)
         {

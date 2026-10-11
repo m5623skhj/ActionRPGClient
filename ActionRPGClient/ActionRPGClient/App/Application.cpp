@@ -16,7 +16,8 @@ namespace ActionRPG
         , loginFlow(assetCatalog, townClient, dungeonClient)
     {
         renderer.SetUiFontFamily(L"Segoe UI");
-        GameWindow::SetMinimumClientSize(640, 360);
+        const auto settings = GameWindow::GetScreenSettings();
+        renderer.SetViewport(window.GetClientWidth(), window.GetClientHeight(), settings.width, settings.height);
     }
 
     int Application::Run()
@@ -36,10 +37,22 @@ namespace ActionRPG
         {
             std::uint32_t resizedWidth{};
             std::uint32_t resizedHeight{};
+            const bool presentationChanged = window.ConsumePresentationChange();
             if (window.ConsumeResize(resizedWidth, resizedHeight))
             {
                 graphicsDevice.Resize(resizedWidth, resizedHeight);
-                if (game) game->Resize(static_cast<float>(resizedWidth), static_cast<float>(resizedHeight));
+                const auto settings = GameWindow::GetScreenSettings();
+                renderer.SetViewport(resizedWidth, resizedHeight, settings.width, settings.height);
+                if (game) game->Resize(static_cast<float>(settings.width), static_cast<float>(settings.height));
+            }
+
+            if (presentationChanged || window.IsMinimized())
+            {
+                pendingPressedKeys.clear();
+                pendingTextInput.clear();
+                pendingMouseWheelDelta = 0;
+                pendingLeftMousePressed = false;
+                accumulatedSeconds = 0;
             }
 
             if (window.IsMinimized())
@@ -56,6 +69,7 @@ namespace ActionRPG
             // A breakpoint or window drag must not create an excessively long catch-up update.
             accumulatedSeconds += std::min(elapsedTime.count(), 0.25);
 
+            const auto settings = GameWindow::GetScreenSettings();
             const InputState inputState = window.ConsumeInputState();
             pendingPressedKeys.insert(
                 pendingPressedKeys.end(),
@@ -78,15 +92,15 @@ namespace ActionRPG
                 updateInput.leftMousePressed = pendingLeftMousePressed;
                 updateInput.clickX = pendingClickX;
                 updateInput.clickY = pendingClickY;
-                loginFlow.Update(updateInput, static_cast<float>(window.GetClientWidth()),
-                    static_cast<float>(window.GetClientHeight()));
+                loginFlow.Update(updateInput, static_cast<float>(settings.width),
+                    static_cast<float>(settings.height));
                 if (!loginFlow.IsPlaying()) game.reset();
                 else
                 {
                     const bool created = !game;
                     if (created)
-                        game = std::make_unique<Game>(static_cast<float>(window.GetClientWidth()),
-                            static_cast<float>(window.GetClientHeight()), assetCatalog, renderer, townClient, dungeonClient);
+                        game = std::make_unique<Game>(static_cast<float>(settings.width),
+                            static_cast<float>(settings.height), assetCatalog, renderer, townClient, dungeonClient);
                     // The Enter/click that completed admission must not become a gameplay command.
                     game->Update(static_cast<float>(FIXED_UPDATE_SECONDS), created ? InputState{} : updateInput);
                     const auto action = game->ConsumeSessionAction();
@@ -110,8 +124,8 @@ namespace ActionRPG
 
             renderer.BeginFrame(D2D1::ColorF(0.04f, 0.05f, 0.07f));
             if (game) game->Render(renderer);
-            else loginFlow.Render(renderer, static_cast<float>(window.GetClientWidth()),
-                static_cast<float>(window.GetClientHeight()));
+            else loginFlow.Render(renderer, static_cast<float>(settings.width),
+                static_cast<float>(settings.height));
             renderer.EndFrame();
         }
 

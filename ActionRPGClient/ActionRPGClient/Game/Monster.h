@@ -16,6 +16,9 @@ namespace ActionRPG
         bool facingLeft{};
         std::uint32_t hp{};
         std::uint32_t maxHp{};
+        std::string name;
+        std::optional<std::uint32_t> level;
+        bool isBoss{};
     };
 
     enum class MonsterMotion
@@ -43,10 +46,17 @@ namespace ActionRPG
         float offsetHeight{};
     };
 
+    struct MonsterPortraitDefinition
+    {
+        std::string image;
+        D2D1_RECT_F sourceRect{}; // Original image pixels; converted to bitmap DIPs when loaded.
+    };
+
     struct MonsterVisualDefinition
     {
         std::string monsterId;
         std::string idleAnimationSection;
+        std::optional<MonsterPortraitDefinition> portrait;
         std::map<MonsterMotion, MonsterClipDefinition> clips;
         std::optional<MonsterAttackEffectDefinition> attackEffect;
     };
@@ -58,6 +68,8 @@ namespace ActionRPG
         explicit MonsterCatalog(const AssetCatalog& inAssetCatalog);
         [[nodiscard]] bool Contains(std::uint32_t inDataId) const { return definitions.contains(inDataId); }
         [[nodiscard]] const MonsterVisualDefinition& Get(std::uint32_t inDataId) const;
+        [[nodiscard]] const std::unordered_map<std::uint32_t, MonsterVisualDefinition>& GetDefinitions() const
+        { return definitions; }
     private:
         std::unordered_map<std::uint32_t, MonsterVisualDefinition> definitions;
     };

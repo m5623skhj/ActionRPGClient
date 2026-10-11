@@ -40,6 +40,19 @@ namespace
             || (inProjectile.itemDefinitionId.empty() != inProjectile.visual.empty()))
             throw std::runtime_error("Invalid item projectile visual.");
     }
+    void ValidatePlayerHud(const ActionRPG::CombatPlayerState& inPlayer)
+    {
+        if ((!inPlayer.mpKnown && (inPlayer.mp != 0 || inPlayer.maxMp != 0))
+            || inPlayer.mp > inPlayer.maxMp || (inPlayer.lastHitMonsterId != 0 && inPlayer.lastHitSequence == 0))
+            throw std::runtime_error("Invalid player HUD state.");
+    }
+    void ValidateMonsterHud(const ActionRPG::CombatMonsterState& inMonster)
+    {
+        if (inMonster.name.empty() || inMonster.name.size() > 128
+            || std::any_of(inMonster.name.begin(), inMonster.name.end(), [](unsigned char c) { return c < 32 || c == 127; })
+            || (inMonster.levelKnown ? inMonster.level == 0 : inMonster.level != 0))
+            throw std::runtime_error("Invalid monster HUD state.");
+    }
     double TickInterval(const Json& inValue, const double inFallback)
     {
         if (!inValue.contains("tickIntervalSeconds")) return inFallback;
@@ -269,6 +282,15 @@ namespace ActionRPG
                 player.itemUseDurationSeconds = Number(source.at("itemUseDurationSeconds"));
                 ValidateItemUse(player);
             }
+            if (source.contains("mp"))
+            {
+                player.hasHudState = true; player.mpKnown = !source.at("mp").is_null();
+                if (player.mpKnown != !source.at("maxMp").is_null()) throw std::runtime_error("Invalid nullable MP.");
+                if (player.mpKnown) { player.mp = Integer(source.at("mp")); player.maxMp = Integer(source.at("maxMp")); }
+                player.lastHitSequence = Id(source.at("lastHitSequence"), true);
+                player.lastHitMonsterId = Id(source.at("lastHitMonsterId"), true);
+                ValidatePlayerHud(player);
+            }
             result.players.push_back(std::move(player));
         }
         ids.clear();
@@ -278,6 +300,13 @@ namespace ActionRPG
             static_cast<CombatActorState&>(monster) = Actor(source);
             monster.instanceId = Id(source.at("instanceId")); monster.dataId = Integer(source.at("dataId"));
             if (monster.dataId == 0 || !ids.insert(monster.instanceId).second) throw std::runtime_error("Invalid combat monster ID.");
+            if (source.contains("name"))
+            {
+                monster.hasHudState = true; monster.name = Text(source.at("name")); monster.isBoss = source.at("isBoss").get<bool>();
+                monster.levelKnown = !source.at("level").is_null();
+                if (monster.levelKnown) monster.level = Integer(source.at("level"));
+                ValidateMonsterHud(monster);
+            }
             monster.aiNodeId = Text(source.at("aiNodeId")); monster.actionType = Text(source.at("actionType"));
             monster.animationId = Text(source.at("animationId"), true);
             monster.actionSequence = Integer(source.value("actionSequence", Json(0)));
@@ -452,6 +481,33 @@ namespace ActionRPG
         {
             const auto tag = reader.UInt(4);
             if (!extensionTags.insert(tag).second) throw std::runtime_error("Duplicate realtime extension.");
+            if (tag == 0x31445548) // HUD1: confirmed hits and authoritative resource/monster metadata.
+            {
+                if (reader.UInt(2) != playerCount) throw std::runtime_error("HUD player count mismatch.");
+                std::unordered_set<std::uint64_t> seen;
+                for (std::uint64_t index = 0; index < playerCount; ++index)
+                {
+                    const auto id = reader.UInt(8);
+                    const auto found = std::find_if(result.players.begin(), result.players.end(), [id](const auto& actor) { return actor.playerId == id; });
+                    if (found == result.players.end() || !seen.insert(id).second) throw std::runtime_error("Invalid HUD player ID.");
+                    found->hasHudState = true; found->mpKnown = reader.Bool();
+                    found->mp = static_cast<std::uint32_t>(reader.UInt(4)); found->maxMp = static_cast<std::uint32_t>(reader.UInt(4));
+                    found->lastHitSequence = reader.UInt(8); found->lastHitMonsterId = reader.UInt(8);
+                    ValidatePlayerHud(*found);
+                }
+                if (reader.UInt(2) != monsterCount) throw std::runtime_error("HUD monster count mismatch.");
+                seen.clear();
+                for (std::uint64_t index = 0; index < monsterCount; ++index)
+                {
+                    const auto id = reader.UInt(8);
+                    const auto found = std::find_if(result.monsters.begin(), result.monsters.end(), [id](const auto& actor) { return actor.instanceId == id; });
+                    if (found == result.monsters.end() || !seen.insert(id).second) throw std::runtime_error("Invalid HUD monster ID.");
+                    found->hasHudState = true; found->levelKnown = reader.Bool(); found->level = static_cast<std::uint32_t>(reader.UInt(4));
+                    found->isBoss = reader.Bool(); found->name = reader.Text();
+                    ValidateMonsterHud(*found);
+                }
+                continue;
+            }
             if (tag == 0x31535549) // IUS1: item use actor presentation; little endian.
             {
                 const auto count = reader.UInt(2);

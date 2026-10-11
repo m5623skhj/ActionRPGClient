@@ -1,6 +1,9 @@
 #include "Game/GameWorld.h"
 #include "Network/CharacterInventoryJson.h"
 #include <array>
+#include <iomanip>
+#include <sstream>
+#include <locale>
 #include <unordered_set>
 #include <limits>
 
@@ -26,10 +29,29 @@ namespace ActionRPG
 {
     namespace
     {
+        constexpr float MONSTER_HUD_LEFT = 12.0f;
+        constexpr float MONSTER_HUD_TOP = 12.0f;
+        constexpr float TOP_RIGHT_UI_RESERVED_WIDTH = 320.0f;
+        constexpr float TOP_UI_GAP = 12.0f;
+
         constexpr float MENU_TILE_WIDTH = 166.0f;
         constexpr float MENU_TILE_HEIGHT = 194.0f;
         constexpr float MENU_ICON_SIZE = 128.0f;
         constexpr float MENU_TILE_GAP = 18.0f;
+
+        D2D1_RECT_F GetScreenSettingsPanel(const float inWidth, const float inHeight)
+        {
+            const float left = (inWidth - 600.0f) * 0.5f, top = (inHeight - 400.0f) * 0.5f;
+            return D2D1::RectF(left, top, left + 600.0f, top + 400.0f);
+        }
+
+        D2D1_RECT_F GetScreenSettingsButton(const D2D1_RECT_F& inPanel, const std::size_t inIndex)
+        {
+            const float left = inPanel.left + 30.0f + (inIndex % 2) * 282.0f;
+            constexpr std::array<float, 3> ROW_TOPS{90.0f, 174.0f, 310.0f};
+            const float top = inPanel.top + ROW_TOPS[inIndex / 2];
+            return D2D1::RectF(left, top, left + 258.0f, top + 46.0f);
+        }
 
         struct DungeonCompletionLayout
         {
@@ -375,6 +397,7 @@ namespace ActionRPG
             }
             else if (actionName == "Skills") action = SystemMenuAction::Skills;
             else if (actionName == "Inventory") action = SystemMenuAction::Inventory;
+            else if (actionName == "ScreenSettings") action = SystemMenuAction::ScreenSettings;
             else if (actionName == "Logout") action = SystemMenuAction::Logout;
             else if (actionName == "SwitchAccount") action = SystemMenuAction::SwitchAccount;
             else if (actionName == "SelectTown") action = SystemMenuAction::SelectTown;
@@ -390,9 +413,31 @@ namespace ActionRPG
             Microsoft::WRL::ComPtr<ID2D1Bitmap1> menuIcon;
             if (action == SystemMenuAction::Skills)
             { try { menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId)); } catch (const std::exception&) {} }
-            else if (action != SystemMenuAction::Inventory) menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
+            else if (action != SystemMenuAction::Inventory && action != SystemMenuAction::ScreenSettings) menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
             systemMenuEntries.push_back(SystemMenuEntry{
                 Utf8ToWide(systemMenuDefinitions.GetValue(section, "Label")), action, std::move(menuIcon)});
+        }
+        // Decode each portrait image once on the game thread and validate the authored pixel crop.
+        std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> portraitImages;
+        for (const auto& [dataId, definition] : monsterCatalog.GetDefinitions())
+        {
+            if (!definition.portrait) continue;
+            const auto& portrait = *definition.portrait;
+            auto image = portraitImages.find(portrait.image);
+            if (image == portraitImages.end())
+                image = portraitImages.emplace(portrait.image,
+                    inRenderer.LoadBitmap(inAssetCatalog.GetAssetPath(portrait.image))).first;
+            const auto pixels = image->second->GetPixelSize();
+            const auto dips = image->second->GetSize();
+            const auto& rect = portrait.sourceRect;
+            if (!pixels.width || !pixels.height || !std::isfinite(dips.width) || !std::isfinite(dips.height)
+                || dips.width <= 0 || dips.height <= 0
+                || rect.right > pixels.width || rect.bottom > pixels.height)
+                throw std::runtime_error("Monster portrait exceeds its image: " + portrait.image);
+            const float dipX = dips.width / pixels.width, dipY = dips.height / pixels.height;
+            monsterPortraits.emplace(dataId, MonsterPortrait{image->second,
+                D2D1::RectF(rect.left * dipX, rect.top * dipY, rect.right * dipX, rect.bottom * dipY),
+                D2D1::SizeF(rect.right - rect.left, rect.bottom - rect.top)});
         }
         player.SetRunningEnabled(false);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
@@ -437,6 +482,13 @@ namespace ActionRPG
         skillUi.SetLearningAllowed(!IsDungeonUiRestricted());
         const bool skillBarVisible=!partyKickedNotice && !hadKickedNotice && !dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
             && (systemUiPage==SystemUiPage::Closed || systemUiPage==SystemUiPage::Skills);
+        const auto hudSkillBar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
+        const auto hudQuickBar = InventoryUi::QuickslotBounds(hudSkillBar);
+        const auto hudMenu = D2D1::RectF(hudQuickBar.right + 8.0f, hudQuickBar.top, hudSkillBar.right - 8.0f, hudQuickBar.bottom);
+        const bool hudInteractive = systemUiPage == SystemUiPage::Closed && !partyKickedNotice && !hadKickedNotice
+            && !dungeonCleared && !completionStopping && !pendingPartyInvitation && !isDungeonSelectionOpen;
+        if (hudInteractive && interfaceInput.leftMousePressed && ContainsPoint(hudMenu, interfaceInput.clickX, interfaceInput.clickY))
+        { SetSystemUiPage(SystemUiPage::Menu); uiClickConsumed = true; }
         if (uiClickConsumed) interfaceInput.leftMousePressed=false;
         const auto skillUiAction=skillUi.Update(inDeltaSeconds,interfaceInput,camera.GetViewportWidth(),camera.GetViewportHeight(),systemUiPage==SystemUiPage::Skills,skillBarVisible);
         if (skillUiAction.requestState) townClient.RequestSkillState();
@@ -448,7 +500,8 @@ namespace ActionRPG
             && !hadKickedNotice && !dungeonCleared && !completionStopping && !pendingPartyInvitation
             && !isDungeonSelectionOpen;
         const auto inventoryAction = inventoryUi.Update(inDeltaSeconds, inventoryInput,
-            camera.GetViewportWidth(), camera.GetViewportHeight(), inventoryVisible);
+            camera.GetViewportWidth(), camera.GetViewportHeight(), inventoryVisible,
+            hudInteractive || inventoryVisible, hudSkillBar);
         if (inventoryAction.requestState) townClient.RequestInventoryState(inventoryAction.requestId);
         if (inventoryAction.requestUseStatus) townClient.RequestUseStatus(inventoryAction.useStatusRequestId);
         if (inventoryAction.operation != InventoryOperation::None)
@@ -467,7 +520,12 @@ namespace ActionRPG
         {
             gameplayInput = InputState{};
         }
+        std::erase_if(gameplayInput.pressedKeys, [](InputKey key) { return key >= InputKey::Item1 && key <= InputKey::Item4; });
+        if (inventoryAction.operation == InventoryOperation::Use)
+        { gameplayInput.pressedKeys.clear(); commandQueue.Clear(); }
         if (gameplayBlocked) { commandQueue.Clear(); }
+        townHp.Update(inDeltaSeconds); townMp.Update(inDeltaSeconds);
+        dungeonHp.Update(inDeltaSeconds); dungeonMp.Update(inDeltaSeconds); targetHp.Update(inDeltaSeconds);
         worldTimeSeconds += inDeltaSeconds;
         projectileSystem.Update(inDeltaSeconds, gameplayMap);
         commandQueue.Record(gameplayInput, worldTimeSeconds);
@@ -608,7 +666,12 @@ namespace ActionRPG
         inRenderer.PopAxisAlignedClip();
         RenderCombatHud(inRenderer);
         if (!dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
-            && systemUiPage==SystemUiPage::Closed) skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),false);
+            && systemUiPage==SystemUiPage::Closed)
+        {
+            skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),false);
+            inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),
+                skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),false);
+        }
         RenderDungeonSelection(inRenderer);
         RenderSystemInterface(inRenderer);
         RenderPartyInterface(inRenderer);
@@ -618,11 +681,22 @@ namespace ActionRPG
 
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
     {
+        commandQueue.Clear();
         skillUi.CancelDrag();
         inventoryUi.Close();
+        inventoryUi.SetHotbarBounds(skillUi.GetHotbarBounds(inViewportWidth, inViewportHeight));
         camera.Resize(inViewportWidth, inViewportHeight);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
+    }
+
+    D2D1_RECT_F GameWorld::GetGameplayTextBounds() const
+    {
+        // Keep the top-left combat strip and the reserved top-right UI clear of hints/status.
+        const bool inDungeon = dungeonEntryState == DungeonEntryState::Entered;
+        const float top = inDungeon ? 72.0f : 16.0f;
+        const float right = inDungeon ? camera.GetViewportWidth() - TOP_RIGHT_UI_RESERVED_WIDTH - TOP_UI_GAP : 1080.0f;
+        return D2D1::RectF(20.0f, top, right, top + 28.0f);
     }
 
     std::wstring_view GameWorld::GetDungeonStatusText() const
@@ -690,6 +764,7 @@ namespace ActionRPG
                     localCharacterId = inEvent.characterId;
                     player.ConfigureJumpSpeed(characterDefinitions, localCharacterId);
                     skillUi.Invalidate();
+                    townHp = {}; townMp = {}; dungeonHp = {}; dungeonMp = {};
                     inventoryUi.Reset();
                     inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(), localCharacterId, 0);
                     partySnapshot = {};
@@ -708,6 +783,7 @@ namespace ActionRPG
                     try
                     {
                         skillUi.ApplyState(inEvent.payload,localCharacterId);
+                        ApplyTownResources(inEvent.payload);
                         inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(), localCharacterId, skillUi.GetProgression().level);
                         if (dungeonEntryState==DungeonEntryState::Entered) dungeonClient.RequestCombatRefresh();
                     }
@@ -1109,6 +1185,8 @@ namespace ActionRPG
                 {
                     if (inEvent.mapEpoch <= pendingMapEpoch) return;
                     pendingMapEpoch = inEvent.mapEpoch;
+                    targetMonsterId = 0; targetHp = {};
+                    inventoryUi.Close();
                     player.ClearPredictedAttackFacing();
                     player.ClearSlideState();
                     skillUi.CancelDrag();
@@ -1190,6 +1268,14 @@ namespace ActionRPG
             combatBuffer.Clear(); presentationSnapshot.reset();
         }
         if (combatSnapshot) QueueCombatHitEffects(*combatSnapshot, snapshot, true);
+        if (snapshot.mapEpoch != appliedMapEpoch)
+        {
+            targetMonsterId = 0; targetHp = {};
+            // Consume the boundary's old target, including a same-map epoch reset. Await a fresh hit.
+            if (appliedMapEpoch != 0 && self->hasHudState)
+                lastHudHitSequence = std::max(lastHudHitSequence, self->lastHitSequence);
+        }
+        ApplyHudSnapshot(snapshot, *self);
         appliedMapEpoch = pendingMapEpoch = snapshot.mapEpoch;
         const auto& rules = dungeonWorld->GetCombatRules();
         // Old movement acknowledgements affect only position correction, not HP/entities/clear state.
@@ -1413,35 +1499,189 @@ namespace ActionRPG
         }
     }
 
+    void GameWorld::HudGauge::Set(const std::uint32_t inValue, const std::uint32_t inMaximum)
+    {
+        if (inValue > inMaximum) throw std::runtime_error("Invalid HUD resource.");
+        const bool reset = !known || maximum != inMaximum;
+        const auto previous = value;
+        value = inValue; maximum = inMaximum; known = true;
+        if (reset) { trailingRatio = Ratio(); holdSeconds = 0.0f; return; }
+        trailingRatio = std::max(trailingRatio, Ratio());
+        if (value < previous) holdSeconds = 0.2f;
+    }
+
+    // Consume hold and shrink times separately, including a frame crossing the hold boundary.
+    void GameWorld::HudGauge::Update(const float inDeltaSeconds)
+    {
+        if (!known) return;
+        const float elapsed = std::max(0.0f, inDeltaSeconds), held = std::min(holdSeconds, elapsed);
+        holdSeconds -= held;
+        trailingRatio = std::max(Ratio(), trailingRatio - (elapsed - held) * 0.6f);
+    }
+
+    void GameWorld::ApplyTownResources(const std::string_view inPayload)
+    {
+        using namespace CharacterInventoryJson;
+        const auto body = Json::parse(inPayload);
+        auto nextHp = townHp, nextMp = townMp;
+        const auto read = [&body](const char* key, const char* maxKey, HudGauge& outGauge)
+        {
+            if (!body.contains(key) && !body.contains(maxKey)) { outGauge = {}; return; }
+            const auto& value = body.at(key); const auto& maximum = body.at(maxKey);
+            if (value.is_null() && maximum.is_null()) { outGauge = {}; return; }
+            outGauge.Set(UInt32(value, 0, UINT32_MAX), UInt32(maximum, 0, UINT32_MAX));
+        };
+        read("hp", "maxHp", nextHp); read("mp", "maxMp", nextMp);
+        // Town TCP state cannot write Dungeon resources, even if it arrives during combat.
+        townHp = nextHp; townMp = nextMp;
+    }
+
+    void GameWorld::ApplyHudSnapshot(const DungeonCombatSnapshot& inSnapshot, const CombatPlayerState& inSelf)
+    {
+        dungeonHp.Set(inSelf.hp, inSelf.maxHp);
+        if (inSelf.hasHudState)
+        {
+            if (inSelf.mpKnown) dungeonMp.Set(inSelf.mp, inSelf.maxMp); else dungeonMp = {};
+            if (inSelf.lastHitSequence > lastHudHitSequence)
+            {
+                lastHudHitSequence = inSelf.lastHitSequence;
+                if (targetMonsterId != inSelf.lastHitMonsterId) targetHp = {};
+                targetMonsterId = inSelf.lastHitMonsterId;
+            }
+        }
+        const auto target = std::find_if(inSnapshot.monsters.begin(), inSnapshot.monsters.end(),
+            [this](const auto& actor) { return actor.instanceId == targetMonsterId; });
+        if (target == inSnapshot.monsters.end() || target->hp == 0 || inSnapshot.cleared)
+        { targetMonsterId = 0; targetHp = {}; }
+        else targetHp.Set(target->hp, target->maxHp);
+    }
+
     void GameWorld::RenderCombatHud(D2DRenderer& inRenderer) const
     {
-        if (dungeonEntryState != DungeonEntryState::Entered || !combatSnapshot) return;
-        const auto bar = [&inRenderer](const Vector2 inPosition, const std::uint32_t inHp, const std::uint32_t inMaxHp)
+        const float width = camera.GetViewportWidth(), height = camera.GetViewportHeight();
+        const auto iron = D2D1::ColorF(0x70757F), brass = D2D1::ColorF(0xBC9364);
+        const auto panel = D2D1::ColorF(0x10141B), textColor = D2D1::ColorF(0xF0EAE0);
+        const auto percent = [](const HudGauge& gauge)
         {
-            if (inMaxHp == 0) return;
-            inRenderer.FillRectangle(inPosition.x - 32.0f, inPosition.y + 8.0f, inPosition.x + 32.0f, inPosition.y + 14.0f,
-                D2D1::ColorF(0.15f, 0.05f, 0.05f, 0.9f));
-            inRenderer.FillRectangle(inPosition.x - 32.0f, inPosition.y + 8.0f,
-                inPosition.x - 32.0f + 64.0f * static_cast<float>(inHp) / static_cast<float>(inMaxHp), inPosition.y + 14.0f,
-                D2D1::ColorF(0.85f, 0.16f, 0.13f));
+            if (!gauge.known || gauge.maximum == 0) return std::wstring(L"—");
+            std::wostringstream text; text.imbue(std::locale::classic());
+            text << std::fixed << std::setprecision(2) << static_cast<double>(gauge.value) * 100.0 / gauge.maximum << L"%";
+            return text.str();
         };
-        for (const auto& state : combatSnapshot->players)
+        if (dungeonEntryState == DungeonEntryState::Entered && combatSnapshot && targetMonsterId != 0 && targetHp.known)
         {
-            const auto position = state.playerId == localPlayerId ? player.GetGroundPosition() : combatPlayers.at(state.playerId)->GetGroundPosition();
-            bar(camera.WorldToScreen(position), state.hp, state.maxHp);
-            if (state.playerId == localPlayerId)
-                inRenderer.DrawText(L"HP " + std::to_wstring(state.hp) + L" / " + std::to_wstring(state.maxHp),
-                    24.0f, 24.0f, 270.0f, 56.0f, D2D1::ColorF(D2D1::ColorF::White));
+            const auto target = std::find_if(combatSnapshot->monsters.begin(), combatSnapshot->monsters.end(),
+                [this](const auto& actor) { return actor.instanceId == targetMonsterId; });
+            if (target != combatSnapshot->monsters.end() && target->hp > 0)
+            {
+                const auto& spawns = dungeonWorld->GetMap(dungeonMapId).monsters;
+                const auto spawn = std::find_if(spawns.begin(), spawns.end(), [this](const auto& actor) { return actor.instanceId == targetMonsterId; });
+                const bool boss = target->hasHudState ? target->isBoss : spawn != spawns.end() && spawn->isBoss;
+                const auto name = target->hasHudState ? target->name : spawn != spawns.end() ? spawn->name : std::string{};
+                const auto level = target->hasHudState
+                    ? (target->levelKnown ? std::optional<std::uint32_t>(target->level) : std::nullopt)
+                    : spawn != spawns.end() ? spawn->level : std::nullopt;
+                const float frameWidth = width - MONSTER_HUD_LEFT - TOP_RIGHT_UI_RESERVED_WIDTH - TOP_UI_GAP;
+                const float frameHeight = boss ? 48.0f : 44.0f;
+                const auto frame = D2D1::RectF(MONSTER_HUD_LEFT, MONSTER_HUD_TOP,
+                    MONSTER_HUD_LEFT + frameWidth, MONSTER_HUD_TOP + frameHeight);
+                const auto border = boss ? brass : iron;
+                const auto hpColor = boss ? D2D1::ColorF(0xBE2434) : D2D1::ColorF(0x4C9A63);
+                inRenderer.FillRectangle(frame.left, frame.top, frame.right, frame.bottom, panel);
+                inRenderer.DrawRectangle(frame.left, frame.top, frame.right, frame.bottom, border, boss ? 3.0f : 2.0f);
+                const float portraitSize = frameHeight - 8.0f;
+                const auto portraitRect = D2D1::RectF(frame.left + 4, frame.top + 4,
+                    frame.left + 4 + portraitSize, frame.bottom - 4);
+                inRenderer.FillRectangle(portraitRect.left, portraitRect.top, portraitRect.right, portraitRect.bottom,
+                    D2D1::ColorF(0x030405));
+                if (const auto portrait = monsterPortraits.find(target->dataId); portrait != monsterPortraits.end())
+                {
+                    const auto& source = portrait->second.sourceRect;
+                    const auto& pixels = portrait->second.sourcePixels;
+                    const float scale = std::min(portraitSize / pixels.width, portraitSize / pixels.height);
+                    const float imageWidth = pixels.width * scale;
+                    const float imageHeight = pixels.height * scale;
+                    const float x = (portraitRect.left + portraitRect.right - imageWidth) * 0.5f;
+                    const float y = (portraitRect.top + portraitRect.bottom - imageHeight) * 0.5f;
+                    inRenderer.DrawBitmap(portrait->second.bitmap.Get(), source,
+                        D2D1::RectF(x, y, x + imageWidth, y + imageHeight));
+                }
+                inRenderer.DrawRectangle(portraitRect.left, portraitRect.top, portraitRect.right, portraitRect.bottom, border);
+                const auto bar = D2D1::RectF(portraitRect.right + 8, frame.top + 7, frame.right - 5, frame.bottom - 7);
+                const float length = bar.right - bar.left;
+                inRenderer.FillRectangle(bar.left, bar.top, bar.right, bar.bottom, D2D1::ColorF(0x030405));
+                inRenderer.FillRectangle(bar.left, bar.top, bar.left + length * targetHp.trailingRatio, bar.bottom, D2D1::ColorF(0x777B82));
+                inRenderer.FillRectangle(bar.left, bar.top, bar.left + length * targetHp.Ratio(), bar.bottom, hpColor);
+                inRenderer.DrawRectangle(bar.left, bar.top, bar.right, bar.bottom, border);
+                if (boss) inRenderer.DrawRectangle(frame.left + 4, frame.top + 4, frame.right - 4, frame.bottom - 4, brass);
+                float labelLeft = bar.left + 8;
+                if (boss)
+                {
+                    const auto badge = D2D1::RectF(labelLeft, bar.top + 3, labelLeft + 48, bar.bottom - 3);
+                    inRenderer.FillRectangle(badge.left, badge.top, badge.right, badge.bottom, D2D1::ColorF(0x332415));
+                    inRenderer.DrawRectangle(badge.left, badge.top, badge.right, badge.bottom, brass);
+                    inRenderer.DrawUiText(L"BOSS", badge, D2D1::ColorF(0xF5DCA4), 12, false, true);
+                    labelLeft = badge.right + 8;
+                }
+                // Separate clipped name/HP/percent regions prevent long server names or u32 HP
+                // values from covering one another; shadow text stays legible over every fill state.
+                const auto hudText = [&](const std::wstring& text, const D2D1_RECT_F& rect)
+                {
+                    auto shadow = rect; shadow.left += 1; shadow.top += 1; shadow.right += 1; shadow.bottom += 1;
+                    inRenderer.DrawUiText(text, shadow, D2D1::ColorF(0x000000), 14, false, true);
+                    inRenderer.DrawUiText(text, rect, textColor, 14, false, true);
+                };
+                const std::wstring label = (level ? L"Lv." + std::to_wstring(*level) : std::wstring(L"Lv.—"))
+                    + L"  " + (name.empty() ? std::wstring(L"이름 미제공") : Utf8ToWide(name));
+                const auto nameRect = D2D1::RectF(labelLeft, bar.top + (bar.bottom - bar.top - 18) * 0.5f,
+                    bar.right - 294, bar.bottom);
+                // Name is left aligned, whereas the two numeric columns are centered.
+                auto nameShadow = nameRect; nameShadow.left += 1; nameShadow.top += 1;
+                nameShadow.right += 1; nameShadow.bottom += 1;
+                inRenderer.DrawUiText(label, nameShadow, D2D1::ColorF(0x000000), 14);
+                inRenderer.DrawUiText(label, nameRect, textColor, 14);
+                const auto amount = std::to_wstring(targetHp.value) + L" / " + std::to_wstring(targetHp.maximum);
+                hudText(amount, D2D1::RectF(bar.right - 282, bar.top, bar.right - 96, bar.bottom));
+                hudText(percent(targetHp), D2D1::RectF(bar.right - 88, bar.top, bar.right - 6, bar.bottom));
+            }
         }
-        if (const auto found = dungeonMonsters.find(dungeonMapId); found != dungeonMonsters.end())
-            for (const auto& monster : found->second) bar(camera.WorldToScreen(monster->GetGroundPosition()), monster->GetHp(), monster->GetMaxHp());
-        if (dungeonCleared)
-            inRenderer.DrawText(L"DUNGEON CLEAR", camera.GetViewportWidth() * 0.5f - 140.0f, 72.0f,
-                camera.GetViewportWidth() * 0.5f + 160.0f, 112.0f, D2D1::ColorF(1.0f, 0.85f, 0.25f));
-        else if (player.IsCombatDead())
-            inRenderer.DrawText(L"YOU ARE DOWN", 24.0f, 60.0f, 300.0f, 94.0f, D2D1::ColorF(0.9f, 0.2f, 0.2f));
+        const auto skillBar = skillUi.GetHotbarBounds(width, height), itemBar = InventoryUi::QuickslotBounds(skillBar);
+        const float radius = width < 1100 || height < 640 ? 36.0f : 48.0f;
+        const float centerY = skillBar.top + (skillBar.bottom - skillBar.top) * 0.55f;
+        const float leftX = skillBar.left - radius - 12, rightX = skillBar.right + radius + 12;
+        inRenderer.FillRectangle(leftX - radius - 8, skillBar.top - 8, rightX + radius + 8, itemBar.bottom + 4, panel);
+        inRenderer.DrawRectangle(leftX - radius - 8, skillBar.top - 8, rightX + radius + 8, itemBar.bottom + 4, iron);
+        const auto orb = [&](const float x, const HudGauge& gauge, const wchar_t* label, const D2D1_COLOR_F& color)
+        {
+            inRenderer.FillEllipse(x, centerY, radius, radius, iron);
+            inRenderer.FillEllipse(x, centerY, radius - 3, radius - 3, D2D1::ColorF(0x202630));
+            const float inner = radius * 0.75f;
+            inRenderer.FillEllipse(x, centerY, inner, inner, D2D1::ColorF(0x030405));
+            if (gauge.known)
+            {
+                inRenderer.PushAxisAlignedClip(D2D1::RectF(x - inner, centerY + inner - 2 * inner * gauge.trailingRatio, x + inner, centerY + inner));
+                inRenderer.FillEllipse(x, centerY, inner, inner, D2D1::ColorF(0x777B82)); inRenderer.PopAxisAlignedClip();
+                inRenderer.PushAxisAlignedClip(D2D1::RectF(x - inner, centerY + inner - 2 * inner * gauge.Ratio(), x + inner, centerY + inner));
+                inRenderer.FillEllipse(x, centerY, inner, inner, color);
+                inRenderer.FillEllipse(x - inner * 0.24f, centerY - inner * 0.24f, inner * 0.6f, inner * 0.56f, D2D1::ColorF(1, 1, 1, 0.10f));
+                inRenderer.PopAxisAlignedClip();
+            }
+            inRenderer.DrawUiText(label, D2D1::RectF(x - radius, centerY - radius + 7, x + radius, centerY - radius + 25), textColor, 14, false, true);
+            inRenderer.DrawUiText(percent(gauge), D2D1::RectF(x - radius, centerY - 9, x + radius, centerY + 11), textColor, 14, false, true);
+            const auto amount = gauge.known ? std::to_wstring(gauge.value) + L"/" + std::to_wstring(gauge.maximum) : std::wstring(L"미제공");
+            inRenderer.DrawUiText(amount, D2D1::RectF(x - radius, centerY + radius + 3, x + radius, centerY + radius + 24), textColor, 14, false, true);
+        };
+        const bool inDungeon = dungeonEntryState == DungeonEntryState::Entered;
+        orb(leftX, inDungeon ? dungeonHp : townHp, L"HP", D2D1::ColorF(0xBE2434));
+        orb(rightX, inDungeon ? dungeonMp : townMp, L"MP", D2D1::ColorF(0x286FC2));
+        const auto menu = D2D1::RectF(itemBar.right + 8, itemBar.top, skillBar.right - 8, itemBar.bottom);
+        inRenderer.FillRectangle(menu.left, menu.top, menu.right, menu.bottom, D2D1::ColorF(0x202630));
+        inRenderer.DrawRectangle(menu.left, menu.top, menu.right, menu.bottom, brass);
+        inRenderer.DrawUiText(L"메뉴 · ESC", menu, textColor, 14, false, true);
+        if (dungeonCleared) inRenderer.DrawUiText(L"DUNGEON CLEAR", D2D1::RectF(width * 0.5f - 150, 148, width * 0.5f + 150, 182), brass, 22, false, true);
+        else if (inDungeon && player.IsCombatDead()) inRenderer.DrawUiText(L"YOU ARE DOWN", D2D1::RectF(24, 148, 300, 182), D2D1::ColorF(0xBE2434), 20);
         if (rejectedActionSeconds > 0.0f)
-            inRenderer.DrawText(L"ACTION NOT ACCEPTED", 24.0f, 98.0f, 360.0f, 128.0f, D2D1::ColorF(0.95f, 0.7f, 0.3f));
+            inRenderer.DrawUiText(L"ACTION NOT ACCEPTED", D2D1::RectF(24, 188, 360, 218), brass, 14);
     }
 
     void GameWorld::UpdateDungeonCompletion(const float inDeltaSeconds, const InputState& inInput)
@@ -1613,6 +1853,19 @@ namespace ActionRPG
             newPartyIsPublic = false;
             partyCreationPending = false;
             partyStatusText.clear();
+        }
+        if (systemUiPage == SystemUiPage::ScreenSettings || page == SystemUiPage::ScreenSettings)
+        {
+            GameWindow::ResetInput();
+            inventoryUi.Close();
+        }
+        if (page == SystemUiPage::ScreenSettings)
+        {
+            const auto settings = GameWindow::GetScreenSettings();
+            screenWidthDraft = settings.width;
+            fullscreenDraft = settings.fullscreen;
+            screenApplyRequested = false;
+            screenSettingsNotice.clear();
         }
         if (systemUiPage == SystemUiPage::Inventory) inventoryUi.Close();
         systemUiPage = page;
@@ -1815,6 +2068,84 @@ namespace ActionRPG
         townClient.CreateParty(*title, newPartyIsPublic);
     }
 
+    void GameWorld::UpdateScreenSettings(const InputState& inInput)
+    {
+        if (screenApplyRequested && !GameWindow::IsScreenSettingsPending())
+        {
+            const auto settings = GameWindow::GetScreenSettings();
+            screenSettingsNotice = settings.width == screenWidthDraft && settings.fullscreen == fullscreenDraft
+                ? L"화면 설정이 적용되었습니다." : L"설정을 적용하지 못했습니다. 현재 설정을 확인해 주세요.";
+            screenApplyRequested = false;
+        }
+        if (screenApplyRequested) return;
+        if (inInput.WasPressed(InputKey::MoveLeft)) screenWidthDraft = 1280;
+        if (inInput.WasPressed(InputKey::MoveRight)) screenWidthDraft = 1920;
+        if (inInput.WasPressed(InputKey::MoveUp)
+            && GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U)) fullscreenDraft = false;
+        if (inInput.WasPressed(InputKey::MoveDown)) fullscreenDraft = true;
+        bool apply = inInput.WasPressed(InputKey::ConfirmSelection);
+        const auto panel = GetScreenSettingsPanel(camera.GetViewportWidth(), camera.GetViewportHeight());
+        if (inInput.leftMousePressed)
+        {
+            for (std::size_t index = 0; index < 6; ++index)
+            {
+                if (!ContainsPoint(GetScreenSettingsButton(panel, index), inInput.clickX, inInput.clickY)) continue;
+                uiClickConsumed = true;
+                screenSettingsNotice.clear();
+                if (index < 2) screenWidthDraft = index == 0 ? 1280 : 1920;
+                else if (index < 4)
+                {
+                    if (index == 3 || GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U))
+                        fullscreenDraft = index == 3;
+                }
+                else if (index == 4) apply = true;
+                else { SetSystemUiPage(SystemUiPage::Menu); return; }
+                break;
+            }
+        }
+        if (apply)
+        {
+            const ScreenSettings settings{screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U, fullscreenDraft};
+            screenApplyRequested = GameWindow::RequestScreenSettings(settings);
+            screenSettingsNotice = screenApplyRequested ? L"화면 설정을 적용하고 있습니다."
+                : L"선택 해상도의 창이 작업 영역에 들어가지 않습니다. 전체화면을 선택해 주세요.";
+        }
+    }
+
+    void GameWorld::RenderScreenSettings(D2DRenderer& inRenderer) const
+    {
+        const float width = camera.GetViewportWidth(), height = camera.GetViewportHeight();
+        const auto panel = GetScreenSettingsPanel(width, height);
+        const auto text = D2D1::ColorF(0xE9E4D8), brass = D2D1::ColorF(0xA98948);
+        inRenderer.FillRectangle(0, 0, width, height, D2D1::ColorF(0.04f, 0.05f, 0.07f, 0.86f));
+        inRenderer.FillRectangle(panel.left, panel.top, panel.right, panel.bottom, D2D1::ColorF(0x141922));
+        inRenderer.DrawRectangle(panel.left, panel.top, panel.right, panel.bottom, brass, 2);
+        inRenderer.DrawUiText(L"화면 설정", D2D1::RectF(panel.left + 30, panel.top + 18, panel.right - 30, panel.top + 52), text, 24);
+        inRenderer.DrawUiText(L"해상도 · 좌우 방향키", D2D1::RectF(panel.left + 30, panel.top + 60, panel.right - 30, panel.top + 84), text, 16);
+        inRenderer.DrawUiText(L"화면 모드 · 위아래 방향키", D2D1::RectF(panel.left + 30, panel.top + 144, panel.right - 30, panel.top + 168), text, 16);
+        const bool fits = GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U);
+        const bool canApply = (fullscreenDraft || fits) && !screenApplyRequested;
+        constexpr std::array<std::wstring_view, 6> LABELS{L"1280 × 720", L"1920 × 1080", L"창모드", L"전체화면", L"적용 · Enter", L"돌아가기 · ESC"};
+        for (std::size_t index = 0; index < LABELS.size(); ++index)
+        {
+            const auto rect = GetScreenSettingsButton(panel, index);
+            const bool selected = index < 2 ? screenWidthDraft == (index == 0 ? 1280U : 1920U)
+                : index < 4 && fullscreenDraft == (index == 3);
+            const bool enabled = !screenApplyRequested && (index != 2 || fits) && (index != 4 || canApply);
+            inRenderer.FillRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(enabled ? (selected ? 0x384657 : 0x242C38) : 0x1B2028));
+            inRenderer.DrawRectangle(rect.left, rect.top, rect.right, rect.bottom, selected ? brass : D2D1::ColorF(0x45515F), selected ? 2.0f : 1.0f);
+            inRenderer.DrawUiText(LABELS[index], rect, enabled ? text : D2D1::ColorF(0x707885), 18, false, true);
+        }
+        const auto notice = !fits && !fullscreenDraft
+            ? std::wstring(L"창 테두리까지 작업 영역에 들어가지 않습니다.\n전체화면을 선택해 주세요.")
+            : screenSettingsNotice.empty() ? std::wstring(L"전체화면은 모니터 비율에 따라 검은 여백을 표시합니다.") : screenSettingsNotice;
+        inRenderer.DrawUiText(notice, D2D1::RectF(panel.left + 30, panel.top + 240, panel.right - 30, panel.top + 302), text, 16, true);
+        const auto current = GameWindow::GetScreenSettings();
+        const auto currentText = L"현재: " + std::to_wstring(current.width) + L" × " + std::to_wstring(current.height)
+            + (current.fullscreen ? L" · 전체화면" : L" · 창모드");
+        inRenderer.DrawUiText(currentText, D2D1::RectF(panel.left + 30, panel.top + 365, panel.right - 30, panel.bottom - 10), text, 14, false, true);
+    }
+
     void GameWorld::UpdateSystemInterface(const InputState& inInput)
     {
         if (uiClickConsumed) return;
@@ -1839,6 +2170,12 @@ namespace ActionRPG
             {
                 SetSystemUiPage(SystemUiPage::Menu);
             }
+            return;
+        }
+
+        if (systemUiPage == SystemUiPage::ScreenSettings)
+        {
+            UpdateScreenSettings(inInput);
             return;
         }
 
@@ -1916,7 +2253,8 @@ namespace ActionRPG
             }
             SetSystemUiPage(action==SystemMenuAction::Party ? SystemUiPage::Party
                 : action==SystemMenuAction::Skills ? SystemUiPage::Skills
-                : action==SystemMenuAction::Inventory ? SystemUiPage::Inventory:SystemUiPage::ExitConfirmation);
+                : action==SystemMenuAction::Inventory ? SystemUiPage::Inventory
+                : action==SystemMenuAction::ScreenSettings ? SystemUiPage::ScreenSettings:SystemUiPage::ExitConfirmation);
             uiClickConsumed = true;
             return;
         }
@@ -2198,6 +2536,14 @@ namespace ActionRPG
     void GameWorld::ApplyDungeonMap(const std::string& inMapId, const Vector2 inPosition)
     {
         const auto& room = dungeonWorld->GetMap(inMapId);
+        if (dungeonMapId.empty())
+        {
+            if (const auto& initial = dungeonWorld->GetInitialPlayerHud(); initial)
+            {
+                dungeonHp.Set(initial->hp, initial->maxHp);
+                if (initial->mpKnown) dungeonMp.Set(initial->mp, initial->maxMp); else dungeonMp = {};
+            }
+        }
         if (!dungeonMonsters.contains(inMapId))
         {
             std::vector<std::unique_ptr<Monster>> monsters;
@@ -2218,6 +2564,8 @@ namespace ActionRPG
         mapBackground.Configure(room.map);
         transitionZones = room.map.transitionZones;
         dungeonMapId = inMapId;
+        targetMonsterId = 0; targetHp = {};
+        inventoryUi.Close();
         combatBuffer.Clear(); presentationSnapshot.reset(); combatHitEffects.clear();
         combatPlayers.clear(); combatSnapshot.reset(); combatSnapshotAge = 0.0f;
         skillUi.CancelDrag();
@@ -2249,6 +2597,7 @@ namespace ActionRPG
         dungeonWorld.reset(); dungeonMonsters.clear(); dungeonMapId.clear();
         combatBuffer.Clear(); presentationSnapshot.reset(); combatHitEffects.clear(); appliedMapEpoch = pendingMapEpoch = 0;
         combatPlayers.clear(); combatSnapshot.reset(); hasCombatTick = dungeonCleared = false;
+        targetMonsterId = lastHudHitSequence = 0; targetHp = {}; dungeonHp = {}; dungeonMp = {};
         lastCombatTick = 0; combatActionSequence = lastCombatActionResult = combatInputsThisSecond = 0;
         combatInputWindowSeconds = combatSnapshotAge = rejectedActionSeconds = 0.0f;
         player.ClearPredictedAttackFacing();
@@ -2382,10 +2731,26 @@ namespace ActionRPG
 
     void GameWorld::RenderSystemInterface(D2DRenderer& inRenderer) const
     {
+        if (systemUiPage == SystemUiPage::ScreenSettings)
+        {
+            RenderScreenSettings(inRenderer);
+            return;
+        }
         if (systemUiPage==SystemUiPage::Skills)
-        { skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),true); return; }
+        {
+            skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),true);
+            inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),
+                skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),false);
+            return;
+        }
         if (systemUiPage==SystemUiPage::Inventory)
-        { inventoryUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),IsDungeonUiRestricted()); return; }
+        {
+            inventoryUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),IsDungeonUiRestricted());
+            skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),false);
+            inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),
+                skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),true);
+            return;
+        }
         if (systemUiPage == SystemUiPage::Closed && !pendingPartyInvitation.has_value())
         {
             return;
@@ -2431,6 +2796,13 @@ namespace ActionRPG
                         inRenderer.DrawUiIcon(systemMenuEntries[index].icon.Get(),destination,disabled);
                     else inRenderer.DrawBitmap(systemMenuEntries[index].icon.Get(),
                         D2D1::RectF(0.0f,0.0f,bitmapSize.width,bitmapSize.height),destination);
+                }
+                if (systemMenuEntries[index].action == SystemMenuAction::ScreenSettings)
+                {
+                    const float x = (tile.left + tile.right) * 0.5f, y = tile.top + 64.0f;
+                    inRenderer.DrawRectangle(x - 45, y - 25, x + 45, y + 25, D2D1::ColorF(0xC7AC74), 3);
+                    inRenderer.DrawLine(x, y + 25, x, y + 42, D2D1::ColorF(0xC7AC74), 3);
+                    inRenderer.DrawLine(x - 24, y + 42, x + 24, y + 42, D2D1::ColorF(0xC7AC74), 3);
                 }
                 if (systemMenuEntries[index].action == SystemMenuAction::Inventory)
                     for (int row = 0; row < 3; ++row) for (int column = 0; column < 3; ++column)

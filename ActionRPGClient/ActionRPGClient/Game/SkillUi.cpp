@@ -1,7 +1,6 @@
 #include "Game/SkillUi.h"
 #include "Graphics/D2DRenderer.h"
 #include "Resources/AssetCatalog.h"
-#include "Platform/GameWindow.h"
 #include <Windows.h>
 #include <d2d1_1helper.h>
 #include <algorithm>
@@ -60,7 +59,7 @@ namespace ActionRPG
         std::ifstream input(path); input >> settings;
         PlayerSkills::Catalog::Require(settings.at("format") == "SkillUi" && settings.at("schemaVersion") == 1, "Unsupported SkillUi configuration.");
         const auto check = [this](const char* section, std::initializer_list<const char*> keys)
-        { for (const auto key : keys) Number(settings.at(section), key); };
+        { for (const auto key : keys) (void)Number(settings.at(section), key); };
         check("layout", {"referenceWidth","referenceHeight","minimumWidth","minimumHeight","compactWidth","compactHeight","stackedWidth","dragThreshold","learnTimeoutSeconds"});
         for (const auto section : {"normalBar","compactBar"})
         {
@@ -74,9 +73,7 @@ namespace ActionRPG
         for (const auto section : {"node","compactNode"}) check(section, {"width","height","iconLeft","iconTop","iconSize","nameLeft","nameTop","nameWidth","nameHeight","columnGap","rowGap"});
         check("fonts", {"title","body","small","lineHeight"});
         renderer.SetUiFontFamily(Wide(settings.at("fonts").at("family").get<std::string>()));
-        for (const auto name : {"panel","border","selected","text","cooldownText","cooldownBacking","locked"}) Color(name);
-        const auto [minimumWidth,minimumHeight]=GetMinimumClientSize();
-        GameWindow::SetMinimumClientSize(minimumWidth,minimumHeight);
+        for (const auto name : {"panel","border","selected","text","cooldownText","cooldownBacking","locked"}) (void)Color(name);
         catalog = PlayerSkills::Catalog::Load(assets.GetDataPath("PlayerSkills"));
         status = L"스킬 상태를 기다리는 중...";
     }

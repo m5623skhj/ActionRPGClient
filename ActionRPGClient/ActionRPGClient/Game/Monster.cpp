@@ -43,18 +43,27 @@ namespace
         return static_cast<std::uint32_t>(value);
     }
 
+    D2D1_RECT_F ReadSourceRectangle(const Json& inRect)
+    {
+        const float x = Number(inRect.at("x"));
+        const float y = Number(inRect.at("y"));
+        const float width = Number(inRect.at("width"), true);
+        const float height = Number(inRect.at("height"), true);
+        const auto rect = D2D1::RectF(x, y, x + width, y + height);
+        if (rect.right <= rect.left || rect.bottom <= rect.top)
+            throw std::runtime_error("Invalid monster source rectangle.");
+        return rect;
+    }
+
     ActionRPG::SpriteFrame Frame(const Json& inValue)
     {
-        const auto& rect = inValue.at("sourceRect");
-        const float x = Number(rect.at("x"));
-        const float y = Number(rect.at("y"));
-        const float width = Number(rect.at("width"), true);
-        const float height = Number(rect.at("height"), true);
+        const auto rect = ReadSourceRectangle(inValue.at("sourceRect"));
+        const float width = rect.right - rect.left, height = rect.bottom - rect.top;
         const auto& pivot = inValue.at("pivot");
         const float pivotX = Number(pivot.at("x"));
         const float pivotY = Number(pivot.at("y"));
         if (pivotX > width || pivotY > height) throw std::runtime_error("Invalid monster pivot.");
-        return { D2D1::RectF(x, y, x + width, y + height), D2D1::Point2F(pivotX, pivotY) };
+        return { rect, D2D1::Point2F(pivotX, pivotY) };
     }
 
     ActionRPG::MonsterClipDefinition ReadClip(const Json& inMotion, const std::string& inImageFolder,
@@ -142,6 +151,15 @@ namespace ActionRPG
             if (dataId == 0 || definition.monsterId.empty() || definition.monsterId.size() > 128
                 || !monsterIds.insert(definition.monsterId).second || definitions.contains(dataId))
                 throw std::runtime_error("Duplicate or invalid client monster ID.");
+            if (entry.contains("portrait"))
+            {
+                const auto& source = entry.at("portrait");
+                MonsterPortraitDefinition portrait;
+                portrait.image = source.at("image").get<std::string>();
+                (void)inAssetCatalog.GetAssetPath(portrait.image);
+                portrait.sourceRect = ReadSourceRectangle(source.at("sourceRect"));
+                definition.portrait = std::move(portrait);
+            }
             if (entry.contains("idleAnimationSection"))
             {
                 definition.idleAnimationSection = entry.at("idleAnimationSection").get<std::string>();

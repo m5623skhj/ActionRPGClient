@@ -68,10 +68,14 @@ namespace ActionRPG
         void SetConnected(bool inConnected);
         void Invalidate(std::wstring inMessage);
         [[nodiscard]] bool ConsumeCombatRefresh() { const bool value = combatRefresh; combatRefresh = false; return value; }
+        void SetHotbarBounds(const D2D1_RECT_F& inBounds) { skillBarBounds = inBounds; }
+        void RenderQuickSlots(D2DRenderer& inRenderer, float inWidth, float inHeight,
+            const D2D1_RECT_F& inSkillBar, bool inInventory) const;
+        [[nodiscard]] static D2D1_RECT_F QuickslotBounds(const D2D1_RECT_F& inSkillBar);
         void Reset();
         void Close();
         [[nodiscard]] InventoryUiAction Update(float inDeltaSeconds, const InputState& inInput,
-            float inWidth, float inHeight, bool inVisible);
+            float inWidth, float inHeight, bool inVisible, bool inBarVisible, const D2D1_RECT_F& inSkillBar);
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inDungeon) const;
 
     private:
@@ -95,13 +99,18 @@ namespace ActionRPG
             std::optional<CooldownMap> cooldowns;
         };
         void CompleteState();
+        [[nodiscard]] static std::array<D2D1_RECT_F, 4> QuickslotRectangles(const D2D1_RECT_F& inSkillBar);
+        [[nodiscard]] InventoryUiAction UpdateQuickSlots(const InputState& inInput, bool inInventory,
+            const D2D1_RECT_F& inSkillBar, float inWidth, float inHeight);
+        void RenderTooltip(D2DRenderer& inRenderer, float inWidth, float inHeight) const;
         std::optional<Assembly> assembly;
         std::uint64_t expectedCharacterId{}, latestServerRevision{};
         std::uint32_t characterDefinitionId{}, characterLevel{};
         std::string stateRequestId;
         struct Layout
         {
-            D2D1_RECT_F panel, status;
+            D2D1_RECT_F panel, status, viewport;
+            float maxScroll{};
             std::array<D2D1_RECT_F, 4> tabs;
             std::array<D2D1_RECT_F, 40> bags;
             std::array<D2D1_RECT_F, 7> equipment;
@@ -123,12 +132,16 @@ namespace ActionRPG
         std::size_t tab{};
         std::string hovered, pendingRequest;
         InventoryOperation pendingOperation{InventoryOperation::None};
-        D2D1_RECT_F hoveredRect{};
+        D2D1_RECT_F hoveredRect{}, skillBarBounds{};
+        std::unordered_map<std::uint64_t, std::array<std::string, 4>> quickSlotsByCharacter;
+        std::string dragCandidate, dragging;
+        float dragStartX{}, dragStartY{}, bagScroll{}, quickNoticeSeconds{};
+        bool quickHover{};
         bool ready{}, connected{}, stateRequested{}, cooldownsKnown{}, combatRefresh{}, useStatusPending{}, useOutcomeUncertain{};
         CooldownMap cooldowns;
         float useStatusSeconds{}, cooldownRefreshSeconds{};
         std::wstring useNotice;
-        float pendingSeconds{}, stateWaitSeconds{}, tooltipScroll{}, mouseX{};
+        float pendingSeconds{}, stateWaitSeconds{}, tooltipScroll{}, mouseX{}, mouseY{};
         std::wstring status{L"인벤토리 상태를 기다리는 중"};
     };
 }

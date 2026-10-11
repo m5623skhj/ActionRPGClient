@@ -17,6 +17,9 @@ namespace
 {
     constexpr std::array<const wchar_t*, 4> CATEGORY_NAMES{L"장비", L"재료", L"소모품", L"퀘스트"};
     constexpr std::array<const wchar_t*, 7> EQUIPMENT_NAMES{L"무기", L"상의", L"하의", L"신발", L"반지", L"목걸이", L"팔찌"};
+    constexpr float ITEM_CELL_SIZE = 48.0f;
+    constexpr float ITEM_ICON_PADDING = 4.0f;
+    constexpr float ITEM_CELL_GAP = 6.0f;
     constexpr float REQUEST_TIMEOUT_SECONDS = 10.0f;
     constexpr float USE_STATUS_INTERVAL_SECONDS = 1.0f;
 
@@ -80,7 +83,7 @@ namespace ActionRPG
         pendingOperation = InventoryOperation::None;
         ready = connected = stateRequested = false;
         pendingSeconds = stateWaitSeconds = tooltipScroll = 0.0f;
-        tab = 0;
+        tab = 0; bagScroll = quickNoticeSeconds = 0.0f;
         icons.clear();
         Close();
         status = L"인벤토리 상태를 기다리는 중";
@@ -431,6 +434,7 @@ namespace ActionRPG
     void InventoryUi::Close()
     {
         hovered.clear();
+        dragCandidate.clear(); dragging.clear(); quickHover = false;
         tooltipScroll = 0.0f;
     }
 
@@ -513,7 +517,7 @@ namespace ActionRPG
         for (const auto& bag : state.bags) for (const auto& item : bag) if (item) loadIcon(*item);
         for (const auto& item : state.equipment) if (item) loadIcon(*item);
         if (pendingRequest.empty()) status = useNotice.empty()
-            ? L"마우스 오버: 정보 / 우클릭: 사용·장착·해제 / 휠: 정보 스크롤" : useNotice;
+            ? L"우클릭 사용 · 드래그 퀵슬롯 · 휠 정보 · Shift+휠 가방" : useNotice;
     }
 
     void InventoryUi::ResolveRequest(const std::string& inRequestId, std::wstring inMessage,
@@ -578,40 +582,38 @@ namespace ActionRPG
     }
 
     /** Keep 8x5 bags and seven equipment cells visible without reserving a fixed detail panel. */
-    InventoryUi::Layout InventoryUi::CalculateLayout(const float inWidth, const float inHeight) const
+    InventoryUi::Layout InventoryUi::CalculateLayout(float inWidth, float inHeight) const
     {
         Layout result;
         result.compact = inWidth < 960.0f;
-        const float width = std::min(1120.0f, inWidth - 24.0f), height = std::min(620.0f, inHeight - 24.0f);
-        const float left = (inWidth - width) * 0.5f, top = (inHeight - height) * 0.5f;
+        constexpr float CELL = ITEM_CELL_SIZE, GAP = ITEM_CELL_GAP, BAG_WIDTH = 8.0f * CELL + 7.0f * GAP;
+        const float width = std::min(574.0f, inWidth - 24.0f);
+        const float availableHeight = std::max(140.0f, std::min(inHeight - 24.0f, skillBarBounds.top - 20.0f));
+        const float height = std::min(384.0f, availableHeight);
+        const float left = (inWidth - width) * 0.5f, top = 12.0f + (availableHeight - height) * 0.5f;
         result.panel = D2D1::RectF(left, top, left + width, top + height);
-        const float x = left + 12.0f, right = left + width - 12.0f;
-        const float gridTop = top + 76.0f, bottom = top + height - 30.0f;
-        constexpr float GAP = 4.0f;
-        const float cell = std::min(64.0f, std::min((bottom - gridTop - 4.0f * GAP) / 5.0f,
-            (width - 200.0f - 7.0f * GAP) / 8.0f));
-        const float bagWidth = 8.0f * cell + 7.0f * GAP;
+        const float x = left + 12, gridTop = top + 76, bottom = top + height - 30;
+        result.viewport = D2D1::RectF(x, gridTop, left + width - 18, bottom);
+        result.maxScroll = std::max(0.0f, 5 * CELL + 4 * GAP - (bottom - gridTop));
+        const float scroll = std::clamp(bagScroll, 0.0f, result.maxScroll);
         for (std::size_t index = 0; index < result.bags.size(); ++index)
         {
-            const float slotX = x + (index % 8) * (cell + GAP), slotY = gridTop + (index / 8) * (cell + GAP);
-            result.bags[index] = D2D1::RectF(slotX, slotY, slotX + cell, slotY + cell);
+            const float slotX = x + (index % 8) * (CELL + GAP), slotY = gridTop + (index / 8) * (CELL + GAP) - scroll;
+            result.bags[index] = D2D1::RectF(slotX, slotY, slotX + CELL, slotY + CELL);
         }
         for (std::size_t index = 0; index < result.tabs.size(); ++index)
         {
-            const float tabX = x + index * bagWidth / 4.0f;
-            result.tabs[index] = D2D1::RectF(tabX, gridTop - 32.0f, tabX + bagWidth / 4.0f - 2.0f, gridTop - 6.0f);
+            const float tabX = x + index * BAG_WIDTH / 4;
+            result.tabs[index] = D2D1::RectF(tabX, gridTop - 32, tabX + BAG_WIDTH / 4 - 2, gridTop - 6);
         }
-        const float equipmentLeft = x + bagWidth + 16.0f;
-        const float equipmentWidth = std::min(216.0f, right - equipmentLeft);
-        const float equipmentHeight = std::min(84.0f, (bottom - gridTop - 3.0f * GAP) / 4.0f);
+        const float equipmentLeft = x + BAG_WIDTH + 16;
         for (std::size_t index = 0; index < result.equipment.size(); ++index)
         {
-            const float slotX = equipmentLeft + (index % 2) * (equipmentWidth + GAP) / 2.0f;
-            const float slotY = gridTop + (index / 2) * (equipmentHeight + GAP);
-            result.equipment[index] = D2D1::RectF(slotX, slotY,
-                slotX + (equipmentWidth - GAP) / 2.0f, slotY + equipmentHeight);
+            const float slotX = equipmentLeft + (index % 2) * (CELL + GAP);
+            const float slotY = gridTop + (index / 2) * (CELL + GAP) - scroll;
+            result.equipment[index] = D2D1::RectF(slotX, slotY, slotX + CELL, slotY + CELL);
         }
-        result.status = D2D1::RectF(x, bottom + 6.0f, right, top + height - 4.0f);
+        result.status = D2D1::RectF(x, bottom + 6, left + width - 12, top + height - 4);
         return result;
     }
 
@@ -638,9 +640,11 @@ namespace ActionRPG
     }
 
     InventoryUiAction InventoryUi::Update(const float inDeltaSeconds, const InputState& inInput,
-        const float inWidth, const float inHeight, const bool inVisible)
+        const float inWidth, const float inHeight, const bool inVisible, const bool inBarVisible, const D2D1_RECT_F& inSkillBar)
     {
+        skillBarBounds = inSkillBar;
         InventoryUiAction action;
+        quickNoticeSeconds = std::max(0.0f, quickNoticeSeconds - std::max(0.0f, inDeltaSeconds));
         const float elapsed = std::max(0.0f, inDeltaSeconds);
         for (auto& [id, cooldown] : cooldowns)
             if (cooldown.state == CooldownState::Active) cooldown.remainingSeconds = std::max(0.0f, cooldown.remainingSeconds - elapsed);
@@ -678,8 +682,11 @@ namespace ActionRPG
             }
         }
         if (inInput.cancelDrag) { Close(); return action; }
-        if (!inVisible) { Close(); return action; }
-        if (connected && inVisible && !stateRequested && pendingRequest.empty()
+        if (!inVisible && !inBarVisible) { Close(); return action; }
+        const auto bound = quickSlotsByCharacter.find(expectedCharacterId);
+        const bool hasBinding = bound != quickSlotsByCharacter.end()
+            && std::any_of(bound->second.begin(), bound->second.end(), [](const auto& id) { return !id.empty(); });
+        if (connected && (inVisible || (inBarVisible && hasBinding)) && !stateRequested && pendingRequest.empty()
             && ((!cooldownsKnown && cooldownRefreshSeconds >= USE_STATUS_INTERVAL_SECONDS)
                 || cooldownRefreshSeconds >= REQUEST_TIMEOUT_SECONDS))
             ready = false;
@@ -699,33 +706,47 @@ namespace ActionRPG
             action.requestState = true;
             status = L"최신 인벤토리와 아이템 정의를 확인하는 중… 변경할 수 없습니다";
         }
+        if (inVisible)
+        {
+            const auto layout = CalculateLayout(inWidth, inHeight);
+            bagScroll = std::clamp(bagScroll, 0.0f, layout.maxScroll);
+            if (inInput.shiftHeld && Contains(layout.viewport, inInput.mouseX, inInput.mouseY))
+                bagScroll = std::clamp(bagScroll - inInput.mouseWheelDelta / 120.0f * 54.0f, 0.0f, layout.maxScroll);
+        }
+        if (inBarVisible)
+        {
+            auto quickAction = UpdateQuickSlots(inInput, inVisible, inSkillBar, inWidth, inHeight);
+            if (quickAction.operation != InventoryOperation::None) return quickAction;
+        }
+        else quickHover = false;
+        if (!inVisible) return action;
         const auto layout = CalculateLayout(inWidth, inHeight);
         if (inInput.leftMousePressed)
             for (std::size_t index = 0; index < layout.tabs.size(); ++index)
                 if (Contains(layout.tabs[index], inInput.clickX, inInput.clickY))
                 {
-                    tab = index;
+                    tab = index; bagScroll = 0.0f;
                     Close();
                     return action;
                 }
 
         mouseX = inInput.mouseX;
-        std::string nextHover;
+        std::string nextHover = quickHover ? hovered : std::string{};
         for (std::size_t index = 0; index < layout.bags.size(); ++index)
-            if (Contains(layout.bags[index], inInput.mouseX, inInput.mouseY) && state.bags[tab][index])
+            if (Contains(layout.viewport, inInput.mouseX, inInput.mouseY) && Contains(layout.bags[index], inInput.mouseX, inInput.mouseY) && state.bags[tab][index])
             {
                 nextHover = state.bags[tab][index]->instanceId;
                 hoveredRect = layout.bags[index];
             }
         for (std::size_t index = 0; index < layout.equipment.size(); ++index)
-            if (Contains(layout.equipment[index], inInput.mouseX, inInput.mouseY) && state.equipment[index])
+            if (Contains(layout.viewport, inInput.mouseX, inInput.mouseY) && Contains(layout.equipment[index], inInput.mouseX, inInput.mouseY) && state.equipment[index])
             {
                 nextHover = state.equipment[index]->instanceId;
                 hoveredRect = layout.equipment[index];
             }
         if (hovered != nextHover) tooltipScroll = 0.0f;
         hovered = std::move(nextHover);
-        if (!hovered.empty())
+        if (!hovered.empty() && !inInput.shiftHeld)
         {
             const auto tooltip = TooltipBounds(inWidth, inHeight);
             const float maxScroll = std::max(0.0f, TextHeight(Details(), tooltip.right - tooltip.left - 24.0f)
@@ -735,14 +756,136 @@ namespace ActionRPG
         if (inInput.rightMousePressed && ready && connected && pendingRequest.empty())
         {
             for (std::size_t index = 0; index < layout.bags.size(); ++index)
-                if (Contains(layout.bags[index], inInput.rightClickX, inInput.rightClickY) && state.bags[tab][index])
+                if (Contains(layout.viewport, inInput.rightClickX, inInput.rightClickY) && Contains(layout.bags[index], inInput.rightClickX, inInput.rightClickY) && state.bags[tab][index])
                     return BeginRequest(tab == 0 ? InventoryOperation::Equip : InventoryOperation::Use,
                         state.bags[tab][index]->instanceId, 1);
             for (std::size_t index = 0; index < layout.equipment.size(); ++index)
-                if (Contains(layout.equipment[index], inInput.rightClickX, inInput.rightClickY) && state.equipment[index])
+                if (Contains(layout.viewport, inInput.rightClickX, inInput.rightClickY) && Contains(layout.equipment[index], inInput.rightClickX, inInput.rightClickY) && state.equipment[index])
                     return BeginRequest(InventoryOperation::Unequip, state.equipment[index]->instanceId, 1);
         }
         return action;
+    }
+
+    D2D1_RECT_F InventoryUi::QuickslotBounds(const D2D1_RECT_F& inSkillBar)
+    {
+        constexpr float cell = ITEM_CELL_SIZE;
+        return D2D1::RectF(inSkillBar.left + 8.0f, inSkillBar.bottom + 4.0f,
+            inSkillBar.left + 8.0f + 4.0f * cell + 3.0f * ITEM_CELL_GAP, inSkillBar.bottom + 4.0f + cell);
+    }
+
+    std::array<D2D1_RECT_F, 4> InventoryUi::QuickslotRectangles(const D2D1_RECT_F& inSkillBar)
+    {
+        const auto bounds = QuickslotBounds(inSkillBar);
+        const float cell = bounds.bottom - bounds.top;
+        std::array<D2D1_RECT_F, 4> result{};
+        for (std::size_t index = 0; index < result.size(); ++index)
+            result[index] = D2D1::RectF(bounds.left + index * (cell + ITEM_CELL_GAP), bounds.top,
+                bounds.left + index * (cell + ITEM_CELL_GAP) + cell, bounds.bottom);
+        return result;
+    }
+
+    // All slot bindings and drag state are game-thread-owned. A depleted instance never switches stacks.
+    InventoryUiAction InventoryUi::UpdateQuickSlots(const InputState& inInput, const bool inInventory,
+        const D2D1_RECT_F& inSkillBar, const float inWidth, const float inHeight)
+    {
+        if (expectedCharacterId == 0) return {};
+        auto& slots = quickSlotsByCharacter[expectedCharacterId];
+        const auto rects = QuickslotRectangles(inSkillBar);
+        const auto useSlot = [this, &slots](std::size_t index)
+        {
+            if (!FindItem(slots[index])) status = slots[index].empty()
+                ? L"아이템이 등록되지 않은 퀵슬롯입니다" : L"지정한 스택이 소진되거나 제거됐습니다. 다시 등록해 주세요";
+            quickNoticeSeconds = 4.0f;
+            return BeginRequest(InventoryOperation::Use, slots[index], 1);
+        };
+        mouseX = inInput.mouseX; mouseY = inInput.mouseY;
+        quickHover = false;
+        for (std::size_t index = 0; index < slots.size(); ++index)
+            if (Contains(rects[index], inInput.mouseX, inInput.mouseY))
+            {
+                if (hovered != slots[index]) tooltipScroll = 0.0f;
+                hovered = slots[index]; hoveredRect = rects[index]; quickHover = true;
+            }
+        if (!inInventory && !quickHover) { hovered.clear(); tooltipScroll = 0.0f; }
+        if (!inInventory && quickHover && FindItem(hovered))
+        {
+            const auto tooltip = TooltipBounds(inWidth, inHeight);
+            const float maxScroll = std::max(0.0f, TextHeight(Details(), tooltip.right - tooltip.left - 24)
+                - (tooltip.bottom - tooltip.top - 48));
+            tooltipScroll = std::clamp(tooltipScroll - inInput.mouseWheelDelta / 120.0f * 40, 0.0f, maxScroll);
+        }
+        if (inInventory && inInput.leftMousePressed && ready && connected)
+        {
+            dragCandidate.clear(); dragging.clear();
+            const auto layout = CalculateLayout(inWidth, inHeight);
+            const InventoryItemView* candidate = nullptr;
+            for (std::size_t index = 0; index < layout.bags.size(); ++index)
+                if (Contains(layout.viewport, inInput.clickX, inInput.clickY) && Contains(layout.bags[index], inInput.clickX, inInput.clickY) && state.bags[tab][index])
+                    candidate = &*state.bags[tab][index];
+            for (std::size_t index = 0; index < layout.equipment.size(); ++index)
+                if (Contains(layout.viewport, inInput.clickX, inInput.clickY) && Contains(layout.equipment[index], inInput.clickX, inInput.clickY) && state.equipment[index])
+                    candidate = &*state.equipment[index];
+            for (std::size_t index = 0; index < slots.size(); ++index)
+                if (Contains(rects[index], inInput.clickX, inInput.clickY)) candidate = FindItem(slots[index]);
+            if (candidate)
+            {
+                if (candidate->useRequiredLevel != 0 && !candidate->equipmentSlot) dragCandidate = candidate->instanceId;
+                else status = L"사용 효과가 있는 소모품만 퀵슬롯에 등록할 수 있습니다";
+            }
+            dragStartX = inInput.clickX; dragStartY = inInput.clickY;
+        }
+        if (!dragCandidate.empty() && (inInput.leftMouseDown || inInput.leftMouseReleased)
+            && std::hypot(inInput.mouseX - dragStartX, inInput.mouseY - dragStartY) >= 6.0f)
+            dragging = dragCandidate;
+        if (inInput.leftMouseReleased)
+        {
+            if (!dragging.empty() && ready && FindItem(dragging))
+                for (std::size_t index = 0; index < slots.size(); ++index)
+                    if (Contains(rects[index], inInput.mouseX, inInput.mouseY))
+                    {
+                        for (auto& slot : slots) if (slot == dragging) slot.clear();
+                        slots[index] = dragging;
+                        status = L"퀵슬롯 등록 완료 · 숫자 키/우클릭 사용 · Shift+우클릭 등록 해제";
+                        break;
+                    }
+            dragCandidate.clear(); dragging.clear();
+        }
+        if (inInput.rightMousePressed)
+            for (std::size_t index = 0; index < slots.size(); ++index)
+                if (Contains(rects[index], inInput.rightClickX, inInput.rightClickY))
+                {
+                    if (inInput.shiftHeld) { slots[index].clear(); return {}; }
+                    return useSlot(index);
+                }
+        if (!inInventory && ready && connected)
+            for (std::size_t index = 0; index < slots.size(); ++index)
+                if (inInput.WasPressed(static_cast<InputKey>(static_cast<int>(InputKey::Item1) + index)))
+                    return useSlot(index);
+        return {};
+    }
+
+    void InventoryUi::RenderQuickSlots(D2DRenderer& inRenderer, const float inWidth, const float inHeight,
+        const D2D1_RECT_F& inSkillBar, const bool inInventory) const
+    {
+        const auto rects = QuickslotRectangles(inSkillBar);
+        const auto found = quickSlotsByCharacter.find(expectedCharacterId);
+        for (std::size_t index = 0; index < rects.size(); ++index)
+        {
+            const auto item = found == quickSlotsByCharacter.end() ? nullptr : FindItem(found->second[index]);
+            DrawItem(inRenderer, rects[index], item, std::to_wstring(index + 1));
+            if (!item && found != quickSlotsByCharacter.end() && !found->second[index].empty())
+                inRenderer.DrawUiText(L"소진", rects[index], D2D1::ColorF(0.65f, 0.65f, 0.65f), 12.0f, false, true);
+        }
+        if (inInventory && !dragging.empty())
+        {
+            const float cell = rects[0].right - rects[0].left;
+            DrawItem(inRenderer, D2D1::RectF(mouseX - cell * 0.5f, mouseY - cell * 0.5f, mouseX + cell * 0.5f, mouseY + cell * 0.5f),
+                FindItem(dragging));
+        }
+        if (!inInventory && (quickNoticeSeconds > 0 || !pendingRequest.empty() || !useNotice.empty()))
+            inRenderer.DrawUiText(status, D2D1::RectF(inSkillBar.left, inSkillBar.top - 26, inSkillBar.right, inSkillBar.top - 8),
+                D2D1::ColorF(0.94f, 0.92f, 0.85f), 14);
+        if (!inInventory && quickHover) RenderTooltip(inRenderer, inWidth, inHeight);
     }
 
     std::wstring InventoryUi::Details() const
@@ -783,38 +926,50 @@ namespace ActionRPG
         inRenderer.DrawRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom,
             D2D1::ColorF(inItem && inItem->instanceId == hovered ? 1.0f : 0.40f,
                 inItem && inItem->instanceId == hovered ? 0.75f : 0.47f, 0.52f));
-        D2D1_RECT_F art = inRect;
-        art.left += 3.0f; art.right -= 3.0f; art.top += 3.0f; art.bottom -= 3.0f;
-        if (!inLabel.empty())
+        // Every view uses a 48px cell and a centered 40px icon. Labels are overlays, never layout padding.
+        const auto art = D2D1::RectF(inRect.left + ITEM_ICON_PADDING, inRect.top + ITEM_ICON_PADDING,
+            inRect.right - ITEM_ICON_PADDING, inRect.bottom - ITEM_ICON_PADDING);
+        if (!inItem)
         {
-            inRenderer.DrawUiText(inLabel, D2D1::RectF(inRect.left, inRect.top, inRect.right, inRect.top + 15.0f),
-                D2D1::ColorF(0.80f, 0.83f, 0.90f), 11.0f, false, true);
-            art.top += 13.0f;
+            if (!inLabel.empty()) inRenderer.DrawUiText(inLabel, inRect, D2D1::ColorF(0.80f, 0.83f, 0.90f), 14, false, true);
+            return;
         }
-        if (!inItem) return;
-        const float size = std::min(art.right - art.left, art.bottom - art.top);
-        art.left = (art.left + art.right - size) * 0.5f;
-        art.right = art.left + size;
-        art.bottom = art.top + size;
         const auto cooldown = FindCooldown(*inItem);
         const bool cooling = cooldown && (cooldown->state == CooldownState::Pending || cooldown->remainingSeconds > 0.0f);
-        const bool unusable = !ready || !connected || (!inItem->equipmentSlot && (!cooldownsKnown
+        const bool unusable = !ready || !connected || !pendingRequest.empty() || (!inItem->equipmentSlot && (!cooldownsKnown
             || cooling || inItem->useRequiredLevel > characterLevel));
         const auto icon = icons.find(inItem->icon);
         if (icon != icons.end() && icon->second)
-            inRenderer.DrawUiIcon(icon->second.Get(), art, unusable);
+        {
+            const auto size = icon->second->GetSize();
+            const float scale = std::min((art.right - art.left) / size.width, (art.bottom - art.top) / size.height);
+            const float width = size.width * scale, height = size.height * scale;
+            const float x = (art.left + art.right - width) * 0.5f, y = (art.top + art.bottom - height) * 0.5f;
+            inRenderer.DrawUiIcon(icon->second.Get(), D2D1::RectF(x, y, x + width, y + height), unusable);
+        }
         else inRenderer.DrawUiText(inItem->name.substr(0, 2), art, D2D1::ColorF(0.90f, 0.90f, 0.92f), 12.0f, false, true);
+        if (!inLabel.empty())
+        {
+            const float width = std::min(ITEM_CELL_SIZE - 2, std::max(14.0f, inLabel.size() * 10.0f + 4));
+            const auto label = D2D1::RectF(inRect.left + 1, inRect.top + 1, inRect.left + 1 + width, inRect.top + 15);
+            inRenderer.FillRectangle(label.left, label.top, label.right, label.bottom, D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.65f));
+            inRenderer.DrawUiText(inLabel, label, D2D1::ColorF(0.90f, 0.90f, 0.92f), 12, false, true);
+        }
         if (!inItem->equipmentSlot)
         {
-            const auto count = D2D1::RectF(inRect.left + 1.0f, inRect.bottom - 14.0f, inRect.right - 1.0f, inRect.bottom);
+            const auto quantity = std::to_wstring(inItem->quantity);
+            const float width = std::min(ITEM_CELL_SIZE - 2, quantity.size() * 8.0f + 4);
+            const auto count = D2D1::RectF(inRect.right - 1 - width, inRect.bottom - 14, inRect.right - 1, inRect.bottom - 1);
             inRenderer.FillRectangle(count.left, count.top, count.right, count.bottom, D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.90f));
-            inRenderer.DrawUiText(std::to_wstring(inItem->quantity), count, D2D1::ColorF(1.0f, 1.0f, 0.92f), 11.0f, false, true);
+            inRenderer.DrawUiText(quantity, count, D2D1::ColorF(1.0f, 1.0f, 0.92f), 11.0f, false, true);
         }
         if (cooling)
         {
             const auto label = cooldown->state == CooldownState::Pending
                 ? std::wstring(L"처리 중") : SecondsText(cooldown->remainingSeconds);
-            const auto rect = D2D1::RectF(inRect.left + 2.0f, art.top + 2.0f, inRect.right - 2.0f, art.top + 18.0f);
+            const float width = cooldown->state == CooldownState::Pending ? 40.0f : 32.0f;
+            const float x = (inRect.left + inRect.right - width) * 0.5f;
+            const auto rect = D2D1::RectF(x, inRect.top + 16, x + width, inRect.top + 32);
             inRenderer.FillRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
             inRenderer.DrawUiText(label, rect, D2D1::ColorF(1.0f, 0.9f, 0.6f), 11.0f, false, true);
         }
@@ -837,11 +992,26 @@ namespace ActionRPG
             if (tab == index) inRenderer.DrawRectangle(layout.tabs[index].left, layout.tabs[index].top,
                 layout.tabs[index].right, layout.tabs[index].bottom, D2D1::ColorF(1.0f, 0.75f, 0.28f), 2.0f);
         }
+        inRenderer.PushAxisAlignedClip(layout.viewport);
         for (std::size_t index = 0; index < layout.bags.size(); ++index)
             DrawItem(inRenderer, layout.bags[index], state.bags[tab][index] ? &*state.bags[tab][index] : nullptr);
         for (std::size_t index = 0; index < layout.equipment.size(); ++index)
             DrawItem(inRenderer, layout.equipment[index], state.equipment[index] ? &*state.equipment[index] : nullptr, EQUIPMENT_NAMES[index]);
+        inRenderer.PopAxisAlignedClip();
+        if (layout.maxScroll > 0)
+        {
+            const float height = layout.viewport.bottom - layout.viewport.top;
+            const float thumb = height * height / (height + layout.maxScroll);
+            const float top = layout.viewport.top + (height - thumb) * bagScroll / layout.maxScroll;
+            inRenderer.FillRectangle(layout.viewport.right + 2, layout.viewport.top, layout.viewport.right + 5, layout.viewport.bottom, D2D1::ColorF(0.15f, 0.16f, 0.19f));
+            inRenderer.FillRectangle(layout.viewport.right + 2, top, layout.viewport.right + 5, top + thumb, D2D1::ColorF(0.55f, 0.56f, 0.60f));
+        }
         inRenderer.DrawUiText(status, layout.status, D2D1::ColorF(0.84f, 0.80f, 0.68f), 12.0f);
+        RenderTooltip(inRenderer, inWidth, inHeight);
+    }
+
+    void InventoryUi::RenderTooltip(D2DRenderer& inRenderer, const float inWidth, const float inHeight) const
+    {
         if (!FindItem(hovered)) return;
         const auto tooltip = TooltipBounds(inWidth, inHeight);
         inRenderer.FillRectangle(tooltip.left, tooltip.top, tooltip.right, tooltip.bottom,

@@ -16,6 +16,7 @@ namespace ActionRPG
         ActionX,
         ActionV,
         SkillA, SkillS, SkillD, SkillF, SkillG, SkillH,
+        Item1, Item2, Item3, Item4,
         ConfirmSelection,
         ToggleSystemMenu
     };

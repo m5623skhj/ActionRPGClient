@@ -218,6 +218,23 @@
     <None Include="..\Assets\Images\UI\system_menu_exit.png" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!-- Use the same vcpkg tree/configuration as the linker, even when linking is skipped. -->
+  <Target Name="CopyOpenSslRuntime" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(_ZVcpkgCurrentInstalledDir)' == ''"
+           Text="OpenSSL runtime deployment requires the existing vcpkg MSBuild integration." />
+    <Error Condition="'$(_ZVcpkgNormalizedConfiguration)' != 'Debug' and '$(_ZVcpkgNormalizedConfiguration)' != 'Release'"
+           Text="OpenSSL runtime deployment requires a Debug or Release vcpkg configuration." />
+    <ItemGroup>
+      <OpenSslRuntimeFiles Include="$(_ZVcpkgCurrentInstalledDir)$(_ZVcpkgConfigSubdir)bin\libssl-3-x64.dll" />
+      <OpenSslRuntimeFiles Include="$(_ZVcpkgCurrentInstalledDir)$(_ZVcpkgConfigSubdir)bin\libcrypto-3-x64.dll" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(OpenSslRuntimeFiles.Identity)')"
+           Text="Required OpenSSL runtime DLL is missing: %(OpenSslRuntimeFiles.Identity). Restore OpenSSL through the configured vcpkg installation." />
+    <Copy SourceFiles="@(OpenSslRuntimeFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <FileWrites Include="@(OpenSslRuntimeFiles-&gt;'$(TargetDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
+  </Target>
   <Target Name="CopyRuntimeAssets" AfterTargets="Build">
     <ItemGroup>
       <RuntimeAssetFiles Include="$(ProjectDir)..\Assets\**\*.*" />

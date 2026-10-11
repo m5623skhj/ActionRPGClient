@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <optional>
 
 namespace ActionRPG
 {
@@ -29,6 +30,7 @@ namespace ActionRPG
         [[nodiscard]] const DungeonMap& GetMap(const std::string& inId) const { return maps.at(inId); }
         [[nodiscard]] const std::string& GetEntryMapId() const { return entryMapId; }
         [[nodiscard]] Vector2 GetSpawn() const { return spawn; }
+        [[nodiscard]] const std::optional<CombatPlayerState>& GetInitialPlayerHud() const { return initialPlayerHud; }
         [[nodiscard]] const CombatRules& GetCombatRules() const { return combatRules; }
         [[nodiscard]] const SlideDefinition& GetSlideDefinition(std::uint32_t inCharacterId) const { return slideDefinitions.at(inCharacterId); }
         [[nodiscard]] const PlayerSkills::Catalog& GetPlayerSkills() const { return playerSkills; }
@@ -37,6 +39,7 @@ namespace ActionRPG
         std::string entryMapId;
         Vector2 spawn{};
         CombatRules combatRules;
+        std::optional<CombatPlayerState> initialPlayerHud;
         std::unordered_map<std::uint32_t, SlideDefinition> slideDefinitions;
         PlayerSkills::Catalog playerSkills;
     };
