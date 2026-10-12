@@ -112,7 +112,7 @@ namespace ActionRPG
         [[nodiscard]] bool CanStartSlide() const;
         [[nodiscard]] bool IsSliding() const;
         [[nodiscard]] bool HasPendingSlide() const { return slidePrediction.has_value(); }
-        bool PredictSlide(std::uint32_t inSequence, Vector2 inDirection, float inDurationSeconds, float inDistancePerRunSpeedSeconds);
+        bool PredictSlide(std::uint32_t inSequence, bool inFacingLeft, float inDurationSeconds, float inDistancePerRunSpeedSeconds);
         void ResolvePredictedSlide(std::uint32_t inSequence, bool inAccepted);
         void ClearSlidePrediction();
         void ClearSlideState();
@@ -136,6 +136,7 @@ namespace ActionRPG
     protected:
         [[nodiscard]] const CombatPlayerState* GetCombatPlayerState() const { return combatState ? &*combatState : nullptr; }
         [[nodiscard]] float GetCombatElapsedSeconds() const { return combatPresentationSeconds; }
+        [[nodiscard]] float GetCombatTempoScale() const { return combatRules.tempoScale; }
         // Server-driven monster presentation needs a pose without the player action controller.
         explicit Character(Vector2 inInitialPosition) : groundPosition(inInitialPosition) {}
         Character(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,

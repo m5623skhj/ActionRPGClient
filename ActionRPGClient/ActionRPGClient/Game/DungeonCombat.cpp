@@ -14,6 +14,9 @@ namespace
     using Json = nlohmann::json;
     // runSpeed 2000 * movementMultiplier 10 * distance seconds 5 / duration 0.05.
     constexpr float MAX_SLIDE_SPEED = 2000000.0f;
+    // UI remaining time is real seconds, bounded by authored maxima / minimum supported tempo.
+    constexpr double MAX_REAL_SKILL_COOLDOWN = 86400.0 / ActionRPG::CombatRules::MIN_TEMPO_SCALE;
+    constexpr double MAX_REAL_BUFF_DURATION = 3600.0 / ActionRPG::CombatRules::MIN_TEMPO_SCALE;
     float Number(const Json& inValue, const bool inSigned = false, const bool inUnbounded = false)
     {
         if (!inValue.is_number()) throw std::runtime_error("Invalid combat number.");
@@ -162,6 +165,8 @@ namespace ActionRPG
         const auto value = Json::parse(inJson);
         if (value.at("version") != 3) throw std::runtime_error("Unsupported combat rules.");
         CombatRules rules;
+        rules.tempoScale = static_cast<float>(PlayerSkills::Catalog::Number(value.value("tempoScale", Json(1.0)),
+            CombatRules::MIN_TEMPO_SCALE, 1.0));
         rules.tickIntervalSeconds = TickInterval(value, rules.tickIntervalSeconds);
         rules.maxHp = Integer(value.at("maxHp")); rules.maxShots = Integer(value.at("maxShots"));
         if (rules.maxHp == 0 || rules.maxShots != 5) throw std::runtime_error("Unsupported combat limits.");
@@ -244,7 +249,7 @@ namespace ActionRPG
                 for (const auto& buff : source.at("buffs"))
                 {
                     CombatBuffState state{ Text(buff.at("skillId")), Number(buff.at("remainingSeconds")) };
-                    if (!PlayerSkills::Catalog::IsId(state.skillId) || !buffIds.insert(state.skillId).second || state.remainingSeconds > 3600)
+                    if (!PlayerSkills::Catalog::IsId(state.skillId) || !buffIds.insert(state.skillId).second || state.remainingSeconds > MAX_REAL_BUFF_DURATION)
                         throw std::runtime_error("Invalid buff state.");
                     player.buffs.push_back(std::move(state));
                 }
@@ -267,7 +272,7 @@ namespace ActionRPG
                 for (const auto& [id,value]:cooldowns.items())
                 {
                     const auto seconds=Number(value);
-                    if (!PlayerSkills::Catalog::IsId(id) || seconds>86400) throw std::runtime_error("Invalid skill cooldown.");
+                    if (!PlayerSkills::Catalog::IsId(id) || seconds>MAX_REAL_SKILL_COOLDOWN) throw std::runtime_error("Invalid skill cooldown.");
                     player.skillCooldowns.emplace(id,seconds);
                 }
                 player.hasSkillState=true;
@@ -562,7 +567,7 @@ namespace ActionRPG
                 for (std::uint64_t buff = 0; buff < buffs; ++buff)
                 {
                     CombatBuffState value{reader.Text(), reader.Float()};
-                    if (!PlayerSkills::Catalog::IsId(value.skillId) || !buffIds.insert(value.skillId).second || value.remainingSeconds > 3600)
+                    if (!PlayerSkills::Catalog::IsId(value.skillId) || !buffIds.insert(value.skillId).second || value.remainingSeconds > MAX_REAL_BUFF_DURATION)
                         throw std::runtime_error("Invalid realtime buff.");
                     found->buffs.push_back(std::move(value));
                 }

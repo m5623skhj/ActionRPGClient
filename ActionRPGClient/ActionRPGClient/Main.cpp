@@ -4,9 +4,30 @@
 #include <objbase.h>
 
 #include <exception>
+#include <cwchar>
+
+namespace
+{
+    // Report native faults before Windows handles termination. Do not recover or modify game state.
+    LONG WINAPI ReportNativeFailure(EXCEPTION_POINTERS* inException)
+    {
+        static LONG reporting{};
+        if (inException && inException->ExceptionRecord && InterlockedCompareExchange(&reporting, 1, 0) == 0)
+        {
+            wchar_t message[320]{};
+            swprintf_s(message, L"ActionRPGClient native exception 0x%08lX at %p.\n"
+                L"Copy this message and the last ActionRPGClient screen-change lines from Visual Studio Output.",
+                inException->ExceptionRecord->ExceptionCode, inException->ExceptionRecord->ExceptionAddress);
+            OutputDebugStringW(message);
+            MessageBoxW(nullptr, message, L"ActionRPGClient - Native error", MB_OK | MB_ICONERROR);
+        }
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+}
 
 int WINAPI wWinMain(HINSTANCE inInstance, HINSTANCE, PWSTR, int)
 {
+    SetUnhandledExceptionFilter(ReportNativeFailure);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -25,6 +46,7 @@ int WINAPI wWinMain(HINSTANCE inInstance, HINSTANCE, PWSTR, int)
     }
     catch (const std::exception& exception)
     {
+        OutputDebugStringA(exception.what());
         MessageBoxA(nullptr, exception.what(), "ActionRPGClient", MB_OK | MB_ICONERROR);
         exitCode = 1;
     }

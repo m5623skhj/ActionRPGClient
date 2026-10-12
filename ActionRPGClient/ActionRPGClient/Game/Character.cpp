@@ -578,8 +578,8 @@ namespace ActionRPG
         const bool alreadyPredicted = predictedAttackFacingSequence != 0;
         predictedAttackFacingSequence = inSequence;
         predictedAttackFacingLeft = facingLeft;
-        // Server key buffer + existing pose prediction horizon + one server tick.
-        if (!alreadyPredicted) predictedAttackFacingSeconds = ACTION_BUFFER_SECONDS + 0.25f
+        // Server action-time key buffer converted to real time + wall prediction horizon + one wall tick.
+        if (!alreadyPredicted) predictedAttackFacingSeconds = ACTION_BUFFER_SECONDS / combatRules.tempoScale + 0.25f
             + static_cast<float>(combatRules.tickIntervalSeconds);
     }
 
@@ -617,12 +617,11 @@ namespace ActionRPG
                 && (slidePresentationSeconds < combatState->slideDurationSeconds || stopped));
     }
 
-    /** Capture direction and buffed run speed once; run speed times the authored seconds gives total distance. */
-    bool Character::PredictSlide(const std::uint32_t inSequence, const Vector2 inDirection,
+    /** Capture facing and buffed run speed once; authored seconds set distance, with no client-only multiplier. */
+    bool Character::PredictSlide(const std::uint32_t inSequence, const bool inFacingLeft,
         const float inDurationSeconds, const float inDistancePerRunSpeedSeconds)
     {
-        const float length = std::hypot(inDirection.x, inDirection.y);
-        if (!CanStartSlide() || inSequence == 0 || !std::isfinite(length) || length <= 0.0f
+        if (!CanStartSlide() || inSequence == 0
             || !std::isfinite(inDurationSeconds) || inDurationSeconds < 0.05f || inDurationSeconds > 2.0f
             || !std::isfinite(inDistancePerRunSpeedSeconds) || inDistancePerRunSpeedSeconds < 0.05f
             || inDistancePerRunSpeedSeconds > 5.0f || !std::isfinite(runSpeed) || runSpeed <= 0.0f) return false;
@@ -634,9 +633,8 @@ namespace ActionRPG
         CancelAttack();
         bufferedActions.clear();
         pendingProjectileRequests.clear();
-        slidePrediction = SlidePrediction{inSequence, {inDirection.x / length, inDirection.y / length},
-            speed, inDurationSeconds, 0.0f, inDurationSeconds + 0.5f,
-            inDirection.x == 0.0f ? facingLeft : inDirection.x < 0.0f};
+        slidePrediction = SlidePrediction{inSequence, {inFacingLeft ? -1.0f : 1.0f, 0.0f},
+            speed, inDurationSeconds, 0.0f, inDurationSeconds / combatRules.tempoScale + 0.5f, inFacingLeft};
         facingLeft = slidePrediction->facingLeft;
         if (slideAnimation) slideAnimation->Reset();
         combatAnimationChanged = true;
@@ -739,10 +737,10 @@ namespace ActionRPG
                 ClearSlidePrediction();
             else if (inState.slideSequence == slide.sequence && inState.slideActive)
             {
-                slide.direction = {inState.slideDirectionX, inState.slideDirectionY};
+                slide.direction = {inState.facingLeft ? -1.0f : 1.0f, 0.0f};
                 slide.speed = inState.slideSpeed; slide.durationSeconds = inState.slideDurationSeconds;
                 slide.elapsedSeconds = std::min(slide.durationSeconds, newStop ? inState.slideSeconds : std::max(slide.elapsedSeconds, inState.slideSeconds));
-                slide.acknowledgementSeconds = slide.durationSeconds - slide.elapsedSeconds + 0.5f;
+                slide.acknowledgementSeconds = (slide.durationSeconds - slide.elapsedSeconds) / inRules.tempoScale + 0.5f;
                 slide.facingLeft = inState.facingLeft;
             }
             else if (inState.actionSequence >= slide.sequence)
@@ -777,9 +775,9 @@ namespace ActionRPG
         }
         slidePresentationSeconds = inState.slideSeconds;
         isMoving = inState.presentationMoving && inState.hp != 0 && inState.reaction == CombatReaction::None;
-        runningRequested = isMoving && (inState.running || inState.presentationSpeed > (inRules.walkSpeed + inRules.runSpeed) * 0.5f);
+        runningRequested = isMoving && (inState.running || inState.presentationSpeed > (inRules.walkSpeed + inRules.runSpeed) * 0.5f * inRules.tempoScale);
         const float speed = runningRequested ? inRules.runSpeed : inRules.walkSpeed;
-        movementAnimationScale = isMoving ? std::clamp(inState.presentationSpeed / speed, 0.25f, 2.0f) : 1.0f;
+        movementAnimationScale = isMoving ? std::clamp(inState.presentationSpeed / speed, 0.25f * inRules.tempoScale, 2.0f * inRules.tempoScale) : 1.0f;
     }
 
     bool Character::IsItemUseMotionActive() const
@@ -837,26 +835,31 @@ namespace ActionRPG
             + (bufferedPresentation ? -static_cast<double>(inDeltaSeconds) * 1000.0 : combatWallSeconds * 1000.0);
         if (!bufferedPresentation) combatWallSeconds += inDeltaSeconds;
         const double currentTime = state.presentationTimeMs + (bufferedPresentation ? 0.0 : combatWallSeconds * 1000.0);
-        const float activeDelta = bufferedPresentation && IsCombatHitstopped(state, currentTime) ? 0.0f
+        const float activeWallDelta = bufferedPresentation && IsCombatHitstopped(state, currentTime) ? 0.0f
             : CombatActiveSeconds(state, previousTime, currentTime);
+        const float activeDelta = activeWallDelta * combatRules.tempoScale;
+        // Prediction horizon is real time; authoritative pose times and motion clocks are combat time.
         combatPresentationSeconds = bufferedPresentation ? 0.0f
-            : std::min(0.25f, CombatActiveSeconds(state, state.presentationTimeMs, currentTime));
+            : std::min(0.25f, CombatActiveSeconds(state, state.presentationTimeMs, currentTime)) * combatRules.tempoScale;
+        // Measured remote velocity already contains tempo; do not slow its locomotion a second time.
+        const float locomotionDelta = bufferedPresentation && isMoving
+            ? activeWallDelta * movementAnimationScale : activeDelta;
         if (slidePrediction)
         {
-            slidePrediction->acknowledgementSeconds -= activeDelta;
+            slidePrediction->acknowledgementSeconds -= activeWallDelta;
             if (slidePrediction->acknowledgementSeconds <= 0.0f)
                 ResolvePredictedSlide(slidePrediction->sequence, false);
         }
         if (predictedAttackFacingSequence != 0)
         {
-            predictedAttackFacingSeconds = std::max(0.0f, predictedAttackFacingSeconds - activeDelta);
+            predictedAttackFacingSeconds = std::max(0.0f, predictedAttackFacingSeconds - activeWallDelta);
             if (predictedAttackFacingSeconds == 0.0f)
             {
                 ClearPredictedAttackFacing();
                 facingLeft = state.facingLeft;
             }
         }
-        if (state.hp == 0) deathPresentationSeconds += inDeltaSeconds;
+        if (state.hp == 0) deathPresentationSeconds += inDeltaSeconds * combatRules.tempoScale;
         if (inLocalDirection && activeDelta > 0.0f)
         {
             const auto previous = groundPosition;
@@ -865,11 +868,10 @@ namespace ActionRPG
                 const float elapsed = GetSlidePresentationSeconds();
                 const float duration = slidePrediction ? slidePrediction->durationSeconds : state.slideDurationSeconds;
                 const float speed = slidePrediction ? slidePrediction->speed : state.slideSpeed;
-                const Vector2 direction = slidePrediction ? slidePrediction->direction
-                    : Vector2{state.slideDirectionX, state.slideDirectionY};
+                const float directionX = slidePrediction ? slidePrediction->direction.x : (state.facingLeft ? -1.0f : 1.0f);
                 const float seconds = std::clamp(duration - elapsed, 0.0f, activeDelta);
-                groundPosition.x += direction.x * speed * seconds;
-                groundPosition.y += direction.y * speed * seconds;
+                groundPosition.x += directionX * speed * seconds;
+                // Slide only along X; retain depth and use the existing foot-collision constraint.
                 groundPosition = inMap.ConstrainGroundMovement(previous, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
                 if (slidePrediction) slidePrediction->elapsedSeconds += seconds;
                 else slidePresentationSeconds += seconds;
@@ -897,7 +899,7 @@ namespace ActionRPG
         }
         else if (!bufferedPresentation)
         {
-            const float blend = 1.0f - std::exp(-12.0f * activeDelta);
+            const float blend = 1.0f - std::exp(-12.0f * activeWallDelta);
             groundPosition.x += (state.position.x - groundPosition.x) * blend;
             groundPosition.y += (state.position.y - groundPosition.y) * blend;
         }
@@ -908,7 +910,7 @@ namespace ActionRPG
         auto& animation = GetCombatAnimation();
         if (!IsItemUseMotionActive() && state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
         {
-            animation.Update(activeDelta * (bufferedPresentation ? movementAnimationScale : 1.0f));
+            animation.Update(locomotionDelta);
             return;
         }
         float elapsed = combatPresentationSeconds;
@@ -943,7 +945,7 @@ namespace ActionRPG
                 : state.shotPhase == CombatShotPhase::Fire ? combatRules.shotIntervalSeconds : combatRules.shotRecoverSeconds;
         }
         else if (state.jumpPhase == CombatJumpPhase::Airborne) elapsed = 0.0f;
-        else { animation.Update(activeDelta * (bufferedPresentation ? movementAnimationScale : 1.0f)); return; }
+        else { animation.Update(locomotionDelta); return; }
         const float seconds = std::max(0.0f, elapsed) / (duration > 0.0f ? duration : 1.0f) * animation.GetDuration();
         lastCombatAnimationSeconds = combatAnimationChanged || lastCombatAnimation != &animation
             ? seconds : std::max(lastCombatAnimationSeconds, seconds);

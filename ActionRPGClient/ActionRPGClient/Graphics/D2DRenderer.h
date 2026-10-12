@@ -18,6 +18,19 @@ namespace ActionRPG
     class D2DRenderer final
     {
     public:
+        // Uniform UI geometry/text scaling on the render thread; restores the letterbox transform via RAII.
+        class UiScaleScope final
+        {
+        public:
+            UiScaleScope(D2DRenderer& inRenderer, float inScale);
+            ~UiScaleScope();
+            UiScaleScope(const UiScaleScope&) = delete;
+            UiScaleScope& operator=(const UiScaleScope&) = delete;
+        private:
+            ID2D1DeviceContext* context{};
+            D2D1_MATRIX_3X2_F previous{};
+        };
+
         explicit D2DRenderer(GraphicsDevice& inGraphicsDevice);
 
         D2DRenderer(const D2DRenderer&) = delete;

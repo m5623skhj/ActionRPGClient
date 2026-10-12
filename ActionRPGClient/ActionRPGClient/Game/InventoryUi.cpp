@@ -1,4 +1,5 @@
 #include "Game/InventoryUi.h"
+#include "Game/HudLayout.h"
 #include "Graphics/D2DRenderer.h"
 #include "Resources/AssetCatalog.h"
 #include "Network/CharacterInventoryJson.h"
@@ -17,9 +18,9 @@ namespace
 {
     constexpr std::array<const wchar_t*, 4> CATEGORY_NAMES{L"장비", L"재료", L"소모품", L"퀘스트"};
     constexpr std::array<const wchar_t*, 7> EQUIPMENT_NAMES{L"무기", L"상의", L"하의", L"신발", L"반지", L"목걸이", L"팔찌"};
-    constexpr float ITEM_CELL_SIZE = 32.0f;
-    constexpr float ITEM_ICON_PADDING = 3.0f;
-    constexpr float ITEM_CELL_GAP = 4.0f;
+    constexpr float ITEM_CELL_SIZE = ActionRPG::HudLayout::SLOT_SIZE;
+    constexpr float ITEM_ICON_PADDING = ActionRPG::HudLayout::ICON_PADDING;
+    constexpr float ITEM_CELL_GAP = ActionRPG::HudLayout::SLOT_GAP;
     constexpr float REQUEST_TIMEOUT_SECONDS = 10.0f;
     constexpr float USE_STATUS_INTERVAL_SECONDS = 1.0f;
 
@@ -652,9 +653,13 @@ namespace ActionRPG
         return D2D1::RectF(left, top, left + width, top + height);
     }
 
-    InventoryUiAction InventoryUi::Update(const float inDeltaSeconds, const InputState& inInput,
-        const float inWidth, const float inHeight, const bool inVisible, const bool inBarVisible, const D2D1_RECT_F& inSkillBar)
+    InventoryUiAction InventoryUi::Update(const float inDeltaSeconds, const InputState& inLogicalInput,
+        const float inLogicalWidth, const float inLogicalHeight, const bool inVisible, const bool inBarVisible, const D2D1_RECT_F& inLogicalSkillBar)
     {
+        const float scale = HudLayout::Scale(inLogicalWidth);
+        const float inWidth = inLogicalWidth/scale, inHeight = inLogicalHeight/scale;
+        const auto inInput = HudLayout::ScaleInput(inLogicalInput, 1.0f/scale);
+        const auto inSkillBar = HudLayout::ScaleRectangle(inLogicalSkillBar, 1.0f/scale);
         skillBarBounds = inSkillBar;
         InventoryUiAction action;
         quickNoticeSeconds = std::max(0.0f, quickNoticeSeconds - std::max(0.0f, inDeltaSeconds));
@@ -781,16 +786,14 @@ namespace ActionRPG
 
     D2D1_RECT_F InventoryUi::QuickslotBounds(const D2D1_RECT_F& inSkillBar)
     {
-        constexpr float cell = ITEM_CELL_SIZE;
-        return D2D1::RectF(inSkillBar.left + 4.0f, inSkillBar.bottom + 4.0f,
-            inSkillBar.left + 4.0f + 4.0f * cell + 3.0f * ITEM_CELL_GAP, inSkillBar.bottom + 4.0f + cell);
+        return HudLayout::Calculate(inSkillBar).items;
     }
 
-    std::array<D2D1_RECT_F, 4> InventoryUi::QuickslotRectangles(const D2D1_RECT_F& inSkillBar)
+    std::array<D2D1_RECT_F, HudLayout::ITEM_SLOT_COUNT> InventoryUi::QuickslotRectangles(const D2D1_RECT_F& inSkillBar)
     {
         const auto bounds = QuickslotBounds(inSkillBar);
         const float cell = bounds.bottom - bounds.top;
-        std::array<D2D1_RECT_F, 4> result{};
+        std::array<D2D1_RECT_F, HudLayout::ITEM_SLOT_COUNT> result{};
         for (std::size_t index = 0; index < result.size(); ++index)
             result[index] = D2D1::RectF(bounds.left + index * (cell + ITEM_CELL_GAP), bounds.top,
                 bounds.left + index * (cell + ITEM_CELL_GAP) + cell, bounds.bottom);
@@ -877,9 +880,13 @@ namespace ActionRPG
         return {};
     }
 
-    void InventoryUi::RenderQuickSlots(D2DRenderer& inRenderer, const float inWidth, const float inHeight,
-        const D2D1_RECT_F& inSkillBar, const bool inInventory) const
+    void InventoryUi::RenderQuickSlots(D2DRenderer& inRenderer, const float inLogicalWidth, const float inLogicalHeight,
+        const D2D1_RECT_F& inLogicalSkillBar, const bool inInventory) const
     {
+        const float scale = HudLayout::Scale(inLogicalWidth);
+        const float inWidth = inLogicalWidth/scale, inHeight = inLogicalHeight/scale;
+        const auto inSkillBar = HudLayout::ScaleRectangle(inLogicalSkillBar, 1.0f/scale);
+        const D2DRenderer::UiScaleScope uiScale(inRenderer, scale);
         const auto rects = QuickslotRectangles(inSkillBar);
         const auto found = quickSlotsByCharacter.find(expectedCharacterId);
         for (std::size_t index = 0; index < rects.size(); ++index)
@@ -917,7 +924,7 @@ namespace ActionRPG
         text += L"수량: " + std::to_wstring(item->quantity) + L" / 최대 스택 " + std::to_wstring(item->maxStack) + L"\n";
         if (item->useRequiredLevel != 0)
             text += L"사용 레벨: " + std::to_wstring(item->useRequiredLevel)
-                + L"\n기본 쿨타임: " + SecondsText(item->useCooldownSeconds) + L"초\n";
+                + L"\n기본 쿨타임: " + SecondsText(item->useCooldownSeconds / combatTempoScale) + L"초\n";
         if (item->useRequiredLevel > characterLevel) text += L"사용에 필요한 레벨이 부족합니다\n";
         if (!item->equipmentSlot && !cooldownsKnown) text += L"재사용 상태 확인 중\n";
         else if (const auto cooldown = FindCooldown(*item))
@@ -935,16 +942,22 @@ namespace ActionRPG
     void InventoryUi::DrawItem(D2DRenderer& inRenderer, const D2D1_RECT_F& inRect,
         const InventoryItemView* inItem, const std::wstring_view inLabel) const
     {
-        inRenderer.FillRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom, D2D1::ColorF(0.07f, 0.09f, 0.12f));
-        inRenderer.DrawRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom,
-            D2D1::ColorF(inItem && inItem->instanceId == hovered ? 1.0f : 0.40f,
-                inItem && inItem->instanceId == hovered ? 0.75f : 0.47f, 0.52f));
-        // Every view uses a 32px cell and a centered 26px icon. Labels are overlays, never layout padding.
+        inRenderer.FillRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom, D2D1::ColorF(0x17130D));
+        inRenderer.DrawRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom, D2D1::ColorF(0x060504));
+        inRenderer.DrawRectangle(inRect.left+1, inRect.top+1, inRect.right-1, inRect.bottom-1,
+            D2D1::ColorF(inItem && inItem->instanceId == hovered ? 0xEACB7C : 0x74603D));
+        inRenderer.DrawLine(inRect.left+2, inRect.top+2, inRect.right-2, inRect.top+2, D2D1::ColorF(0xAE9460));
+        // Quick slots, bag, equipment, and drag use the same 40px reference frame / centered 34px icon, scaled together per viewport.
         const auto art = D2D1::RectF(inRect.left + ITEM_ICON_PADDING, inRect.top + ITEM_ICON_PADDING,
             inRect.right - ITEM_ICON_PADDING, inRect.bottom - ITEM_ICON_PADDING);
         if (!inItem)
         {
-            if (!inLabel.empty()) inRenderer.DrawUiText(inLabel, inRect, D2D1::ColorF(0.80f, 0.83f, 0.90f), 9, false, true);
+            if (!inLabel.empty())
+            {
+                const float width = std::min(ITEM_CELL_SIZE - 2, std::max(10.0f, inLabel.size() * 10.0f + 4));
+                inRenderer.DrawUiText(inLabel, D2D1::RectF(inRect.left+1,inRect.bottom-14,inRect.left+1+width,inRect.bottom-1),
+                    D2D1::ColorF(0xEACB7C), 11, false, true);
+            }
             return;
         }
         const auto cooldown = FindCooldown(*inItem);
@@ -963,18 +976,18 @@ namespace ActionRPG
         else inRenderer.DrawUiText(inItem->name.substr(0, 2), art, D2D1::ColorF(0.90f, 0.90f, 0.92f), 12.0f, false, true);
         if (!inLabel.empty())
         {
-            const float width = std::min(ITEM_CELL_SIZE - 2, std::max(10.0f, inLabel.size() * 8.0f + 4));
-            const auto label = D2D1::RectF(inRect.left + 1, inRect.top + 1, inRect.left + 1 + width, inRect.top + 11);
+            const float width = std::min(ITEM_CELL_SIZE - 2, std::max(10.0f, inLabel.size() * 10.0f + 4));
+            const auto label = D2D1::RectF(inRect.left + 1, inRect.bottom - 14, inRect.left + 1 + width, inRect.bottom - 1);
             inRenderer.FillRectangle(label.left, label.top, label.right, label.bottom, D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.65f));
-            inRenderer.DrawUiText(inLabel, label, D2D1::ColorF(0.90f, 0.90f, 0.92f), 8, false, true);
+            inRenderer.DrawUiText(inLabel, label, D2D1::ColorF(0xEACB7C), 11, false, true);
         }
         if (!inItem->equipmentSlot)
         {
             const auto quantity = SlotQuantityText(inItem->quantity);
-            const float width = std::min(ITEM_CELL_SIZE - 2, quantity.size() * 5.0f + 4);
-            const auto count = D2D1::RectF(inRect.right - 1 - width, inRect.bottom - 11, inRect.right - 1, inRect.bottom - 1);
+            const float width = std::min(ITEM_CELL_SIZE - 2, quantity.size() * 6.5f + 4);
+            const auto count = D2D1::RectF(inRect.right - 1 - width, inRect.top + 1, inRect.right - 1, inRect.top + 14);
             inRenderer.FillRectangle(count.left, count.top, count.right, count.bottom, D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.90f));
-            inRenderer.DrawUiText(quantity, count, D2D1::ColorF(1.0f, 1.0f, 0.92f), 8.0f, false, true);
+            inRenderer.DrawUiText(quantity, count, D2D1::ColorF(1.0f, 1.0f, 0.92f), 11.0f, false, true);
         }
         if (cooling)
         {
@@ -984,15 +997,18 @@ namespace ActionRPG
                     : SecondsText(cooldown->remainingSeconds);
             const float width = ITEM_CELL_SIZE - 2.0f;
             const float x = (inRect.left + inRect.right - width) * 0.5f;
-            const auto rect = D2D1::RectF(x, inRect.top + 11, x + width, inRect.top + 21);
+            const auto rect = D2D1::RectF(x, inRect.top + 14, x + width, inRect.top + 27);
             inRenderer.FillRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
-            inRenderer.DrawUiText(label, rect, D2D1::ColorF(1.0f, 0.9f, 0.6f), 8.0f, false, true);
+            inRenderer.DrawUiText(label, rect, D2D1::ColorF(1.0f, 0.9f, 0.6f), 11.0f, false, true);
         }
     }
 
-    void InventoryUi::Render(D2DRenderer& inRenderer, const float inWidth, const float inHeight,
+    void InventoryUi::Render(D2DRenderer& inRenderer, const float inLogicalWidth, const float inLogicalHeight,
         const bool inDungeon) const
     {
+        const float scale = HudLayout::Scale(inLogicalWidth);
+        const float inWidth = inLogicalWidth/scale, inHeight = inLogicalHeight/scale;
+        const D2DRenderer::UiScaleScope uiScale(inRenderer, scale);
         const auto layout = CalculateLayout(inWidth, inHeight);
         inRenderer.FillRectangle(layout.panel.left, layout.panel.top, layout.panel.right, layout.panel.bottom,
             D2D1::ColorF(0.035f, 0.05f, 0.075f, 0.98f));

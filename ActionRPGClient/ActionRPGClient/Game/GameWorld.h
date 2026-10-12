@@ -34,6 +34,7 @@
 
 namespace ActionRPG
 {
+    class AudioMixer;
     class AssetCatalog;
     class D2DRenderer;
     class DungeonClient;
@@ -43,7 +44,8 @@ namespace ActionRPG
     {
     public:
         GameWorld(float inViewportWidth, float inViewportHeight, const AssetCatalog& inAssetCatalog,
-            D2DRenderer& inRenderer, TownClient& inTownClient, DungeonClient& inDungeonClient);
+            D2DRenderer& inRenderer, TownClient& inTownClient, DungeonClient& inDungeonClient, AudioMixer& inAudio);
+        ~GameWorld();
 
         void Update(float inDeltaSeconds, const InputState& inInput);
         void Render(D2DRenderer& inRenderer) const;
@@ -101,7 +103,7 @@ namespace ActionRPG
             ExitConfirmation,
             Skills,
             Inventory,
-            ScreenSettings
+            GameOptions
         };
 
         enum class SystemMenuAction
@@ -113,7 +115,7 @@ namespace ActionRPG
             Logout,
             SwitchAccount,
             SelectTown,
-            ScreenSettings
+            GameOptions
         };
 
         struct SystemMenuEntry
@@ -152,8 +154,8 @@ namespace ActionRPG
         void ProcessDungeonCompletion();
         void UpdateDungeonSelection(const InputState& inInput);
         void UpdateSystemInterface(const InputState& inInput);
-        void UpdateScreenSettings(const InputState& inInput);
-        void RenderScreenSettings(D2DRenderer& inRenderer) const;
+        void UpdateGameOptions(const InputState& inInput);
+        void RenderGameOptions(D2DRenderer& inRenderer) const;
         void UpdatePartyInterface(const InputState& inInput);
         [[nodiscard]] bool IsDungeonUiRestricted() const noexcept
         { return dungeonEntryState != DungeonEntryState::Idle; }
@@ -214,6 +216,7 @@ namespace ActionRPG
         D2DRenderer& renderer;
         TownClient& townClient;
         DungeonClient& dungeonClient;
+        AudioMixer& audio;
         MonsterCatalog monsterCatalog;
         struct MonsterPortrait
         {
@@ -222,6 +225,7 @@ namespace ActionRPG
             D2D1_SIZE_F sourcePixels{}; // Preserve the authored aspect even with differing bitmap X/Y DPI.
         };
         std::unordered_map<std::uint32_t, MonsterPortrait> monsterPortraits;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> hudOrbFrame;
         DungeonCombatBuffer combatBuffer;
         std::optional<DungeonCombatSnapshot> presentationSnapshot;
         std::uint32_t appliedMapEpoch{}, pendingMapEpoch{};
@@ -278,6 +282,7 @@ namespace ActionRPG
         std::vector<SystemMenuEntry> systemMenuEntries;
         SystemUiPage systemUiPage = SystemUiPage::Closed;
         float systemMenuScrollOffset{};
+        std::size_t selectedOptionsRow{};
         std::uint32_t screenWidthDraft = 1280;
         bool fullscreenDraft{}, screenApplyRequested{};
         std::wstring screenSettingsNotice;

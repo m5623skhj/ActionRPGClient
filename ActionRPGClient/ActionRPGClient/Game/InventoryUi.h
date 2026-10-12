@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Input/InputState.h"
+#include "Game/HudLayout.h"
 
 #include <d2d1_1.h>
 #include <wrl/client.h>
@@ -66,9 +67,11 @@ namespace ActionRPG
         void ApplyState(InventorySnapshotView inState);
         void ResolveRequest(const std::string& inRequestId, std::wstring inMessage, bool inStateCurrent);
         void SetConnected(bool inConnected);
+        void SetCombatTempoScale(float inTempoScale) { combatTempoScale = inTempoScale; }
         void Invalidate(std::wstring inMessage);
         [[nodiscard]] bool ConsumeCombatRefresh() { const bool value = combatRefresh; combatRefresh = false; return value; }
-        void SetHotbarBounds(const D2D1_RECT_F& inBounds) { skillBarBounds = inBounds; }
+        void SetHotbarBounds(const D2D1_RECT_F& inBounds, float inScale = 1.0f)
+        { skillBarBounds = HudLayout::ScaleRectangle(inBounds, 1.0f/inScale); }
         void RenderQuickSlots(D2DRenderer& inRenderer, float inWidth, float inHeight,
             const D2D1_RECT_F& inSkillBar, bool inInventory) const;
         [[nodiscard]] static D2D1_RECT_F QuickslotBounds(const D2D1_RECT_F& inSkillBar);
@@ -99,7 +102,7 @@ namespace ActionRPG
             std::optional<CooldownMap> cooldowns;
         };
         void CompleteState();
-        [[nodiscard]] static std::array<D2D1_RECT_F, 4> QuickslotRectangles(const D2D1_RECT_F& inSkillBar);
+        [[nodiscard]] static std::array<D2D1_RECT_F, HudLayout::ITEM_SLOT_COUNT> QuickslotRectangles(const D2D1_RECT_F& inSkillBar);
         [[nodiscard]] InventoryUiAction UpdateQuickSlots(const InputState& inInput, bool inInventory,
             const D2D1_RECT_F& inSkillBar, float inWidth, float inHeight);
         void RenderTooltip(D2DRenderer& inRenderer, float inWidth, float inHeight) const;
@@ -132,7 +135,7 @@ namespace ActionRPG
         std::string hovered, pendingRequest;
         InventoryOperation pendingOperation{InventoryOperation::None};
         D2D1_RECT_F hoveredRect{}, skillBarBounds{};
-        std::unordered_map<std::uint64_t, std::array<std::string, 4>> quickSlotsByCharacter;
+        std::unordered_map<std::uint64_t, std::array<std::string, HudLayout::ITEM_SLOT_COUNT>> quickSlotsByCharacter;
         std::string dragCandidate, dragging;
         float dragStartX{}, dragStartY{}, bagScroll{}, quickNoticeSeconds{};
         bool quickHover{};
@@ -141,6 +144,7 @@ namespace ActionRPG
         float useStatusSeconds{}, cooldownRefreshSeconds{};
         std::wstring useNotice;
         float pendingSeconds{}, stateWaitSeconds{}, tooltipScroll{}, mouseX{}, mouseY{};
+        float combatTempoScale{1.0f};
         std::wstring status{L"인벤토리 상태를 기다리는 중"};
     };
 }

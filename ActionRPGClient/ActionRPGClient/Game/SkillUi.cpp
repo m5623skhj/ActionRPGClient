@@ -1,4 +1,5 @@
 #include "Game/SkillUi.h"
+#include "Game/HudLayout.h"
 #include "Graphics/D2DRenderer.h"
 #include "Resources/AssetCatalog.h"
 #include <Windows.h>
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <unordered_set>
 
@@ -45,7 +47,7 @@ namespace
     {
         std::wostringstream text;
         if (seconds < 60) text << std::fixed << std::setprecision(1) << std::ceil(seconds*10)/10 << L"초";
-        else text << std::max<std::uint32_t>(1,static_cast<std::uint32_t>(std::floor(seconds/60))) << L"m";
+        else text << std::max<std::uint32_t>(1,static_cast<std::uint32_t>(std::ceil(seconds/60))) << L"m";
         return text.str();
     }
 }
@@ -134,8 +136,11 @@ namespace ActionRPG
         // validate its progression without overwriting the latest Town permission state.
         cooldowns = inState.skillCooldowns; combatReady = true;
     }
-    void SkillUi::AcceptSkill(const std::string& inId)
-    { if (ready && IsOwned(inId)) cooldowns[inId]=catalog.skills.at(inId).at("cooldownSeconds").get<float>(); }
+    void SkillUi::AcceptSkill(const std::string& inId, const float inTempoScale)
+    {
+        // Bootstrap the same real-seconds value the next server JSON will supply.
+        if (ready && IsOwned(inId)) cooldowns[inId]=catalog.skills.at(inId).at("cooldownSeconds").get<float>()/inTempoScale;
+    }
     void SkillUi::ApplyTownCooldowns(const std::unordered_map<std::string,float>& inCooldowns) { cooldowns = inCooldowns; }
     void SkillUi::ResetCombatState() { combatReady = false; cooldowns.clear(); CancelDrag(); }
     void SkillUi::Invalidate() { ready = false; learnPending = false; ResetCombatState(); status = L"스킬 상태를 다시 요청해야 합니다"; }
@@ -180,10 +185,20 @@ namespace ActionRPG
         const auto& bar = settings.at(result.compact ? "compactBar" : "normalBar");
         const auto& window = settings.at(result.compact ? "compactWindow" : "normalWindow");
         const float padding = Number(bar,"padding"), gap = Number(bar,"gap");
-        const float barWidth = slots.size()*Number(bar,"slotWidth")+(slots.size()-1)*gap+2*padding;
-        const float barHeight = Number(bar,"slotHeight")+2*padding;
-        result.bar = D2D1::RectF((width-barWidth)/2,height-Number(bar,"bottomMargin")-barHeight,(width+barWidth)/2,height-Number(bar,"bottomMargin"));
-        for (std::size_t i = 0;i < slots.size();++i) result.slots[i] = Offset(result.bar,padding+i*(Number(bar,"slotWidth")+gap),padding,Number(bar,"slotWidth"),Number(bar,"slotHeight"));
+        constexpr auto columns = HudLayout::SKILL_COLUMNS;
+        const auto rows = (slots.size() + columns - 1) / columns;
+        const float barWidth = columns*Number(bar,"slotWidth")+(columns-1)*gap+2*padding;
+        const float barHeight = rows*Number(bar,"slotHeight")+(rows-1)*gap+2*padding;
+        // Center the complete asymmetric HUD, including six items on the left and menu on the right.
+        const float barLeft = (width-barWidth+HudLayout::ITEM_WIDTH-HudLayout::MENU_WIDTH)/2;
+        result.bar = D2D1::RectF(barLeft,height-Number(bar,"bottomMargin")-barHeight,barLeft+barWidth,height-Number(bar,"bottomMargin"));
+        for (std::size_t i = 0;i < slots.size();++i)
+        {
+            // Keep key/save indices unchanged: Q/W/E/R/T/Y above A/S/D/F/G/H like the keyboard.
+            const auto visualIndex = (i + columns) % slots.size();
+            result.slots[i] = Offset(result.bar,padding+(visualIndex%columns)*(Number(bar,"slotWidth")+gap),
+                padding+(visualIndex/columns)*(Number(bar,"slotHeight")+gap),Number(bar,"slotWidth"),Number(bar,"slotHeight"));
+        }
         const float margin = Number(window,"margin"), available = std::max(0.0f,result.bar.top-Number(window,"barGap")-margin);
         const float panelWidth = std::min(Number(window,"width"),std::max(0.0f,width-2*margin)), panelHeight = std::min(Number(window,"height"),available);
         result.panel = D2D1::RectF((width-panelWidth)/2,margin+(available-panelHeight)/2,(width+panelWidth)/2,margin+(available+panelHeight)/2);
@@ -218,7 +233,7 @@ namespace ActionRPG
         const auto current = progression.GetSkillLevel(id), next = current+1;
         std::wstring text = Wide(skill.at("name").get<std::string>())+L"\n"+Wide(node.at("description").get<std::string>())+L"\n\n";
         text += L"스킬 레벨: "+std::to_wstring(current)+L" / "+(node.at("maxSkillLevel").is_null() ? L"상한 없음" : std::to_wstring(node.at("maxSkillLevel").get<std::uint32_t>()))+L"\n";
-        std::wostringstream cooldown; cooldown << skill.at("cooldownSeconds").get<float>();
+        std::wostringstream cooldown; cooldown << skill.at("cooldownSeconds").get<float>()/combatTempoScale;
         text += L"쿨타임: "+cooldown.str()+L"초\n";
         if (skill.at("execution").contains("damage"))
             text += L"공격력: "+std::to_wstring(trees.Damage(catalog,id,current ? current : 1))+(current ? L"" : L" (습득 시)")+L"\n다음 단계 공격력: "+std::to_wstring(trees.Damage(catalog,id,next))+L"\n";
@@ -253,10 +268,14 @@ namespace ActionRPG
             if (path.empty() || !std::filesystem::is_regular_file(path) || std::filesystem::file_size(path) > 8192) return;
             std::ifstream file(path); Json value; file >> value;
             PlayerSkills::Catalog::Keys(value,{"format","schemaVersion","characterId","slots"});
-            PlayerSkills::Catalog::Require(value.at("format") == "SkillSlots" && value.at("schemaVersion") == 1
-                && value.at("characterId") == characterId && value.at("slots").is_array() && value.at("slots").size() == slots.size(),"Invalid saved slots.");
+            PlayerSkills::Catalog::Require(value.at("format") == "SkillSlots"
+                && value.at("characterId") == characterId && value.at("slots").is_array(),"Invalid saved slots.");
+            const auto count = value.at("slots").size();
+            // V1's six bindings retain their A/S/D/F/G/H keys; V2 stores all twelve.
+            const bool legacy = value.at("schemaVersion") == 1 && count == 6;
+            PlayerSkills::Catalog::Require(legacy || (value.at("schemaVersion") == 2 && count == slots.size()),"Invalid saved slot version/count.");
             std::unordered_set<std::string> used;
-            for (std::size_t i=0;i<slots.size();++i)
+            for (std::size_t i=0;i<count;++i)
             {
                 const auto id = value.at("slots")[i].get<std::string>();
                 if (!id.empty() && IsOwned(id) && progression.GetSkillLevel(id)>0 && used.insert(id).second) slots[i]=id;
@@ -278,7 +297,7 @@ namespace ActionRPG
                 std::filesystem::path path;
                 ~TemporaryFile() { std::error_code error; std::filesystem::remove(path,error); }
             } cleanup{temporary};
-            { std::ofstream file(std::filesystem::path(temporary),std::ios::binary|std::ios::trunc); file << Json{{"format","SkillSlots"},{"schemaVersion",1},{"characterId",characterId},{"slots",slots}}.dump(2); file.flush(); if (!file.good()) throw std::runtime_error("Slot write failed."); }
+            { std::ofstream file(std::filesystem::path(temporary),std::ios::binary|std::ios::trunc); file << Json{{"format","SkillSlots"},{"schemaVersion",2},{"characterId",characterId},{"slots",slots}}.dump(2); file.flush(); if (!file.good()) throw std::runtime_error("Slot write failed."); }
             if (!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("Slot replacement failed.");
         }
         catch (const std::exception&) { status=L"단축키 저장에 실패했습니다. 현재 배치는 이번 실행에 유지됩니다"; }
@@ -292,8 +311,11 @@ namespace ActionRPG
         if (slots!=previous) SaveSlots();
     }
 
-    SkillUiAction SkillUi::Update(float dt,const InputState& input,float width,float height,bool editing,bool barVisible)
+    SkillUiAction SkillUi::Update(float dt,const InputState& inInput,float width,float height,bool editing,bool barVisible)
     {
+        const float scale = HudLayout::Scale(width);
+        const auto input = HudLayout::ScaleInput(inInput, 1.0f/scale);
+        width/=scale; height/=scale;
         SkillUiAction action;
         mouseX=input.mouseX; mouseY=input.mouseY;
         for (auto& [id,seconds]:cooldowns) seconds=std::max(0.0f,seconds-dt);
@@ -372,6 +394,9 @@ namespace ActionRPG
     }
     void SkillUi::Render(D2DRenderer& draw,float width,float height,bool editing) const
     {
+        const float scale = HudLayout::Scale(width);
+        width/=scale; height/=scale;
+        const D2DRenderer::UiScaleScope uiScale(draw, scale);
         const auto layout=CalculateLayout(width,height);
         const auto& bar=settings.at(layout.compact ? "compactBar":"normalBar");
         const auto& window=settings.at(layout.compact ? "compactWindow":"normalWindow");
@@ -436,12 +461,17 @@ namespace ActionRPG
             }
             draw.DrawUiText((learningAllowed ? status:L"던전: 조회·단축키 등록만 가능")+L"  | 휠: 위아래, Shift+휠: 좌우",D2D1::RectF(layout.panel.left+padding,layout.panel.bottom-padding-Number(window,"footerHeight"),layout.panel.right-padding,layout.panel.bottom-padding),Color("text"),smallFont,true);
         }
-        draw.FillRectangle(layout.bar.left,layout.bar.top,layout.bar.right,layout.bar.bottom,Color("panel"));
-        static constexpr wchar_t KEYS[]=L"ASDFGH";
+        draw.FillRectangle(layout.bar.left,layout.bar.top,layout.bar.right,layout.bar.bottom,D2D1::ColorF(0x100D09));
+        draw.DrawRectangle(layout.bar.left,layout.bar.top,layout.bar.right,layout.bar.bottom,D2D1::ColorF(0x41341F));
+        static constexpr wchar_t KEYS[]=L"ASDFGHQWERTY";
+        static_assert(std::size(KEYS)-1 == HudLayout::SKILL_SLOT_COUNT);
         for (std::size_t i=0;i<slots.size();++i)
         {
             const auto rect=layout.slots[i]; const auto& id=slots[i]; const float seconds=Cooldown(id);
-            draw.DrawRectangle(rect.left,rect.top,rect.right,rect.bottom,Color("border"));
+            draw.FillRectangle(rect.left,rect.top,rect.right,rect.bottom,D2D1::ColorF(0x17130D));
+            draw.DrawRectangle(rect.left,rect.top,rect.right,rect.bottom,D2D1::ColorF(0x060504));
+            draw.DrawRectangle(rect.left+1,rect.top+1,rect.right-1,rect.bottom-1,D2D1::ColorF(0x74603D));
+            draw.DrawLine(rect.left+2,rect.top+2,rect.right-2,rect.top+2,D2D1::ColorF(0xAE9460));
             if (!id.empty()) DrawIcon(draw,id,Offset(rect,Number(bar,"iconLeft"),Number(bar,"iconTop"),Number(bar,"iconSize"),Number(bar,"iconSize")),!ready || progression.GetSkillLevel(id)==0 || seconds>0);
             if (seconds>0)
             {
@@ -451,7 +481,28 @@ namespace ActionRPG
             }
             const auto key=Offset(rect,Number(bar,"keyLeft"),Number(bar,"keyTop"),Number(bar,"keyWidth"),Number(bar,"keyHeight"));
             draw.FillRectangle(key.left,key.top,key.right,key.bottom,Color("cooldownBacking"));
-            draw.DrawUiText(std::wstring(1,KEYS[i]),key,Color("text"),Number(bar,"keyFontSize"),false,true);
+            draw.DrawUiText(std::wstring(1,KEYS[i]),key,D2D1::ColorF(0xEACB7C),Number(bar,"keyFontSize"),false,true);
+        }
+        if (dragging.empty())
+        {
+            for (std::size_t i=0;i<slots.size();++i)
+            {
+                const auto& id=slots[i];
+                if (id.empty() || !Contains(layout.slots[i],mouseX,mouseY) || !IsOwned(id)) continue;
+                const float left=std::clamp(mouseX+12.0f,12.0f,width-272.0f);
+                const float top=std::max(12.0f,layout.bar.top-140.0f);
+                const auto tooltip=D2D1::RectF(left,top,left+260.0f,top+128.0f);
+                std::wostringstream remaining;
+                remaining << std::fixed << std::setprecision(1) << std::ceil(Cooldown(id)*10.0f)/10.0f;
+                const std::wstring text=Wide(catalog.skills.at(id).at("name").get<std::string>())
+                    +L"\n단축키: "+std::wstring(1,KEYS[i])+L"  스킬 Lv."+std::to_wstring(progression.GetSkillLevel(id))
+                    +L"\n재사용 대기: "+(ready ? remaining.str()+L"초" : std::wstring(L"확인 중"))+L"\n"
+                    +Wide(trees.nodes.at(id).at("description").get<std::string>());
+                draw.FillRectangle(tooltip.left,tooltip.top,tooltip.right,tooltip.bottom,D2D1::ColorF(0x100D09));
+                draw.DrawRectangle(tooltip.left,tooltip.top,tooltip.right,tooltip.bottom,D2D1::ColorF(0x74603D));
+                draw.DrawUiText(text,Offset(tooltip,10,8,240,112),Color("text"),13,true);
+                break;
+            }
         }
         if (editing && !dragging.empty()) DrawIcon(draw,dragging,D2D1::RectF(mouseX-Number(bar,"iconSize")/2,mouseY-Number(bar,"iconSize")/2,mouseX+Number(bar,"iconSize")/2,mouseY+Number(bar,"iconSize")/2),false);
     }

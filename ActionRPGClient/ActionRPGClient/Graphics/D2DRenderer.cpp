@@ -58,6 +58,14 @@ namespace ActionRPG
         defaultTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     }
 
+    D2DRenderer::UiScaleScope::UiScaleScope(D2DRenderer& inRenderer, float inScale)
+        : context(inRenderer.d2dContext)
+    {
+        context->GetTransform(&previous);
+        context->SetTransform(D2D1::Matrix3x2F::Scale(inScale,inScale)*previous);
+    }
+    D2DRenderer::UiScaleScope::~UiScaleScope() { context->SetTransform(previous); }
+
     void D2DRenderer::SetViewport(const std::uint32_t inPhysicalWidth, const std::uint32_t inPhysicalHeight,
         const std::uint32_t inLogicalWidth, const std::uint32_t inLogicalHeight)
     {

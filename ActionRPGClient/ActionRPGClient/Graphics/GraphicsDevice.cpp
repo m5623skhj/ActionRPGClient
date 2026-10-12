@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -19,6 +20,7 @@ namespace
         std::ostringstream message;
         message << inOperation << " failed with HRESULT 0x"
             << std::hex << std::uppercase << static_cast<unsigned long>(inResult) << '.';
+        OutputDebugStringA(("ActionRPGClient: " + message.str() + "\n").c_str());
         throw std::runtime_error(message.str());
     }
 }
@@ -41,14 +43,32 @@ namespace ActionRPG
             return;
         }
 
+        DXGI_SWAP_CHAIN_DESC1 current{};
+        ThrowIfFailed(swapChain->GetDesc1(&current), "IDXGISwapChain1::GetDesc1");
+        if (current.Width == inWidth && current.Height == inHeight)
+        {
+            if (!d2dTargetBitmap) CreateRenderTarget();
+            return;
+        }
+
+        // The previous frame ended with EndDraw. Do not Flush after removing its target:
+        // no drawing is pending here, and a second fallible draw call can abort a mode change.
         d2dContext->SetTarget(nullptr);
         d2dTargetBitmap.Reset();
-        d2dContext->Flush();
+        d3dContext->ClearState();
+        d3dContext->Flush();
 
-        ThrowIfFailed(
-            swapChain->ResizeBuffers(2, inWidth, inHeight, DXGI_FORMAT_B8G8R8A8_UNORM, 0),
-            "IDXGISwapChain1::ResizeBuffers");
-
+        std::ostringstream resizeMessage;
+        resizeMessage << "ActionRPGClient: ResizeBuffers " << current.Width << 'x' << current.Height
+            << " -> " << inWidth << 'x' << inHeight << "\n";
+        OutputDebugStringA(resizeMessage.str().c_str());
+        const HRESULT resizeResult = swapChain->ResizeBuffers(0, inWidth, inHeight, DXGI_FORMAT_UNKNOWN, current.Flags);
+        if (FAILED(resizeResult))
+        {
+            // ResizeBuffers failure retains the old buffers. Restore their target before reporting.
+            CreateRenderTarget();
+            ThrowIfFailed(resizeResult, "IDXGISwapChain1::ResizeBuffers");
+        }
         CreateRenderTarget();
     }
 
@@ -180,6 +200,7 @@ namespace ActionRPG
 
     void GraphicsDevice::CreateRenderTarget()
     {
+        OutputDebugStringA("ActionRPGClient: acquiring back buffer for D2D target\n");
         Microsoft::WRL::ComPtr<IDXGISurface> backBuffer;
         ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)), "IDXGISwapChain1::GetBuffer");
 
@@ -190,11 +211,15 @@ namespace ActionRPG
             DIPS_PER_INCH,
             DIPS_PER_INCH);
 
+        OutputDebugStringA("ActionRPGClient: creating D2D target bitmap\n");
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> target;
         ThrowIfFailed(
-            d2dContext->CreateBitmapFromDxgiSurface(backBuffer.Get(), &bitmapProperties, &d2dTargetBitmap),
+            d2dContext->CreateBitmapFromDxgiSurface(backBuffer.Get(), &bitmapProperties, &target),
             "ID2D1DeviceContext::CreateBitmapFromDxgiSurface");
 
+        d2dTargetBitmap = std::move(target);
         d2dContext->SetTarget(d2dTargetBitmap.Get());
         d2dContext->SetDpi(DIPS_PER_INCH, DIPS_PER_INCH);
+        OutputDebugStringA("ActionRPGClient: D2D target ready\n");
     }
 }

@@ -10,8 +10,8 @@
 namespace ActionRPG
 {
     Game::Game(const float inViewportWidth, const float inViewportHeight, const AssetCatalog& inAssetCatalog,
-        D2DRenderer& inRenderer, TownClient& inTownClient, DungeonClient& inDungeonClient)
-        : world(inViewportWidth, inViewportHeight, inAssetCatalog, inRenderer, inTownClient, inDungeonClient)
+        D2DRenderer& inRenderer, TownClient& inTownClient, DungeonClient& inDungeonClient, AudioMixer& inAudio)
+        : world(inViewportWidth, inViewportHeight, inAssetCatalog, inRenderer, inTownClient, inDungeonClient, inAudio)
     {
     }
 

@@ -2,6 +2,7 @@
 #include "Game/SkillTreeCatalog.h"
 #include "Game/DungeonCombat.h"
 #include "Input/InputState.h"
+#include "Game/HudLayout.h"
 #include <d2d1_1.h>
 #include <wrl/client.h>
 #include <array>
@@ -26,7 +27,8 @@ namespace ActionRPG
         SkillUi(const AssetCatalog& inAssets, D2DRenderer& inRenderer);
         void ApplyState(std::string_view inPayload, std::uint32_t inCharacterId);
         void ApplyCombatState(const CombatPlayerState& inState);
-        void AcceptSkill(const std::string& inId);
+        void AcceptSkill(const std::string& inId, float inTempoScale = 1.0f);
+        void SetCombatTempoScale(float inTempoScale) { combatTempoScale = inTempoScale; }
         void ApplyTownCooldowns(const std::unordered_map<std::string, float>& inCooldowns);
         void ResetCombatState();
         void Invalidate();
@@ -45,14 +47,17 @@ namespace ActionRPG
             float inWidth, float inHeight, bool inEditing, bool inBarVisible);
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inEditing) const;
         [[nodiscard]] D2D1_RECT_F GetHotbarBounds(float inWidth, float inHeight) const
-        { return CalculateLayout(inWidth, inHeight).bar; }
+        {
+            const float scale = HudLayout::Scale(inWidth);
+            return HudLayout::ScaleRectangle(CalculateLayout(inWidth/scale, inHeight/scale).bar, scale);
+        }
 
     private:
         struct Layout
         {
             bool compact{}, stacked{};
             D2D1_RECT_F bar{}, panel{}, tree{}, detail{}, learnButton{}, treeTab{}, detailTab{};
-            std::array<D2D1_RECT_F, 6> slots{};
+            std::array<D2D1_RECT_F, HudLayout::SKILL_SLOT_COUNT> slots{};
         };
         [[nodiscard]] Layout CalculateLayout(float inWidth, float inHeight) const;
         [[nodiscard]] float Number(const nlohmann::json& inObject, const char* inKey) const;
@@ -80,7 +85,8 @@ namespace ActionRPG
         bool ready{}, connected{}, combatReady{}, learnPending{}, detailTabSelected{};
         bool learningAllowed{true};
         float learnSeconds{}, treeScrollX{}, treeScrollY{}, detailScroll{};
-        std::array<std::string, 6> slots{};
+        float combatTempoScale{1.0f};
+        std::array<std::string, HudLayout::SKILL_SLOT_COUNT> slots{};
         std::unordered_map<std::string, float> cooldowns;
         std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> icons;
         std::string selected, dragCandidate, dragging;

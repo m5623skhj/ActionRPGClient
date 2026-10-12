@@ -11,6 +11,9 @@ namespace ActionRPG
 
         for (const InputKey key : inInput.pressedKeys)
         {
+            // Slot hotkeys are consumed by their UI paths, never inserted into movement/attack commands.
+            if ((key >= InputKey::SkillA && key <= InputKey::SkillY)
+                || (key >= InputKey::Item1 && key <= InputKey::Item6)) continue;
             events.push_back(CommandInputEvent{ key, inCurrentTimeSeconds });
         }
     }

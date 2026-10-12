@@ -1,4 +1,5 @@
 #include "Game/GameWorld.h"
+#include "Game/HudLayout.h"
 #include "Network/CharacterInventoryJson.h"
 #include <array>
 #include <iomanip>
@@ -12,6 +13,7 @@
 #include "Network/DungeonProtocol.h"
 #include "Network/TownClient.h"
 #include "Platform/GameWindow.h"
+#include "Platform/AudioMixer.h"
 #include "Resources/AssetCatalog.h"
 
 #include <d2d1_1helper.h>
@@ -39,18 +41,26 @@ namespace ActionRPG
         constexpr float MENU_ICON_SIZE = 128.0f;
         constexpr float MENU_TILE_GAP = 18.0f;
 
-        D2D1_RECT_F GetScreenSettingsPanel(const float inWidth, const float inHeight)
+        D2D1_RECT_F GetGameOptionsPanel(const float inWidth, const float inHeight)
         {
-            const float left = (inWidth - 600.0f) * 0.5f, top = (inHeight - 400.0f) * 0.5f;
-            return D2D1::RectF(left, top, left + 600.0f, top + 400.0f);
+            const float left = (inWidth - 440.0f) * 0.5f, top = (inHeight - 350.0f) * 0.5f;
+            return D2D1::RectF(left, top, left + 440.0f, top + 350.0f);
         }
 
-        D2D1_RECT_F GetScreenSettingsButton(const D2D1_RECT_F& inPanel, const std::size_t inIndex)
+        D2D1_RECT_F GetGameOptionsButton(const D2D1_RECT_F& inPanel, const std::size_t inIndex)
         {
-            const float left = inPanel.left + 30.0f + (inIndex % 2) * 282.0f;
-            constexpr std::array<float, 3> ROW_TOPS{90.0f, 174.0f, 310.0f};
-            const float top = inPanel.top + ROW_TOPS[inIndex / 2];
-            return D2D1::RectF(left, top, left + 258.0f, top + 46.0f);
+            const bool footer = inIndex >= 4;
+            const float left = inPanel.left + (footer ? 20.0f : 140.0f)
+                + (inIndex % 2) * (footer ? 208.0f : 142.0f);
+            const float top = inPanel.top + (footer ? 306.0f : inIndex < 2 ? 62.0f : 98.0f);
+            return D2D1::RectF(left, top, left + (footer ? 192.0f : 132.0f), top + 28.0f);
+        }
+
+        D2D1_RECT_F GetVolumeButton(const D2D1_RECT_F& inPanel, const std::size_t inIndex)
+        {
+            const float left = inPanel.left + 140.0f + (inIndex % 2) * 116.0f;
+            const float top = inPanel.top + 150.0f + (inIndex / 2) * 38.0f;
+            return D2D1::RectF(left, top, left + 28.0f, top + 28.0f);
         }
 
         struct DungeonCompletionLayout
@@ -368,7 +378,7 @@ namespace ActionRPG
 
     GameWorld::GameWorld(const float inViewportWidth, const float inViewportHeight,
         const AssetCatalog& inAssetCatalog, D2DRenderer& inRenderer, TownClient& inTownClient,
-        DungeonClient& inDungeonClient)
+        DungeonClient& inDungeonClient, AudioMixer& inAudio)
         : mapBackground(inAssetCatalog)
         , camera(inViewportWidth, inViewportHeight)
         , animationDefinitions(inAssetCatalog.GetDataPath("Animations"))
@@ -384,8 +394,20 @@ namespace ActionRPG
         , renderer(inRenderer)
         , townClient(inTownClient)
         , dungeonClient(inDungeonClient)
+        , audio(inAudio)
         , monsterCatalog(inAssetCatalog)
     {
+        audio.Stop();
+        if (assetCatalog.HasAudio("StageBgm")) (void)audio.PlayMusic(assetCatalog.GetAudioPath("StageBgm"));
+        const IniDocument effects(assetCatalog.GetDataPath("Effects"));
+        const auto effectAudio = effects.GetOptionalValue("DirectionalStrike", "audio_asset");
+        if (!effectAudio.empty())
+        {
+            if (!assetCatalog.HasAudio(effectAudio)) throw std::runtime_error("Unknown DirectionalStrike audio asset.");
+            (void)audio.LoadEffect(assetCatalog.GetAudioPath(effectAudio));
+        }
+        if (inAssetCatalog.HasImage("HudOrbFrame"))
+            hudOrbFrame = inRenderer.LoadBitmap(inAssetCatalog.GetImagePath("HudOrbFrame"));
         player.SetSkillPresentation(&playerSkillPresentation);
         for (const std::string& section : systemMenuDefinitions.GetSectionNames())
         {
@@ -397,7 +419,7 @@ namespace ActionRPG
             }
             else if (actionName == "Skills") action = SystemMenuAction::Skills;
             else if (actionName == "Inventory") action = SystemMenuAction::Inventory;
-            else if (actionName == "ScreenSettings") action = SystemMenuAction::ScreenSettings;
+            else if (actionName == "GameOptions") action = SystemMenuAction::GameOptions;
             else if (actionName == "Logout") action = SystemMenuAction::Logout;
             else if (actionName == "SwitchAccount") action = SystemMenuAction::SwitchAccount;
             else if (actionName == "SelectTown") action = SystemMenuAction::SelectTown;
@@ -413,7 +435,7 @@ namespace ActionRPG
             Microsoft::WRL::ComPtr<ID2D1Bitmap1> menuIcon;
             if (action == SystemMenuAction::Skills)
             { try { menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId)); } catch (const std::exception&) {} }
-            else if (action != SystemMenuAction::Inventory && action != SystemMenuAction::ScreenSettings) menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
+            else if (action != SystemMenuAction::Inventory && action != SystemMenuAction::GameOptions) menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
             systemMenuEntries.push_back(SystemMenuEntry{
                 Utf8ToWide(systemMenuDefinitions.GetValue(section, "Label")), action, std::move(menuIcon)});
         }
@@ -442,6 +464,11 @@ namespace ActionRPG
         player.SetRunningEnabled(false);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
+    }
+
+    GameWorld::~GameWorld()
+    {
+        audio.Stop();
     }
 
     void GameWorld::Update(const float inDeltaSeconds, const InputState& inInput)
@@ -478,13 +505,15 @@ namespace ActionRPG
         }
 
         if (hadKickedNotice || partyKickedNotice) { interfaceInput = {}; interfaceInput.cancelDrag = true; }
+        const float uiTempoScale = dungeonWorld && IsDungeonUiRestricted() ? dungeonWorld->GetCombatRules().tempoScale : 1.0f;
+        skillUi.SetCombatTempoScale(uiTempoScale);
+        inventoryUi.SetCombatTempoScale(uiTempoScale);
         skillUi.SetConnected(townClient.IsConnected());
         skillUi.SetLearningAllowed(!IsDungeonUiRestricted());
         const bool skillBarVisible=!partyKickedNotice && !hadKickedNotice && !dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
             && (systemUiPage==SystemUiPage::Closed || systemUiPage==SystemUiPage::Skills);
         const auto hudSkillBar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
-        const auto hudQuickBar = InventoryUi::QuickslotBounds(hudSkillBar);
-        const auto hudMenu = D2D1::RectF(hudQuickBar.right + 4.0f, hudQuickBar.top, hudSkillBar.right - 4.0f, hudQuickBar.bottom);
+        const auto hudMenu = HudLayout::Calculate(hudSkillBar, HudLayout::Scale(camera.GetViewportWidth())).menu;
         const bool hudInteractive = systemUiPage == SystemUiPage::Closed && !partyKickedNotice && !hadKickedNotice
             && !dungeonCleared && !completionStopping && !pendingPartyInvitation && !isDungeonSelectionOpen;
         if (hudInteractive && interfaceInput.leftMousePressed && ContainsPoint(hudMenu, interfaceInput.clickX, interfaceInput.clickY))
@@ -520,7 +549,7 @@ namespace ActionRPG
         {
             gameplayInput = InputState{};
         }
-        std::erase_if(gameplayInput.pressedKeys, [](InputKey key) { return key >= InputKey::Item1 && key <= InputKey::Item4; });
+        std::erase_if(gameplayInput.pressedKeys, [](InputKey key) { return key >= InputKey::Item1 && key <= InputKey::Item6; });
         if (inventoryAction.operation == InventoryOperation::Use)
         { gameplayInput.pressedKeys.clear(); commandQueue.Clear(); }
         if (gameplayBlocked) { commandQueue.Clear(); }
@@ -541,8 +570,9 @@ namespace ActionRPG
                 commandQueue.Clear();
                 std::erase_if(gameplayInput.pressedKeys,[](InputKey key)
                     { return key==InputKey::ActionX || key==InputKey::ActionC || key==InputKey::ActionV; });
-                if (!id.empty() && skillUi.CanUse(id,player.GetHeight()>0,false))
-                    (void)player.ActivateCatalogSkill(id,skillUi.GetProgression().skillLevels);
+                if (!id.empty() && skillUi.CanUse(id,player.GetHeight()>0,false)
+                    && player.ActivateCatalogSkill(id,skillUi.GetProgression().skillLevels)
+                    && id == "Character1.FrontKick") (void)audio.PlayEffect();
                 // Unavailable skill input is discarded immediately; never reserve it for a later frame.
             }
         }
@@ -684,7 +714,7 @@ namespace ActionRPG
         commandQueue.Clear();
         skillUi.CancelDrag();
         inventoryUi.Close();
-        inventoryUi.SetHotbarBounds(skillUi.GetHotbarBounds(inViewportWidth, inViewportHeight));
+        inventoryUi.SetHotbarBounds(skillUi.GetHotbarBounds(inViewportWidth, inViewportHeight), HudLayout::Scale(inViewportWidth));
         camera.Resize(inViewportWidth, inViewportHeight);
         camera.Follow(player.GetGroundPosition(), gameplayMap.GetWorldLeft(), gameplayMap.GetWorldTop(),
             gameplayMap.GetWorldRight(), gameplayMap.GetWorldBottom());
@@ -1208,7 +1238,7 @@ namespace ActionRPG
                     player.ResolvePredictedSlide(inEvent.sequence, inEvent.accepted);
                     if (const auto skill=skillActionIds.find(inEvent.sequence); skill!=skillActionIds.end())
                     {
-                        if (inEvent.accepted) { lastAcceptedSkillSequence=std::max(lastAcceptedSkillSequence,inEvent.sequence); skillUi.AcceptSkill(skill->second); dungeonClient.RequestCombatRefresh(); }
+                        if (inEvent.accepted) { lastAcceptedSkillSequence=std::max(lastAcceptedSkillSequence,inEvent.sequence); skillUi.AcceptSkill(skill->second, dungeonWorld ? dungeonWorld->GetCombatRules().tempoScale : 1.0f); dungeonClient.RequestCombatRefresh(); }
                         skillActionIds.erase(skill);
                     }
                     if (inEvent.sequence <= lastCombatActionResult) return;
@@ -1279,6 +1309,15 @@ namespace ActionRPG
         appliedMapEpoch = pendingMapEpoch = snapshot.mapEpoch;
         const auto& rules = dungeonWorld->GetCombatRules();
         // Old movement acknowledgements affect only position correction, not HP/entities/clear state.
+        // First observation, map changes and repeated snapshots must not replay a skill sound.
+        if (combatSnapshot && combatSnapshot->mapEpoch == snapshot.mapEpoch && combatSnapshot->mapId == snapshot.mapId
+            && self->skillActive && self->skillId == "Character1.FrontKick")
+        {
+            const auto previous = std::find_if(combatSnapshot->players.begin(), combatSnapshot->players.end(),
+                [this](const auto& actor) { return actor.playerId == localPlayerId; });
+            if (previous != combatSnapshot->players.end() && self->skillSequence > previous->skillSequence)
+                (void)audio.PlayEffect();
+        }
         player.ApplyCombatState(*self, rules);
         if (self->moveSequence >= lastDungeonStateSequence) player.ReconcileCombatGroundPosition(*self, gameplayMap);
         lastDungeonStateSequence = std::max(lastDungeonStateSequence, self->moveSequence);
@@ -1389,9 +1428,11 @@ namespace ActionRPG
             DungeonProtocol::DungeonActionInput packet;
             packet.sequence = combatActionSequence + 1;
             packet.action = slide ? 3 : action;
+            // Horizontal intent establishes facing on the start frame; vertical intent keeps current facing.
             packet.facingLeft = slide && direction.x != 0.0f ? direction.x < 0.0f : player.GetFacingLeft();
             packet.mapEpoch = appliedMapEpoch;
             packet.moveSequence = dungeonMovementSequence;
+            // Preserve original run input for moveSequence validation; slide motion uses facing only.
             packet.directionX = static_cast<std::int8_t>(direction.x);
             packet.directionY = static_cast<std::int8_t>(direction.y);
             packet.running = player.IsDungeonRunInput() ? 1 : 0;
@@ -1401,7 +1442,7 @@ namespace ActionRPG
             if (slide)
             {
                 const auto& definition = dungeonWorld->GetSlideDefinition(localCharacterId);
-                player.PredictSlide(packet.sequence, direction, definition.durationSeconds,
+                player.PredictSlide(packet.sequence, packet.facingLeft != 0, definition.durationSeconds,
                     definition.distancePerRunSpeedSeconds);
                 commandQueue.Clear();
                 break; // Consume X exactly once; no same-frame C/second X reservation.
@@ -1416,9 +1457,10 @@ namespace ActionRPG
         if (combatInputWindowSeconds >= 1.0f) { combatInputWindowSeconds = 0.0f; combatInputsThisSecond = 0; }
         combatSnapshotAge = std::min(0.25f, combatSnapshotAge + inDeltaSeconds);
         rejectedActionSeconds = std::max(0.0f, rejectedActionSeconds - inDeltaSeconds);
-        for (auto& effect : combatHitEffects) (void)effect.animation.AdvanceOnce(inDeltaSeconds);
+        const float effectDelta = inDeltaSeconds * (dungeonWorld ? dungeonWorld->GetCombatRules().tempoScale : 1.0f);
+        for (auto& effect : combatHitEffects) (void)effect.animation.AdvanceOnce(effectDelta);
         std::erase_if(combatHitEffects, [](const auto& effect) { return effect.animation.IsFinished(); });
-        auto sampled = combatBuffer.Sample();
+        auto sampled = dungeonWorld ? combatBuffer.Sample(dungeonWorld->GetCombatRules()) : std::nullopt;
         if (sampled && presentationSnapshot) QueueCombatHitEffects(*presentationSnapshot, *sampled, false);
         presentationSnapshot = std::move(sampled);
         if (!presentationSnapshot || !dungeonWorld) return;
@@ -1479,7 +1521,8 @@ namespace ActionRPG
     void GameWorld::RenderCombatProjectiles(D2DRenderer& inRenderer) const
     {
         if (!combatSnapshot || !dungeonWorld) return;
-        const float age = presentationSnapshot ? 0.0f : combatSnapshotAge;
+        // Buffered positions are already slowed; only fallback velocity extrapolation needs combat age.
+        const float age = presentationSnapshot ? 0.0f : combatSnapshotAge * dungeonWorld->GetCombatRules().tempoScale;
         const auto& projectiles = presentationSnapshot ? presentationSnapshot->projectiles : combatSnapshot->projectiles;
         for (const auto& projectile : projectiles)
         {
@@ -1559,6 +1602,7 @@ namespace ActionRPG
     void GameWorld::RenderCombatHud(D2DRenderer& inRenderer) const
     {
         const float width = camera.GetViewportWidth(), height = camera.GetViewportHeight();
+        const bool inDungeon = dungeonEntryState == DungeonEntryState::Entered;
         const auto iron = D2D1::ColorF(0x70757F), brass = D2D1::ColorF(0xBC9364);
         const auto panel = D2D1::ColorF(0x10141B), textColor = D2D1::ColorF(0xF0EAE0);
         const auto percent = [](const HudGauge& gauge)
@@ -1645,39 +1689,65 @@ namespace ActionRPG
                 hudText(percent(targetHp), D2D1::RectF(bar.right - 88, bar.top, bar.right - 6, bar.bottom));
             }
         }
-        const auto skillBar = skillUi.GetHotbarBounds(width, height), itemBar = InventoryUi::QuickslotBounds(skillBar);
-        const float radius = 28.0f;
-        const float centerY = (skillBar.top + itemBar.bottom) * 0.5f;
-        const float leftX = skillBar.left - radius - 8, rightX = skillBar.right + radius + 8;
-        inRenderer.FillRectangle(leftX - radius - 8, skillBar.top - 8, rightX + radius + 8, itemBar.bottom + 4, panel);
-        inRenderer.DrawRectangle(leftX - radius - 8, skillBar.top - 8, rightX + radius + 8, itemBar.bottom + 4, iron);
-        const auto orb = [&](const float x, const HudGauge& gauge, const wchar_t* label, const D2D1_COLOR_F& color)
         {
-            inRenderer.FillEllipse(x, centerY, radius, radius, iron);
-            inRenderer.FillEllipse(x, centerY, radius - 3, radius - 3, D2D1::ColorF(0x202630));
-            const float inner = radius * 0.75f;
-            inRenderer.FillEllipse(x, centerY, inner, inner, D2D1::ColorF(0x030405));
-            if (gauge.known)
+            const float scale = HudLayout::Scale(width);
+            const D2DRenderer::UiScaleScope uiScale(inRenderer, scale);
+            const auto skillBar = HudLayout::ScaleRectangle(skillUi.GetHotbarBounds(width, height), 1.0f/scale);
+            const auto hud = HudLayout::Calculate(skillBar);
+            const auto orb = [&](const D2D1_RECT_F& rect, const HudGauge& gauge, const wchar_t* label, const D2D1_COLOR_F& color)
             {
-                inRenderer.PushAxisAlignedClip(D2D1::RectF(x - inner, centerY + inner - 2 * inner * gauge.trailingRatio, x + inner, centerY + inner));
-                inRenderer.FillEllipse(x, centerY, inner, inner, D2D1::ColorF(0x777B82)); inRenderer.PopAxisAlignedClip();
-                inRenderer.PushAxisAlignedClip(D2D1::RectF(x - inner, centerY + inner - 2 * inner * gauge.Ratio(), x + inner, centerY + inner));
-                inRenderer.FillEllipse(x, centerY, inner, inner, color);
-                inRenderer.FillEllipse(x - inner * 0.24f, centerY - inner * 0.24f, inner * 0.6f, inner * 0.56f, D2D1::ColorF(1, 1, 1, 0.10f));
-                inRenderer.PopAxisAlignedClip();
-            }
-            inRenderer.DrawUiText(label, D2D1::RectF(x - radius, centerY - radius + 4, x + radius, centerY - radius + 17), textColor, 11, false, true);
-            inRenderer.DrawUiText(percent(gauge), D2D1::RectF(x - radius, centerY - 7, x + radius, centerY + 8), textColor, 11, false, true);
-            const auto amount = gauge.known ? std::to_wstring(gauge.value) + L"/" + std::to_wstring(gauge.maximum) : std::wstring(L"미제공");
-            inRenderer.DrawUiText(amount, D2D1::RectF(x - radius, centerY + radius + 2, x + radius, centerY + radius + 14), textColor, 10, false, true);
-        };
-        const bool inDungeon = dungeonEntryState == DungeonEntryState::Entered;
-        orb(leftX, inDungeon ? dungeonHp : townHp, L"HP", D2D1::ColorF(0xBE2434));
-        orb(rightX, inDungeon ? dungeonMp : townMp, L"MP", D2D1::ColorF(0x286FC2));
-        const auto menu = D2D1::RectF(itemBar.right + 4, itemBar.top, skillBar.right - 4, itemBar.bottom);
-        inRenderer.FillRectangle(menu.left, menu.top, menu.right, menu.bottom, D2D1::ColorF(0x202630));
-        inRenderer.DrawRectangle(menu.left, menu.top, menu.right, menu.bottom, brass);
-        inRenderer.DrawUiText(L"메뉴 · ESC", menu, textColor, 11, false, true);
+                const float x = (rect.left + rect.right) * 0.5f, y = (rect.top + rect.bottom) * 0.5f;
+                constexpr float RADIUS = HudLayout::ORB_SIZE / 2;
+                // The 96px frame has a 64px transparent aperture; at 92px reference display size,
+                // keep the fill just inside its 61.3px opening so its height ratio stays accurate.
+                constexpr float INNER_RADIUS = 30.0f;
+                if (!hudOrbFrame)
+                {
+                    inRenderer.FillEllipse(x, y, RADIUS - 1, RADIUS - 1, D2D1::ColorF(0x080706));
+                    inRenderer.FillEllipse(x, y, RADIUS - 3, RADIUS - 3, D2D1::ColorF(0x67583A));
+                    inRenderer.FillEllipse(x, y, RADIUS - 5, RADIUS - 5, D2D1::ColorF(0x17120D));
+                }
+                inRenderer.FillEllipse(x, y, INNER_RADIUS, INNER_RADIUS, D2D1::ColorF(0x030405));
+                if (gauge.known)
+                {
+                    inRenderer.PushAxisAlignedClip(D2D1::RectF(x - INNER_RADIUS, y + INNER_RADIUS - 2 * INNER_RADIUS * gauge.trailingRatio, x + INNER_RADIUS, y + INNER_RADIUS));
+                    inRenderer.FillEllipse(x, y, INNER_RADIUS, INNER_RADIUS, D2D1::ColorF(0x777B82));
+                    inRenderer.PopAxisAlignedClip();
+                    inRenderer.PushAxisAlignedClip(D2D1::RectF(x - INNER_RADIUS, y + INNER_RADIUS - 2 * INNER_RADIUS * gauge.Ratio(), x + INNER_RADIUS, y + INNER_RADIUS));
+                    inRenderer.FillEllipse(x, y, INNER_RADIUS, INNER_RADIUS, color);
+                    inRenderer.FillEllipse(x - 5, y - 6, 15, 14, D2D1::ColorF(1, 1, 1, 0.12f));
+                    inRenderer.PopAxisAlignedClip();
+                }
+                // Frame art overlays only the rim; current/trailing fill remains server-owned.
+                if (hudOrbFrame)
+                {
+                    const auto size = hudOrbFrame->GetSize();
+                    inRenderer.DrawBitmap(hudOrbFrame.Get(), D2D1::RectF(0,0,size.width,size.height), rect);
+                }
+                const auto value = gauge.known ? percent(gauge) : std::wstring(L"—");
+                const auto valueRect = D2D1::RectF(x - 30, y - 9, x + 30, y + 9);
+                auto shadow = valueRect; shadow.left += 1; shadow.top += 1; shadow.right += 1; shadow.bottom += 1;
+                inRenderer.DrawUiText(value, shadow, D2D1::ColorF(0x000000), 12, false, true);
+                inRenderer.DrawUiText(value, valueRect, textColor, 12, false, true);
+                if (ContainsPoint(rect, uiMouseX/scale, uiMouseY/scale))
+                {
+                    const auto tooltip = D2D1::RectF(x-106,rect.top-42,x+106,rect.top-6);
+                    const auto amount = gauge.known ? std::to_wstring(gauge.value) + L" / " + std::to_wstring(gauge.maximum)
+                        : std::wstring(L"미제공");
+                    inRenderer.FillRectangle(tooltip.left,tooltip.top,tooltip.right,tooltip.bottom,D2D1::ColorF(0x100D09));
+                    inRenderer.DrawRectangle(tooltip.left,tooltip.top,tooltip.right,tooltip.bottom,D2D1::ColorF(0x74603D));
+                    inRenderer.DrawUiText(std::wstring(label)+L"  "+amount,tooltip,textColor,12,false,true);
+                }
+            };
+            orb(hud.hp, inDungeon ? dungeonHp : townHp, L"HP", D2D1::ColorF(0xC5111B));
+            orb(hud.mp, inDungeon ? dungeonMp : townMp, L"MP", D2D1::ColorF(0x095FD1));
+            const auto& menu = hud.menu;
+            inRenderer.FillRectangle(menu.left, menu.top, menu.right, menu.bottom, D2D1::ColorF(0x17130D));
+            inRenderer.DrawRectangle(menu.left, menu.top, menu.right, menu.bottom, D2D1::ColorF(0x080604));
+            inRenderer.DrawRectangle(menu.left + 1, menu.top + 1, menu.right - 1, menu.bottom - 1, D2D1::ColorF(0x74603D));
+            inRenderer.DrawLine(menu.left + 2, menu.top + 2, menu.right - 2, menu.top + 2, D2D1::ColorF(0xAE9460));
+            inRenderer.DrawUiText(L"메뉴 ESC", menu, D2D1::ColorF(0xEACB7C), 12, false, true);
+        }
         if (dungeonCleared) inRenderer.DrawUiText(L"DUNGEON CLEAR", D2D1::RectF(width * 0.5f - 150, 148, width * 0.5f + 150, 182), brass, 22, false, true);
         else if (inDungeon && player.IsCombatDead()) inRenderer.DrawUiText(L"YOU ARE DOWN", D2D1::RectF(24, 148, 300, 182), D2D1::ColorF(0xBE2434), 20);
         if (rejectedActionSeconds > 0.0f)
@@ -1854,14 +1924,15 @@ namespace ActionRPG
             partyCreationPending = false;
             partyStatusText.clear();
         }
-        if (systemUiPage == SystemUiPage::ScreenSettings || page == SystemUiPage::ScreenSettings)
+        if (systemUiPage == SystemUiPage::GameOptions || page == SystemUiPage::GameOptions)
         {
             GameWindow::ResetInput();
             inventoryUi.Close();
         }
-        if (page == SystemUiPage::ScreenSettings)
+        if (page == SystemUiPage::GameOptions)
         {
             const auto settings = GameWindow::GetScreenSettings();
+            selectedOptionsRow = 0;
             screenWidthDraft = settings.width;
             fullscreenDraft = settings.fullscreen;
             screenApplyRequested = false;
@@ -2068,33 +2139,49 @@ namespace ActionRPG
         townClient.CreateParty(*title, newPartyIsPublic);
     }
 
-    void GameWorld::UpdateScreenSettings(const InputState& inInput)
+    void GameWorld::UpdateGameOptions(const InputState& inInput)
     {
         if (screenApplyRequested && !GameWindow::IsScreenSettingsPending())
         {
             const auto settings = GameWindow::GetScreenSettings();
             screenSettingsNotice = settings.width == screenWidthDraft && settings.fullscreen == fullscreenDraft
-                ? L"화면 설정이 적용되었습니다." : L"설정을 적용하지 못했습니다. 현재 설정을 확인해 주세요.";
+                ? L"화면 설정이 적용되었습니다." : L"화면 설정을 적용하지 못했습니다.";
             screenApplyRequested = false;
         }
         if (screenApplyRequested) return;
-        if (inInput.WasPressed(InputKey::MoveLeft)) screenWidthDraft = 1280;
-        if (inInput.WasPressed(InputKey::MoveRight)) screenWidthDraft = 1920;
-        if (inInput.WasPressed(InputKey::MoveUp)
-            && GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U)) fullscreenDraft = false;
-        if (inInput.WasPressed(InputKey::MoveDown)) fullscreenDraft = true;
+        if (inInput.WasPressed(InputKey::MoveUp)) selectedOptionsRow = (selectedOptionsRow + 4) % 5;
+        if (inInput.WasPressed(InputKey::MoveDown)) selectedOptionsRow = (selectedOptionsRow + 1) % 5;
+        const auto adjustVolume = [this](std::size_t index, float delta)
+        {
+            const auto channel = static_cast<AudioChannel>(index);
+            const float volume = std::round(std::clamp(audio.GetVolume(channel) + delta, 0.0f, 1.0f) * 20.0f) / 20.0f;
+            (void)audio.SetVolume(channel, volume);
+        };
+        const bool left = inInput.WasPressed(InputKey::MoveLeft), right = inInput.WasPressed(InputKey::MoveRight);
+        if (left || right)
+        {
+            screenSettingsNotice.clear();
+            if (selectedOptionsRow == 0) screenWidthDraft = right ? 1920U : 1280U;
+            else if (selectedOptionsRow == 1)
+            {
+                if (right || GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U))
+                    fullscreenDraft = right;
+            }
+            else adjustVolume(selectedOptionsRow - 2, right ? 0.05f : -0.05f);
+        }
         bool apply = inInput.WasPressed(InputKey::ConfirmSelection);
-        const auto panel = GetScreenSettingsPanel(camera.GetViewportWidth(), camera.GetViewportHeight());
+        const auto panel = GetGameOptionsPanel(camera.GetViewportWidth(), camera.GetViewportHeight());
         if (inInput.leftMousePressed)
         {
             for (std::size_t index = 0; index < 6; ++index)
             {
-                if (!ContainsPoint(GetScreenSettingsButton(panel, index), inInput.clickX, inInput.clickY)) continue;
+                if (!ContainsPoint(GetGameOptionsButton(panel, index), inInput.clickX, inInput.clickY)) continue;
                 uiClickConsumed = true;
                 screenSettingsNotice.clear();
-                if (index < 2) screenWidthDraft = index == 0 ? 1280 : 1920;
+                if (index < 2) { selectedOptionsRow = 0; screenWidthDraft = index == 0 ? 1280U : 1920U; }
                 else if (index < 4)
                 {
+                    selectedOptionsRow = 1;
                     if (index == 3 || GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U))
                         fullscreenDraft = index == 3;
                 }
@@ -2102,48 +2189,74 @@ namespace ActionRPG
                 else { SetSystemUiPage(SystemUiPage::Menu); return; }
                 break;
             }
+            for (std::size_t index = 0; index < 6; ++index)
+                if (ContainsPoint(GetVolumeButton(panel, index), inInput.clickX, inInput.clickY))
+                {
+                    uiClickConsumed = true;
+                    selectedOptionsRow = index / 2 + 2;
+                    adjustVolume(index / 2, index % 2 ? 0.05f : -0.05f);
+                    break;
+                }
         }
         if (apply)
         {
             const ScreenSettings settings{screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U, fullscreenDraft};
             screenApplyRequested = GameWindow::RequestScreenSettings(settings);
             screenSettingsNotice = screenApplyRequested ? L"화면 설정을 적용하고 있습니다."
-                : L"선택 해상도의 창이 작업 영역에 들어가지 않습니다. 전체화면을 선택해 주세요.";
+                : L"선택한 창 크기가 작업 영역보다 큽니다.";
         }
     }
 
-    void GameWorld::RenderScreenSettings(D2DRenderer& inRenderer) const
+    void GameWorld::RenderGameOptions(D2DRenderer& inRenderer) const
     {
         const float width = camera.GetViewportWidth(), height = camera.GetViewportHeight();
-        const auto panel = GetScreenSettingsPanel(width, height);
-        const auto text = D2D1::ColorF(0xE9E4D8), brass = D2D1::ColorF(0xA98948);
+        const auto panel = GetGameOptionsPanel(width, height);
+        const auto text = D2D1::ColorF(0xE9E4D8), brass = D2D1::ColorF(0xA98948), muted = D2D1::ColorF(0x707885);
         inRenderer.FillRectangle(0, 0, width, height, D2D1::ColorF(0.04f, 0.05f, 0.07f, 0.86f));
         inRenderer.FillRectangle(panel.left, panel.top, panel.right, panel.bottom, D2D1::ColorF(0x141922));
         inRenderer.DrawRectangle(panel.left, panel.top, panel.right, panel.bottom, brass, 2);
-        inRenderer.DrawUiText(L"화면 설정", D2D1::RectF(panel.left + 30, panel.top + 18, panel.right - 30, panel.top + 52), text, 24);
-        inRenderer.DrawUiText(L"해상도 · 좌우 방향키", D2D1::RectF(panel.left + 30, panel.top + 60, panel.right - 30, panel.top + 84), text, 16);
-        inRenderer.DrawUiText(L"화면 모드 · 위아래 방향키", D2D1::RectF(panel.left + 30, panel.top + 144, panel.right - 30, panel.top + 168), text, 16);
+        inRenderer.DrawUiText(L"게임 옵션", D2D1::RectF(panel.left + 20, panel.top + 12, panel.right - 20, panel.top + 38), text, 20);
+        inRenderer.DrawUiText(L"↑↓ 항목 · ←→ 값 · 볼륨 5% 단위 · Enter 화면 적용", D2D1::RectF(panel.left + 20, panel.top + 40, panel.right - 20, panel.top + 56), text, 11);
+        constexpr std::array<std::wstring_view, 5> ROW_LABELS{L"해상도", L"화면 모드", L"마스터 볼륨", L"효과음", L"배경음악"};
+        for (std::size_t row = 0; row < ROW_LABELS.size(); ++row)
+        {
+            const float top = panel.top + (row < 2 ? 62.0f + row * 36.0f : 150.0f + (row - 2) * 38.0f);
+            const auto label = D2D1::RectF(panel.left + 20, top, panel.left + 132, top + 28);
+            if (selectedOptionsRow == row) inRenderer.DrawRectangle(label.left, label.top, label.right, label.bottom, brass);
+            inRenderer.DrawUiText(ROW_LABELS[row], label, text, 14, false, true);
+        }
         const bool fits = GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U);
-        const bool canApply = (fullscreenDraft || fits) && !screenApplyRequested;
-        constexpr std::array<std::wstring_view, 6> LABELS{L"1280 × 720", L"1920 × 1080", L"창모드", L"전체화면", L"적용 · Enter", L"돌아가기 · ESC"};
+        constexpr std::array<std::wstring_view, 6> LABELS{L"1280 × 720", L"1920 × 1080", L"창모드", L"전체화면", L"화면 적용", L"돌아가기 · ESC"};
         for (std::size_t index = 0; index < LABELS.size(); ++index)
         {
-            const auto rect = GetScreenSettingsButton(panel, index);
+            const auto rect = GetGameOptionsButton(panel, index);
             const bool selected = index < 2 ? screenWidthDraft == (index == 0 ? 1280U : 1920U)
                 : index < 4 && fullscreenDraft == (index == 3);
-            const bool enabled = !screenApplyRequested && (index != 2 || fits) && (index != 4 || canApply);
+            const bool enabled = !screenApplyRequested && (index != 2 || fits) && (index != 4 || fullscreenDraft || fits);
             inRenderer.FillRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(enabled ? (selected ? 0x384657 : 0x242C38) : 0x1B2028));
-            inRenderer.DrawRectangle(rect.left, rect.top, rect.right, rect.bottom, selected ? brass : D2D1::ColorF(0x45515F), selected ? 2.0f : 1.0f);
-            inRenderer.DrawUiText(LABELS[index], rect, enabled ? text : D2D1::ColorF(0x707885), 18, false, true);
+            inRenderer.DrawRectangle(rect.left, rect.top, rect.right, rect.bottom, selected ? brass : D2D1::ColorF(0x45515F));
+            inRenderer.DrawUiText(LABELS[index], rect, enabled ? text : muted, 13, false, true);
         }
-        const auto notice = !fits && !fullscreenDraft
-            ? std::wstring(L"창 테두리까지 작업 영역에 들어가지 않습니다.\n전체화면을 선택해 주세요.")
-            : screenSettingsNotice.empty() ? std::wstring(L"전체화면은 모니터 비율에 따라 검은 여백을 표시합니다.") : screenSettingsNotice;
-        inRenderer.DrawUiText(notice, D2D1::RectF(panel.left + 30, panel.top + 240, panel.right - 30, panel.top + 302), text, 16, true);
+        for (std::size_t index = 0; index < 6; ++index)
+        {
+            const auto rect = GetVolumeButton(panel, index);
+            inRenderer.FillRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(0x242C38));
+            inRenderer.DrawRectangle(rect.left, rect.top, rect.right, rect.bottom, D2D1::ColorF(0x45515F));
+            inRenderer.DrawUiText(index % 2 ? L"+" : L"−", rect, audio.IsAvailable() ? text : muted, 16, false, true);
+            if (index % 2 == 0)
+            {
+                const auto volume = std::to_wstring(static_cast<int>(std::lround(audio.GetVolume(static_cast<AudioChannel>(index / 2)) * 100))) + L"%";
+                inRenderer.DrawUiText(volume, D2D1::RectF(rect.right + 10, rect.top, rect.right + 78, rect.bottom), text, 14, false, true);
+            }
+        }
         const auto current = GameWindow::GetScreenSettings();
         const auto currentText = L"현재: " + std::to_wstring(current.width) + L" × " + std::to_wstring(current.height)
             + (current.fullscreen ? L" · 전체화면" : L" · 창모드");
-        inRenderer.DrawUiText(currentText, D2D1::RectF(panel.left + 30, panel.top + 365, panel.right - 30, panel.bottom - 10), text, 14, false, true);
+        inRenderer.DrawUiText(screenSettingsNotice.empty() ? currentText : screenSettingsNotice,
+            D2D1::RectF(panel.left + 20, panel.top + 262, panel.right - 20, panel.top + 280), text, 11);
+        const auto audioNotice = !audio.GetNotice().empty() ? audio.GetNotice()
+            : !audio.HasSounds() ? std::wstring_view(L"음원이 아직 등록되지 않았습니다.") : std::wstring_view(L"볼륨 변경은 바로 적용됩니다.");
+        inRenderer.DrawUiText(audioNotice, D2D1::RectF(panel.left + 20, panel.top + 282, panel.right - 20, panel.top + 300), text, 11);
     }
 
     void GameWorld::UpdateSystemInterface(const InputState& inInput)
@@ -2173,9 +2286,9 @@ namespace ActionRPG
             return;
         }
 
-        if (systemUiPage == SystemUiPage::ScreenSettings)
+        if (systemUiPage == SystemUiPage::GameOptions)
         {
-            UpdateScreenSettings(inInput);
+            UpdateGameOptions(inInput);
             return;
         }
 
@@ -2254,7 +2367,7 @@ namespace ActionRPG
             SetSystemUiPage(action==SystemMenuAction::Party ? SystemUiPage::Party
                 : action==SystemMenuAction::Skills ? SystemUiPage::Skills
                 : action==SystemMenuAction::Inventory ? SystemUiPage::Inventory
-                : action==SystemMenuAction::ScreenSettings ? SystemUiPage::ScreenSettings:SystemUiPage::ExitConfirmation);
+                : action==SystemMenuAction::GameOptions ? SystemUiPage::GameOptions:SystemUiPage::ExitConfirmation);
             uiClickConsumed = true;
             return;
         }
@@ -2731,9 +2844,9 @@ namespace ActionRPG
 
     void GameWorld::RenderSystemInterface(D2DRenderer& inRenderer) const
     {
-        if (systemUiPage == SystemUiPage::ScreenSettings)
+        if (systemUiPage == SystemUiPage::GameOptions)
         {
-            RenderScreenSettings(inRenderer);
+            RenderGameOptions(inRenderer);
             return;
         }
         if (systemUiPage==SystemUiPage::Skills)
@@ -2797,7 +2910,7 @@ namespace ActionRPG
                     else inRenderer.DrawBitmap(systemMenuEntries[index].icon.Get(),
                         D2D1::RectF(0.0f,0.0f,bitmapSize.width,bitmapSize.height),destination);
                 }
-                if (systemMenuEntries[index].action == SystemMenuAction::ScreenSettings)
+                if (systemMenuEntries[index].action == SystemMenuAction::GameOptions)
                 {
                     const float x = (tile.left + tile.right) * 0.5f, y = tile.top + 64.0f;
                     inRenderer.DrawRectangle(x - 45, y - 25, x + 45, y + 25, D2D1::ColorF(0xC7AC74), 3);

@@ -163,9 +163,9 @@ namespace ActionRPG
         if (inState.slideActive)
         {
             const float age = std::clamp(GetSlidePresentationSeconds() - inState.slideSeconds, 0.0f,
-                std::min(0.1f, std::max(0.0f, inState.slideDurationSeconds - inState.slideSeconds)));
-            target.x += inState.slideDirectionX * inState.slideSpeed * age;
-            target.y += inState.slideDirectionY * inState.slideSpeed * age;
+                std::min(0.1f * GetCombatTempoScale(), std::max(0.0f, inState.slideDurationSeconds - inState.slideSeconds)));
+            target.x += (inState.facingLeft ? -1.0f : 1.0f) * inState.slideSpeed * age;
+            // Keep the authoritative depth; slide extrapolation never adds field-depth movement.
             target = inMap.ConstrainGroundMovement(inState.position, target, HORIZONTAL_RADIUS, DEPTH_RADIUS);
         }
         ReconcileGroundPosition(target);

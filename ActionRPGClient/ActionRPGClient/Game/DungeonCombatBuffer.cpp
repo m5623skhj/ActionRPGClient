@@ -24,7 +24,7 @@ namespace ActionRPG
             const float dx = inB.position.x - inA.position.x, dy = inB.position.y - inA.position.y;
             return inA.hp != 0 && inB.hp != 0 && dx * dx + dy * dy < TELEPORT_DISTANCE * TELEPORT_DISTANCE;
         }
-        bool ContinuousPlayer(const CombatPlayerState& inA, const CombatPlayerState& inB, const float inSeconds)
+        bool ContinuousPlayer(const CombatPlayerState& inA, const CombatPlayerState& inB, const float inSeconds, const float inTempoScale)
         {
             if (Continuous(inA, inB)) return true;
             if (inA.hp == 0 || inB.hp == 0 || inA.slideSequence == 0 || inA.slideSequence != inB.slideSequence
@@ -32,7 +32,7 @@ namespace ActionRPG
             // A fast slide may exceed the ordinary teleport threshold within one valid snapshot interval.
             const float duration = std::max(inA.slideDurationSeconds, inB.slideDurationSeconds);
             const float limit = std::max(TELEPORT_DISTANCE,
-                std::max(inA.slideSpeed, inB.slideSpeed) * std::min(inSeconds, duration) + 16.0f);
+                std::max(inA.slideSpeed, inB.slideSpeed) * std::min(inSeconds * inTempoScale, duration) + 16.0f);
             const float dx = inB.position.x - inA.position.x, dy = inB.position.y - inA.position.y;
             return dx * dx + dy * dy <= limit * limit;
         }
@@ -122,7 +122,7 @@ namespace ActionRPG
 
     // Interpolate matching living actors only. Latest complete membership/HP is authoritative.
     // Beyond the last sample, at most 100ms of measured velocity is used; >500ms stalls hold the last pose.
-    std::optional<DungeonCombatSnapshot> DungeonCombatBuffer::Sample()
+    std::optional<DungeonCombatSnapshot> DungeonCombatBuffer::Sample(const CombatRules& inRules)
     {
         if (frames.empty()) return std::nullopt;
         const bool stalled = std::chrono::steady_clock::now() - lastArrival > std::chrono::milliseconds(500);
@@ -158,7 +158,7 @@ namespace ActionRPG
         {
             const auto pa = Find(a->players, [&player](const auto& value) { return value.playerId == player.playerId; });
             const auto pb = Find(b->players, [&player](const auto& value) { return value.playerId == player.playerId; });
-            if (!pa || !pb || !ContinuousPlayer(*pa, *pb, static_cast<float>(span / 1000.0)) || player.hp == 0) continue;
+            if (!pa || !pb || !ContinuousPlayer(*pa, *pb, static_cast<float>(span / 1000.0), inRules.tempoScale) || player.hp == 0) continue;
             const auto authoritative = player;
             const auto hp = player.hp, maxHp = player.maxHp;
             player = useB ? *pb : *pa;
@@ -166,7 +166,7 @@ namespace ActionRPG
             auto playerTimeline = player;
             RetainedStop(playerTimeline, *pb, authoritative, static_cast<double>(b->serverTimeMs));
             const float actionAge = FrameActiveSeconds(playerTimeline, *pa,
-                static_cast<double>(useB ? b->serverTimeMs : a->serverTimeMs), target);
+                static_cast<double>(useB ? b->serverTimeMs : a->serverTimeMs), target) * inRules.tempoScale;
             float playerRatio = ActiveRatio(playerTimeline, *pa,
                 static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs), poseTime);
             if (playerRatio > 1.0f && (pa->slideActive || pb->slideActive))
@@ -175,11 +175,12 @@ namespace ActionRPG
                 playerRatio = !pb->slideActive || span <= 0.0 ? 1.0f
                     : std::min(playerRatio, 1.0f + std::max(0.0f, pb->slideDurationSeconds - pb->slideSeconds)
                         / std::max(0.000001f, FrameActiveSeconds(playerTimeline, *pa,
-                            static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs))));
+                            static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs)) * inRules.tempoScale));
             }
             Pose(player, *pa, *pb, playerRatio, FrameActiveSeconds(playerTimeline, *pa,
                 static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs)));
-            Advance(player, age); player.shotSeconds += actionAge; player.jumpSeconds += actionAge;
+            // Pose ratios/measured velocity use real time; only action clocks advance in combat time.
+            Advance(player, actionAge); player.shotSeconds += actionAge; player.jumpSeconds += actionAge;
             player.presentationTimeMs = target;
             if (player.slideActive)
             {
@@ -213,12 +214,12 @@ namespace ActionRPG
             auto monsterTimeline = monster;
             RetainedStop(monsterTimeline, *mb, authoritative, static_cast<double>(b->serverTimeMs));
             const float actionAge = FrameActiveSeconds(monsterTimeline, *ma,
-                static_cast<double>(useB ? b->serverTimeMs : a->serverTimeMs), target);
+                static_cast<double>(useB ? b->serverTimeMs : a->serverTimeMs), target) * inRules.tempoScale;
             const float monsterRatio = ActiveRatio(monsterTimeline, *ma,
                 static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs), poseTime);
             Pose(monster, *ma, *mb, monsterRatio, FrameActiveSeconds(monsterTimeline, *ma,
                 static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs)));
-            Advance(monster, age); monster.actionSeconds += actionAge;
+            Advance(monster, actionAge); monster.actionSeconds += actionAge;
             monster.presentationTimeMs = target;
             if (IsCombatHitstopped(monster, target)) monster.presentationMoving = false;
             monster.hp = hp; monster.maxHp = maxHp;

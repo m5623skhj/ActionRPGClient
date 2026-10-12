@@ -8,6 +8,7 @@
 #include "Network/DungeonClient.h"
 #include "Network/TownClient.h"
 #include "Platform/GameWindow.h"
+#include "Platform/AudioMixer.h"
 #include "Resources/AssetCatalog.h"
 
 #include <Windows.h>
@@ -33,6 +34,7 @@ namespace ActionRPG
         GraphicsDevice graphicsDevice;
         D2DRenderer renderer;
         AssetCatalog assetCatalog;
+        AudioMixer audio;
         TownClient townClient;
         DungeonClient dungeonClient;
         LoginFlow loginFlow;

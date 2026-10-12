@@ -14,7 +14,7 @@ namespace ActionRPG
     {
     public:
         Game(float inViewportWidth, float inViewportHeight, const AssetCatalog& inAssetCatalog,
-            D2DRenderer& inRenderer, TownClient& inTownClient, DungeonClient& inDungeonClient);
+            D2DRenderer& inRenderer, TownClient& inTownClient, DungeonClient& inDungeonClient, AudioMixer& inAudio);
 
         void Update(float inDeltaSeconds, const InputState& inInput);
         void Render(D2DRenderer& inRenderer) const;

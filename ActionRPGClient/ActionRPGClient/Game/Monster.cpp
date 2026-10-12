@@ -449,7 +449,7 @@ namespace ActionRPG
         if (!std::isfinite(inDeltaSeconds) || inDeltaSeconds < 0.0f)
             throw std::runtime_error("Invalid monster update interval.");
         auto& clip = clips.at(motion);
-        float activeDelta = inDeltaSeconds;
+        float activeWallDelta = inDeltaSeconds;
         if (serverState)
         {
             const double previousTime = serverState->presentationTimeMs + (bufferedPresentation
@@ -457,14 +457,15 @@ namespace ActionRPG
             if (!bufferedPresentation) serverWallSeconds += inDeltaSeconds;
             const double currentTime = serverState->presentationTimeMs
                 + (bufferedPresentation ? 0.0 : serverWallSeconds * 1000.0);
-            activeDelta = bufferedPresentation && IsCombatHitstopped(*serverState, currentTime) ? 0.0f
+            activeWallDelta = bufferedPresentation && IsCombatHitstopped(*serverState, currentTime) ? 0.0f
                 : CombatActiveSeconds(*serverState, previousTime, currentTime);
         }
+        const float activeDelta = activeWallDelta * (serverState ? serverRules.tempoScale : 1.0f);
         if (serverState && !bufferedPresentation)
         {
             serverPresentationSeconds = std::min(0.25f, CombatActiveSeconds(*serverState, serverState->presentationTimeMs,
-                serverState->presentationTimeMs + serverWallSeconds * 1000.0));
-            const float blend = 1.0f - std::exp(-12.0f * activeDelta);
+                serverState->presentationTimeMs + serverWallSeconds * 1000.0)) * serverRules.tempoScale;
+            const float blend = 1.0f - std::exp(-12.0f * activeWallDelta);
             auto position = GetGroundPosition();
             position.x += (serverState->position.x - position.x) * blend;
             position.y += (serverState->position.y - position.y) * blend;

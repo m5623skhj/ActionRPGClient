@@ -42,6 +42,7 @@
     <ClCompile Include="Network\TownClient.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Network\TownProtocol.cpp"><Filter>Network</Filter></ClCompile>
     <ClCompile Include="Platform\GameWindow.cpp"><Filter>Platform</Filter></ClCompile>
+    <ClCompile Include="Platform\AudioMixer.cpp"><Filter>Platform</Filter></ClCompile>
     <ClCompile Include="Resources\AssetCatalog.cpp"><Filter>Resources</Filter></ClCompile>
     <ClCompile Include="Resources\SpriteAnimation.cpp"><Filter>Resources</Filter></ClCompile>
   </ItemGroup>
@@ -60,6 +61,9 @@
     <ClInclude Include="Game\Monster.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\DungeonCombatBuffer.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\DungeonWorld.h"><Filter>Game</Filter></ClInclude>
+    <ClInclude Include="Game\HudLayout.h">
+      <Filter>Game</Filter>
+    </ClInclude>
     <ClInclude Include="Game\GameWorld.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\InputCommandQueue.h"><Filter>Game</Filter></ClInclude>
     <ClInclude Include="Game\MapBackground.h"><Filter>Game</Filter></ClInclude>
@@ -80,6 +84,7 @@
     <ClInclude Include="Network\TownClient.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Network\TownProtocol.h"><Filter>Network</Filter></ClInclude>
     <ClInclude Include="Platform\GameWindow.h"><Filter>Platform</Filter></ClInclude>
+    <ClInclude Include="Platform\AudioMixer.h"><Filter>Platform</Filter></ClInclude>
     <ClInclude Include="Resources\AssetCatalog.h"><Filter>Resources</Filter></ClInclude>
     <ClInclude Include="Resources\SpriteAnimation.h"><Filter>Resources</Filter></ClInclude>
   </ItemGroup>

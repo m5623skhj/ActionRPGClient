@@ -100,6 +100,7 @@ namespace ActionRPG
         {
             if (message.message == WM_QUIT)
             {
+                OutputDebugStringA("ActionRPGClient: WM_QUIT received\n");
                 return false;
             }
 
@@ -228,8 +229,11 @@ namespace ActionRPG
         RECT oldRect{};
         if (!GetWindowRect(windowHandle, &oldRect)) return false;
         applyingPresentation = true;
+        // Replace decoration bits without hiding an already visible window.
+        const LONG_PTR style = (screenSettings.fullscreen ? FULLSCREEN_STYLE : WINDOWED_STYLE)
+            | (oldStyle & (WS_VISIBLE | WS_DISABLED));
         SetLastError(ERROR_SUCCESS);
-        if (SetWindowLongPtrW(windowHandle, GWL_STYLE, screenSettings.fullscreen ? FULLSCREEN_STYLE : WINDOWED_STYLE) == 0
+        if (SetWindowLongPtrW(windowHandle, GWL_STYLE, style) == 0
             && GetLastError() != ERROR_SUCCESS)
         {
             applyingPresentation = false;
@@ -389,15 +393,27 @@ namespace ActionRPG
             else if (!applyingPresentation && !IsIconic(windowHandle) && screenSettings.fullscreen)
             {
                 RECT proposed{};
-                GetWindowRect(windowHandle, &proposed);
+                if (!GetWindowRect(windowHandle, &proposed)) return 0;
                 if (!(position->flags & SWP_NOMOVE))
                 {
                     OffsetRect(&proposed, position->x - proposed.left, position->y - proposed.top);
                 }
-                requestedMonitor = MonitorFromRect(&proposed, MONITOR_DEFAULTTONEAREST);
-                requestedSettings = screenSettings;
-                presentationPending = true;
-                ClearInput();
+                if (!(position->flags & SWP_NOSIZE))
+                {
+                    proposed.right = proposed.left + position->cx;
+                    proposed.bottom = proposed.top + position->cy;
+                }
+                MONITORINFO monitor{sizeof(MONITORINFO)};
+                const auto targetMonitor = MonitorFromRect(&proposed, MONITOR_DEFAULTTONEAREST);
+                // Activation/z-order notifications often keep the same fullscreen rectangle.
+                // Reapplying those requests causes another resize and may repeat during Present.
+                if (GetMonitorInfoW(targetMonitor, &monitor) && !EqualRect(&proposed, &monitor.rcMonitor))
+                {
+                    requestedMonitor = targetMonitor;
+                    if (!presentationPending) requestedSettings = screenSettings;
+                    presentationPending = true;
+                    ClearInput();
+                }
             }
             return 0;
         }
@@ -424,9 +440,14 @@ namespace ActionRPG
             isMinimized = inWParam == SIZE_MINIMIZED || LOWORD(inLParam) == 0 || HIWORD(inLParam) == 0;
             if (!isMinimized)
             {
-                clientWidth = static_cast<std::uint32_t>(LOWORD(inLParam));
-                clientHeight = static_cast<std::uint32_t>(HIWORD(inLParam));
-                resizePending = true;
+                const auto width = static_cast<std::uint32_t>(LOWORD(inLParam));
+                const auto height = static_cast<std::uint32_t>(HIWORD(inLParam));
+                if (clientWidth != width || clientHeight != height)
+                {
+                    clientWidth = width;
+                    clientHeight = height;
+                    resizePending = true;
+                }
             }
             else ClearInput();
             return 0;
@@ -510,10 +531,12 @@ namespace ActionRPG
             return 0;
 
         case WM_CLOSE:
+            OutputDebugStringA("ActionRPGClient: WM_CLOSE received\n");
             DestroyWindow(windowHandle);
             return 0;
 
         case WM_DESTROY:
+            OutputDebugStringA("ActionRPGClient: window destroyed\n");
             PostQuitMessage(0);
             return 0;
 
@@ -565,10 +588,18 @@ namespace ActionRPG
         case 'F': pendingPressedKeys.push_back(InputKey::SkillF); break;
         case 'G': pendingPressedKeys.push_back(InputKey::SkillG); break;
         case 'H': pendingPressedKeys.push_back(InputKey::SkillH); break;
+        case 'Q': pendingPressedKeys.push_back(InputKey::SkillQ); break;
+        case 'W': pendingPressedKeys.push_back(InputKey::SkillW); break;
+        case 'E': pendingPressedKeys.push_back(InputKey::SkillE); break;
+        case 'R': pendingPressedKeys.push_back(InputKey::SkillR); break;
+        case 'T': pendingPressedKeys.push_back(InputKey::SkillT); break;
+        case 'Y': pendingPressedKeys.push_back(InputKey::SkillY); break;
         case '1': pendingPressedKeys.push_back(InputKey::Item1); break;
         case '2': pendingPressedKeys.push_back(InputKey::Item2); break;
         case '3': pendingPressedKeys.push_back(InputKey::Item3); break;
         case '4': pendingPressedKeys.push_back(InputKey::Item4); break;
+        case '5': pendingPressedKeys.push_back(InputKey::Item5); break;
+        case '6': pendingPressedKeys.push_back(InputKey::Item6); break;
         case VK_RETURN:
             pendingPressedKeys.push_back(InputKey::ConfirmSelection);
             break;

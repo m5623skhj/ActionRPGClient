@@ -13,6 +13,9 @@ namespace ActionRPG
     enum class CombatJumpPhase { Grounded, Prepare, Airborne };
     struct CombatRules
     {
+        static constexpr double MIN_TEMPO_SCALE = 0.1;
+        // Neutral default for legacy worlds. Durations/speeds remain combat-time units.
+        float tempoScale{1.0f};
         float walkSpeed{}, runSpeed{}, shotPrepareSeconds{}, shotIntervalSeconds{}, shotRecoverSeconds{};
         float jumpSpeed{}, gravity{}, jumpPrepareSeconds{}, hitStunSeconds{}, downSeconds{}, riseSeconds{};
         float projectileSpeed{}, muzzleHeight{}, airFireLift{}, airRecoilDistance{}, shotHitstopSeconds{};
@@ -36,7 +39,7 @@ namespace ActionRPG
         float presentationSpeed{};
         CombatReaction reaction{ CombatReaction::None };
     };
-    // Count actor time outside the retained authoritative attacker-only stop interval.
+    // Return real seconds outside the wall-clock attacker-only stop interval; callers convert action time once.
     [[nodiscard]] float CombatActiveSeconds(const CombatActorState& inActor, double inStartMs, double inEndMs);
     [[nodiscard]] bool IsCombatHitstopped(const CombatActorState& inActor, double inTimeMs);
     struct CombatBuffState { std::string skillId; float remainingSeconds{}; };

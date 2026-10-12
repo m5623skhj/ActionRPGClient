@@ -13,7 +13,7 @@ namespace ActionRPG
         void Clear();
         void Push(const DungeonCombatSnapshot& inSnapshot);
         [[nodiscard]] bool HasFreshRealtime() const;
-        [[nodiscard]] std::optional<DungeonCombatSnapshot> Sample();
+        [[nodiscard]] std::optional<DungeonCombatSnapshot> Sample(const CombatRules& inRules);
     private:
         std::deque<DungeonCombatSnapshot> frames;
         std::optional<DungeonCombatSnapshot> lastPresentation;
