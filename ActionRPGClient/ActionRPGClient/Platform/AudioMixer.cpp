@@ -1,3 +1,4 @@
+#include "Platform/ShutdownTrace.h"
 #include "Platform/AudioMixer.h"
 
 #include <Windows.h>
@@ -117,11 +118,14 @@ namespace ActionRPG
         }
         ~Impl()
         {
+            TraceShutdown("ActionRPGClient: stopping audio engine\n");
             effects.clear(); music.reset(); effect.reset();
             if (engine) engine->StopEngine();
             if (effectsBus) effectsBus->DestroyVoice();
             if (musicBus) musicBus->DestroyVoice();
             if (mastering) mastering->DestroyVoice();
+            engine.Reset();
+            TraceShutdown("ActionRPGClient: audio engine stopped\n");
         }
         std::unique_ptr<Playback> Start(std::shared_ptr<WaveData> inData, bool inLoop)
         {

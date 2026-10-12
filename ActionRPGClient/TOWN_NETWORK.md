@@ -227,3 +227,27 @@ LoginFlow가 연결 ready를 확인한 후 Game이 입장 응답 이벤트를 �
 별도 실행 확인에는 로그인/거절/503/ready=false, 단계별 취소·역순 완료·만료·TLS 거절, 로그아웃 실패, 마을/던전에서 계정·타운 전환, 대기 중 창 닫기, 파티 동시 요청과 스킬 응답 지연이 포함됩니다. 실제 주소·CA·Google 등록 및 서버·DB 배포 상태는 운영 설정과 담당 문서에서 확인합니다.
 
 코드 근거: [LoginFlow](ActionRPGClient/App/LoginFlow.cpp), [AuthClient](ActionRPGClient/Network/AuthClient.cpp), [AuthHttps](ActionRPGClient/Network/AuthHttps.cpp), [AuthSettings](ActionRPGClient/Network/AuthSettings.cpp), [TownClient](ActionRPGClient/Network/TownClient.cpp), [TownProtocol](ActionRPGClient/Network/TownProtocol.cpp), [TownEvent](ActionRPGClient/Network/TownClient.h), [GameWorld](ActionRPGClient/Game/GameWorld.cpp).
+
+## 채팅 (2026-10-12 추가 계약)
+
+Town TLS의 기존 4바이트 body length 및 big-endian 필드 인코딩을 사용합니다. 원본은 서버 `Tool/TownPacketDefine.yml`이며 클라이언트 `TownPacket.generated.h`는 같은 생성기로 갱신합니다. 기존 ID 1~48은 유지합니다.
+
+| ID | 패킷 | 필드 순서 |
+|---|---|---|
+| 49 | ChatRequest | sequence u32, channel u8, message UTF-8 string |
+| 50 | ChatResult | sequence u32, result u8, actual channel u8, messageId u64, retryAfterMs u32 |
+| 51 | ChatMessage | messageId u64, requestSequence u32, actual channel u8, senderPlayerId u64, senderCharacterId u64, senderName string, message string |
+
+문자열은 u16 UTF-8 바이트 길이 접두사입니다. General=1, Party=2. 결과는 Succeeded=0 / InvalidChannel=1 / InvalidMessage=2 / RateLimited=3 / NotInParty=4 / NotEntered=5 / StaleSequence=6 / SequenceConflict=7 / Unavailable=8입니다. 서버의 수신 계약은 200 Unicode code points·UTF-8 800바이트이며 서버가 빈 문장, 제어·개행·bidi 문자 및 전송 빈도(초당 2회, burst 5)를 검증합니다. 클라이언트 실제 입력 한도는 50 Unicode code points·UTF-8 200바이트로 더 엄격하게 제한합니다. 한도 도달 시 별도 안내를 출력하지 않고 추가 입력만 버립니다. 입력줄의 IME 조합 미리보기도 같은 한도를 적용합니다. 서버 계약 원본과 수신 코덱은 변경하지 않으므로 이전 클라이언트의 긴 메시지를 받아도 기록 내용은 유지합니다.
+
+마을 일반은 현재 같은 맵의 근방 3×3 섹터, 파티는 장소 무관 현재 파티원입니다. 던전 및 입장 전환 중 일반 요청은 서버가 Party로 확정합니다. 클라이언트도 실제 입력 채널을 파티로 표시하며 파티가 없으면 전송을 막고 안내합니다. 일반 탭의 과거 기록 열람은 가능하며 일반 탭에서 보낸 본인 메시지가 Party로 승인되면 파티 탭으로 이동합니다. 다른 채널로 대체 전송하지 않습니다.
+
+요청 순번은 Town 연결별로 1부터 증가하고 새 연결에서 초기화합니다. 성공 ACK는 별도 본문 표시를 만들지 않습니다. 본인도 서버 ChatMessage로만 한 번 표시합니다. 수신 이벤트는 기존 attempt로 태그된 TCP 큐를 거쳐 게임 스레드에서 적용합니다. messageId는 현재 Town 수명의 단조 순번이며 번호 누락은 채널/AOI 수신 범위에 따른 정상 상태입니다. 이미 적용한 ID와 그 이전 ID는 보관에서 제거된 뒤에도 재표시하지 않습니다. 새 Game/연결에서는 기록·중복 기준을 새로 만들며 서버 재시작 순번을 이어 쓰지 않습니다. 전송 대기 결과는 최대 8건·5초, 자동 재전송은 하지 않습니다. 실패·연결 종료·응답 만료는 입력줄에 안내합니다.
+
+UI는 공통 200건 deque에서 전체/일반/파티로 필터링합니다. 기본 400×180, 기록 14px, 탭 24px, 입력줄 28px이며 1920에서 공통 배율 1.5를 적용합니다. 평소 글씨만, hover/입력/드래그 중에는 반투명 배경입니다. 일반은 흰색, 파티는 하늘색이며 기록·입력 채널·작성 본문·말풍선에 같은 의미 색상을 적용합니다. 전송 실패/제한 안내는 금색, 조작 도움말과 전체 탭은 회색입니다. 얇은 검은 글자 외곽선과 선택 탭 밑줄로 밝은 맵에서도 구분합니다. 우측 스크롤바·휠, 빈 배경/상단 드래그로 이동, 하단 4px 핸들로 높이를 조절합니다. 높이 120~360 및 화면/HUD 상한을 적용하고 과거 기록을 읽는 동안 새 메시지는 읽던 행을 유지합니다.
+
+Enter로 입력·전송, Esc로 취소합니다. 채팅 입력 중 Tab은 일반 → 파티 → 일반 순환이며 선택 기록 탭도 해당 채널로 전환합니다. 작성 중인 본문·IME 조합은 유지하고 길게 누를 때 자동 반복으로 채널이 바뀌지 않습니다. 전체 탭은 마우스로 선택하는 기록 필터입니다. 던전에서는 Tab으로 일반 기록을 열어도 입력 채널 표시와 실제 전송은 파티로 유지합니다. 조합 중 Esc는 조합부터 취소합니다. 일반 한글 입력에서는 Enter 한 번으로 IME 조합을 확정한 뒤 전송합니다. 후보 선택 창이 열렸을 때의 Enter는 IME 후보 선택만 처리하고 전송하지 않습니다. 전송 요청은 Win32 메시지 처리가 끝나고 확정 문자열 이벤트가 큐에 들어온 뒤 추가하며, 확정 실패·새 키 입력·포커스 취소는 보류한 전송을 취소합니다. IME 조합 결과와 새로운 preedit가 함께 도착하면 둘을 별도로 유지하며 WM_CHAR의 CR은 중복 전송을 만들지 않습니다. IME 조합/확정 결과를 별도로 받고 UTF-16 surrogate pair와 UTF-8 바이트 제한을 확인합니다. 채팅 입력 동안 이동·공격·스킬·아이템·커맨드 키는 차단하며 메뉴/로그인/슬롯 드래그가 우선합니다. 입력줄 바깥 클릭은 입력을 취소하고 기존 UI로 전달합니다. 캡처된 채팅 포인터 이벤트는 퀵슬롯으로 다시 전달하지 않습니다.
+
+현재 화면에 보이는 발신 캐릭터에만 4초 말풍선을 붙입니다. 말풍선은 12px, 최대 본문 폭 220px·측정 기준 3줄, 어두운 배경/밝은 얇은 테두리입니다. 넘치는 본문은 surrogate pair를 유지해 줄이고 말줄임표로 표시하며 전체 내용은 기록에서 볼 수 있습니다. 머리 위 위치는 발에서 고정 100px 또는 더 큰 달리기 시트의 최대 높이 대신 각 캐릭터의 대기 스프라이트 renderHeight/anchor 또는 frame pivot/scale로 계산하고 점프 높이·카메라를 적용합니다. 머리 위 10px 간격을 두며 화면 위쪽에 공간이 없으면 캐릭터 위에 겹쳐 내리지 않고 말풍선을 숨깁니다. 다른 장소나 화면 밖 발신자는 기록만 표시합니다. 방/맵 이동과 연결 종료에서는 말풍선을 비우며 기록은 같은 Game 세션 동안 유지합니다. 채팅과 말풍선은 월드 위, 기존 메뉴/인벤토리/스킬 창 아래에 렌더링합니다. 채팅 시간은 실제 시간이며 던전 0.7 전투 템포를 적용하지 않습니다.
+
+이번 검증은 생성 선언·코덱 필드 순서·스레드 소유·입력/배율/렌더 경로의 정적 검토입니다. 빌드·실행·IME 실기·시각 캡처·두 클라이언트 AOI/파티 전송 테스트는 수행하지 않았습니다.

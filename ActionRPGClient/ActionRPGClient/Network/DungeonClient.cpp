@@ -1,3 +1,4 @@
+#include "Platform/ShutdownTrace.h"
 #include "Network/DungeonClient.h"
 
 #include "Network/DungeonProtocol.h"
@@ -212,8 +213,10 @@ namespace ActionRPG
 
     void DungeonClient::Stop()
     {
+        TraceShutdown("ActionRPGClient: waiting for dungeon shutdown\n");
         if (stopTask.valid()) stopTask.get();
         impl->StopClient();
+        TraceShutdown("ActionRPGClient: dungeon shutdown completed\n");
         ResetRealtime();
         worldJson.clear(); worldBytes = 0; receivingWorld = false;
         combatJson.clear(); combatSnapshotId = combatBytes = combatOffset = 0;

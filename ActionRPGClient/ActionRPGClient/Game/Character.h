@@ -87,6 +87,7 @@ namespace ActionRPG
 
         [[nodiscard]] Vector2 GetGroundPosition() const { return groundPosition; }
         [[nodiscard]] float GetHeight() const { return height; }
+        [[nodiscard]] float GetChatHeadHeight() const;
         [[nodiscard]] virtual bool IsHitReacting() const
         {
             return combatState ? combatState->reaction != CombatReaction::None : hitPhase != HitPhase::None;

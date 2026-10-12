@@ -1,3 +1,4 @@
+#include "Platform/ShutdownTrace.h"
 #include "App/Application.h"
 
 #include <Windows.h>
@@ -43,6 +44,7 @@ int WINAPI wWinMain(HINSTANCE inInstance, HINSTANCE, PWSTR, int)
     {
         ActionRPG::Application application(inInstance);
         exitCode = application.Run();
+        ActionRPG::TraceShutdown("ActionRPGClient: releasing application resources\n");
     }
     catch (const std::exception& exception)
     {
@@ -51,10 +53,13 @@ int WINAPI wWinMain(HINSTANCE inInstance, HINSTANCE, PWSTR, int)
         exitCode = 1;
     }
 
+    ActionRPG::TraceShutdown("ActionRPGClient: application resources released\n");
     if (shouldUninitializeCom)
     {
+        ActionRPG::TraceShutdown("ActionRPGClient: uninitializing main-thread COM\n");
         CoUninitialize();
     }
 
+    ActionRPG::TraceShutdown("ActionRPGClient: returning from wWinMain\n");
     return exitCode;
 }

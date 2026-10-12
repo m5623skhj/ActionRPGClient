@@ -1,5 +1,6 @@
 #include "Network/TownProtocol.h"
 
+#include <Windows.h>
 #include <algorithm>
 #include <bit>
 #include <cstddef>
@@ -356,6 +357,44 @@ namespace
 
 namespace TownProtocol
 {
+    std::vector<std::uint8_t> Encode(const ChatRequest& inPacket)
+    {
+        if(inPacket.sequence==0 || inPacket.message.empty() || inPacket.message.size()>MAX_CHAT_UTF8_BYTES)
+            throw std::length_error("Invalid chat request size or sequence.");
+        PacketWriter writer(PacketType::ChatRequest);
+        writer.WriteUInt32(inPacket.sequence);writer.WriteUInt8(static_cast<std::uint8_t>(inPacket.channel));
+        writer.WriteString(inPacket.message);return writer.Finish();
+    }
+    std::optional<ChatResult> DecodeChatResult(const std::vector<std::uint8_t>& inPacket)
+    {
+        PacketReader reader(inPacket);ChatResult packet;std::uint8_t result{},channel{};
+        if(!ReadExpectedType(reader,PacketType::ChatResult) || !reader.ReadUInt32(packet.sequence) || packet.sequence==0
+            || !reader.ReadUInt8(result) || result>static_cast<std::uint8_t>(ChatResultCode::Unavailable)
+            || !reader.ReadUInt8(channel) || (channel!=1 && channel!=2)
+            || !reader.ReadUInt64(packet.messageId) || !reader.ReadUInt32(packet.retryAfterMs) || !reader.Finished()
+            || (result==0 ? packet.messageId==0:packet.messageId!=0) || packet.retryAfterMs>500) return std::nullopt;
+        packet.result=static_cast<ChatResultCode>(result);packet.channel=static_cast<ChatChannel>(channel);return packet;
+    }
+    std::optional<ChatMessage> DecodeChatMessage(const std::vector<std::uint8_t>& inPacket)
+    {
+        PacketReader reader(inPacket);ChatMessage packet;std::uint8_t channel{};
+        if(inPacket.size()>MAX_CHAT_UTF8_BYTES+128 || !ReadExpectedType(reader,PacketType::ChatMessage)
+            || !reader.ReadUInt64(packet.messageId) || packet.messageId==0
+            || !reader.ReadUInt32(packet.requestSequence) || packet.requestSequence==0
+            || !reader.ReadUInt8(channel) || (channel!=1 && channel!=2)
+            || !reader.ReadUInt64(packet.senderPlayerId) || packet.senderPlayerId==0
+            || !reader.ReadUInt64(packet.senderCharacterId) || packet.senderCharacterId==0
+            || !reader.ReadString(packet.senderName) || packet.senderName.empty() || packet.senderName.size()>32
+            || !reader.ReadString(packet.message) || packet.message.empty() || packet.message.size()>MAX_CHAT_UTF8_BYTES
+            || !reader.Finished())return std::nullopt;
+        if(MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,packet.senderName.data(),static_cast<int>(packet.senderName.size()),nullptr,0)<=0
+            || MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,packet.message.data(),static_cast<int>(packet.message.size()),nullptr,0)<=0)
+            return std::nullopt;
+        std::size_t scalars=0;
+        for(const unsigned char value:packet.message)if((value&0xC0)!=0x80)++scalars;
+        if(scalars>MAX_CHAT_CODE_POINTS)return std::nullopt;
+        packet.channel=static_cast<ChatChannel>(channel);return packet;
+    }
     namespace
     {
         std::vector<std::uint8_t> EncodeCharacterJson(PacketType inType, const std::string& inJson)

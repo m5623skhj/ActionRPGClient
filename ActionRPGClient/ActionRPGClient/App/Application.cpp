@@ -30,6 +30,7 @@ namespace ActionRPG
         double accumulatedSeconds = 0.0;
         std::vector<InputKey> pendingPressedKeys;
         std::wstring pendingTextInput;
+        std::vector<TextEditEvent> pendingTextEdits;
         int pendingMouseWheelDelta = 0;
         auto appliedSettings = GameWindow::GetScreenSettings();
         bool pendingLeftMousePressed = false;
@@ -110,6 +111,7 @@ namespace ActionRPG
             {
                 pendingPressedKeys.clear();
                 pendingTextInput.clear();
+                pendingTextEdits.clear();
                 pendingMouseWheelDelta = 0;
                 pendingLeftMousePressed = false;
                 accumulatedSeconds = 0;
@@ -136,6 +138,7 @@ namespace ActionRPG
                 inputState.pressedKeys.begin(),
                 inputState.pressedKeys.end());
             pendingTextInput += inputState.textInput;
+            pendingTextEdits.insert(pendingTextEdits.end(), inputState.textEdits.begin(), inputState.textEdits.end());
             pendingMouseWheelDelta += inputState.mouseWheelDelta;
             if (inputState.leftMousePressed && !pendingLeftMousePressed)
             {
@@ -148,6 +151,7 @@ namespace ActionRPG
                 InputState updateInput = inputState;
                 updateInput.pressedKeys = std::move(pendingPressedKeys);
                 updateInput.textInput = std::move(pendingTextInput);
+                updateInput.textEdits = std::move(pendingTextEdits);
                 updateInput.mouseWheelDelta = pendingMouseWheelDelta;
                 updateInput.leftMousePressed = pendingLeftMousePressed;
                 updateInput.clickX = pendingClickX;
@@ -172,6 +176,7 @@ namespace ActionRPG
                 }
                 pendingPressedKeys.clear();
                 pendingTextInput.clear();
+                pendingTextEdits.clear();
                 pendingMouseWheelDelta = 0;
                 pendingLeftMousePressed = false;
                 accumulatedSeconds -= FIXED_UPDATE_SECONDS;

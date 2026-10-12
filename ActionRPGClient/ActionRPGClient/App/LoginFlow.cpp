@@ -1,3 +1,4 @@
+#include "Platform/ShutdownTrace.h"
 #include "App/LoginFlow.h"
 #include "Graphics/D2DRenderer.h"
 #include "Network/DungeonClient.h"
@@ -44,6 +45,7 @@ namespace ActionRPG
               : settings.loginConfigurationError), playerName(settings.playerName), characterId(settings.characterId) {}
     LoginFlow::~LoginFlow()
     {
+        TraceShutdown("ActionRPGClient: requesting network shutdown\n");
         auth.Cancel();
         gameToken.clear();
         town.RequestStop();

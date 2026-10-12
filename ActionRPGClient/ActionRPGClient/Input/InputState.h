@@ -22,6 +22,13 @@ namespace ActionRPG
         ToggleSystemMenu
     };
 
+    struct TextEditEvent
+    {
+        enum class Kind { Insert, Backspace, Submit, Cancel, CycleChannel };
+        Kind kind{Kind::Insert};
+        std::wstring text;
+    };
+
     struct InputState
     {
         bool moveLeft{};
@@ -37,6 +44,9 @@ namespace ActionRPG
         bool leftMouseDown{}, leftMouseReleased{}, rightMousePressed{}, cancelDrag{}, shiftHeld{};
         float rightClickX{}, rightClickY{};
         std::wstring textInput;
+        std::vector<TextEditEvent> textEdits;
+        std::wstring composition;
+        bool imeComposing{};
         std::vector<InputKey> pressedKeys;
 
         [[nodiscard]] bool WasPressed(const InputKey inKey) const

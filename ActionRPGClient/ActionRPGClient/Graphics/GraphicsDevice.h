@@ -15,6 +15,7 @@ namespace ActionRPG
     {
     public:
         GraphicsDevice(HWND inWindowHandle, std::uint32_t inWidth, std::uint32_t inHeight);
+        ~GraphicsDevice();
 
         GraphicsDevice(const GraphicsDevice&) = delete;
         GraphicsDevice& operator=(const GraphicsDevice&) = delete;

@@ -309,6 +309,14 @@ namespace ActionRPG
         return 0.0f;
     }
 
+    float SpriteAnimation::GetTopOffset() const
+    {
+        if (!bitmap) return 0;
+        if (!frames.empty()) return frames[currentFrame].pivot.y * scale;
+        const auto row = currentFrame / columns;
+        return renderHeight * (rows == 2 && row == 1 ? secondRowAnchorY:anchorY);
+    }
+
     void SpriteAnimation::Draw(D2DRenderer& inRenderer, const float inCenterX, const float inBottomY,
         const bool inFlipHorizontal) const
     {

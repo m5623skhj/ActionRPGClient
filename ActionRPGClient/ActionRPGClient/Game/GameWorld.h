@@ -2,6 +2,7 @@
 
 #include "Core/IniDocument.h"
 #include "Game/Camera.h"
+#include "Game/ChatUi.h"
 #include "Game/SessionMenuAction.h"
 #include "Game/DungeonCombatBuffer.h"
 #include "Game/DungeonWorld.h"
@@ -126,6 +127,10 @@ namespace ActionRPG
         };
 
         void ProcessNetworkEvents(const InputState& inInput);
+        [[nodiscard]] std::optional<Vector2> ChatBubblePosition(std::uint64_t inPlayerId) const;
+        ChatUi chatUi;
+        [[nodiscard]] bool HandleChatEvent(const TownEvent& inEvent);
+        std::unordered_map<std::uint32_t, float> pendingChatResults;
         void ProcessDungeonEvents();
         void ApplyCombatState(DungeonCombatSnapshot inSnapshot);
         void ApplyCombatSnapshot(std::string_view inJson);

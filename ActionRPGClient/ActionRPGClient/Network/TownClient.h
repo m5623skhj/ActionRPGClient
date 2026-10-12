@@ -35,7 +35,7 @@ namespace ActionRPG
         TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult,
         TownProtocol::PartyDirectoryPage, TownProtocol::PartyDirectoryChanged,
         TownProtocol::DungeonCompletionResponse, TownProtocol::PartyDetailResponse,
-        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent, InventoryEvent>;
+        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent, InventoryEvent, TownProtocol::ChatResult, TownProtocol::ChatMessage>;
 
     enum class TownConnectionState { Disconnected, Connecting, AdmissionPending, CharacterSelection, EnteringTown, Ready, Failed };
     struct TownConnectionInfo
@@ -71,6 +71,7 @@ namespace ActionRPG
         [[nodiscard]] TownConnectionInfo GetConnectionInfo() const;
         void Stop();
         void SendMovement(const TownProtocol::MoveInput& inInput);
+        [[nodiscard]] std::optional<std::uint32_t> SendChat(TownProtocol::ChatChannel inChannel, std::string inMessage);
         void RequestDungeon(std::string inZoneId, std::uint32_t inDungeonId);
         void RequestDungeonCompletion(std::uint64_t inRoomId, bool inRetry);
         void RequestSkillState();
@@ -94,6 +95,7 @@ namespace ActionRPG
         void QueuePacket(std::vector<std::uint8_t> inBody);
         void QueueCharacterPacket(std::vector<std::uint8_t> inBody, bool inSelecting = false);
         std::uint64_t selectedCharacterId{};
+        std::uint32_t chatSequence{}; // Game thread; resets only for a new Town connection attempt.
         struct Impl;
         std::unique_ptr<Impl> impl;
     };

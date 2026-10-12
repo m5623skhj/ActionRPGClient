@@ -468,12 +468,19 @@ namespace ActionRPG
 
     GameWorld::~GameWorld()
     {
+        GameWindow::SetChatInputMode(false);
         audio.Stop();
     }
 
-    void GameWorld::Update(const float inDeltaSeconds, const InputState& inInput)
+    void GameWorld::Update(const float inDeltaSeconds, const InputState& inRawInput)
     {
-        InputState interfaceInput=inInput;
+        InputState inInput=inRawInput;
+        if (chatUi.IsEditing())
+        {
+            inInput.moveLeft=inInput.moveRight=inInput.moveUp=inInput.moveDown=false;
+            inInput.pressedKeys.clear();
+        }
+        InputState interfaceInput=inRawInput;
         GameWindow::ConsumeUiPointer(interfaceInput);
         const bool hadUiAtFrameStart=IsUiOverlayVisible();
         uiMouseX = inInput.mouseX;
@@ -491,6 +498,50 @@ namespace ActionRPG
             if (!townClient.IsConnected()) partyKickedNotice = false;
         }
         if (IsDungeonUiRestricted() && IsPartyUiPage(systemUiPage)) SetSystemUiPage(SystemUiPage::Menu);
+        const bool chatAllowed = !dungeonCleared && !completionStopping && !isDungeonSelectionOpen
+            && systemUiPage==SystemUiPage::Closed && !pendingPartyInvitation && !partyKickedNotice
+            && !skillUi.IsDragging() && !inventoryUi.IsDragging();
+        const auto chatBar=skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight());
+        const auto chatHud=HudLayout::Calculate(chatBar,HudLayout::Scale(camera.GetViewportWidth()));
+        const auto chatAction=chatUi.Update(inDeltaSeconds,interfaceInput,renderer,camera.GetViewportWidth(),
+            camera.GetViewportHeight(),chatHud.hp.top,chatAllowed,IsDungeonUiRestricted(),
+            partySnapshot.partyId!=0,townClient.IsConnected());
+        const auto chatInputPosition=chatUi.GetInputPosition();
+        const float chatScale=HudLayout::Scale(camera.GetViewportWidth());
+        GameWindow::SetChatInputMode(chatUi.IsEditing(),chatInputPosition.x*chatScale,chatInputPosition.y*chatScale);
+        chatUi.SetLimits(TownProtocol::MAX_CHAT_CODE_POINTS,TownProtocol::MAX_CHAT_UTF8_BYTES);
+        for(auto it=pendingChatResults.begin();it!=pendingChatResults.end();)
+        {
+            it->second-=inDeltaSeconds;
+            if(it->second<=0 || !townClient.IsConnected())
+            {chatUi.Notice(L"채팅 전송 결과를 확인하지 못했습니다.");it=pendingChatResults.erase(it);}
+            else ++it;
+        }
+        if(chatAction.submission)
+        {
+            const auto text=WideToUtf8(chatAction.submission->text);
+            const auto channel=chatAction.submission->channel==ChatChannel::Party ? TownProtocol::ChatChannel::Party:TownProtocol::ChatChannel::General;
+            if(pendingChatResults.size()>=8) chatUi.Notice(L"채팅 전송 결과를 기다리고 있습니다.");
+            else if(text)
+            {
+                if(const auto sequence=townClient.SendChat(channel,*text)) pendingChatResults.emplace(*sequence,5.0f);
+                else chatUi.Notice(L"채팅을 전송할 수 없습니다. 연결 상태를 확인해 주세요.");
+            }
+            else chatUi.Notice(L"유효한 Unicode 문장을 입력해 주세요.");
+        }
+        if (chatAction.consumeInput)
+        {
+            inInput.moveLeft=inInput.moveRight=inInput.moveUp=inInput.moveDown=false;
+            inInput.pressedKeys.clear();inInput.textInput.clear();inInput.textEdits.clear();
+            interfaceInput.pressedKeys.clear();interfaceInput.textInput.clear();interfaceInput.textEdits.clear();
+        }
+        if (chatAction.consumePointer)
+        {
+            inInput.leftMousePressed=false;inInput.mouseWheelDelta=0;
+            interfaceInput.leftMousePressed=false;interfaceInput.mouseWheelDelta=0;
+            uiClickConsumed=true;
+        }
+        if (!townClient.IsConnected()) chatUi.ClearBubbles();
         const bool hadKickedNotice = partyKickedNotice;
         UpdatePartyNotifications(inInput);
         if (!hadKickedNotice && !partyKickedNotice)
@@ -542,7 +593,7 @@ namespace ActionRPG
                 inventoryAction.throwItem ? std::optional<bool>(player.GetFacingLeft()) : std::nullopt);
         }
         InputState gameplayInput = inInput;
-        const bool gameplayBlocked = dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
+        const bool gameplayBlocked = chatUi.IsEditing() || chatAction.consumeInput || dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
             || pendingPartyInvitation.has_value() || partyKickedNotice || hadKickedNotice || player.IsHitReacting() || hadUiAtFrameStart || interfaceInput.cancelDrag
             || (dungeonEntryState != DungeonEntryState::Idle && dungeonEntryState != DungeonEntryState::Entered);
         if (gameplayBlocked)
@@ -702,6 +753,14 @@ namespace ActionRPG
             inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),
                 skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),false);
         }
+        std::vector<ChatBubbleAnchor> chatAnchors;
+        if (const auto anchor=ChatBubblePosition(localPlayerId)) chatAnchors.push_back({localPlayerId,*anchor});
+        for (const auto& [id,actor]:remotePlayers)
+            if (const auto anchor=ChatBubblePosition(id)) chatAnchors.push_back({id,*anchor});
+        for (const auto& [id,actor]:combatPlayers)
+            if (const auto anchor=ChatBubblePosition(id)) chatAnchors.push_back({id,*anchor});
+        chatUi.RenderBubbles(inRenderer,chatAnchors,camera.GetViewportWidth(),camera.GetViewportHeight());
+        chatUi.Render(inRenderer,camera.GetViewportWidth());
         RenderDungeonSelection(inRenderer);
         RenderSystemInterface(inRenderer);
         RenderPartyInterface(inRenderer);
@@ -709,8 +768,35 @@ namespace ActionRPG
         RenderPartyNotifications(inRenderer);
     }
 
+    std::optional<Vector2> GameWorld::ChatBubblePosition(const std::uint64_t inPlayerId) const
+    {
+        Vector2 ground{}; float height=0, headHeight=0;
+        if (inPlayerId==localPlayerId && localPlayerId!=0)
+        { ground=player.GetGroundPosition();height=player.GetHeight();headHeight=player.GetChatHeadHeight(); }
+        else if (dungeonEntryState==DungeonEntryState::Entered)
+        {
+            const auto actor=combatPlayers.find(inPlayerId);
+            if(actor==combatPlayers.end())return std::nullopt;
+            ground=actor->second->GetGroundPosition();height=actor->second->GetHeight();
+            headHeight=actor->second->GetChatHeadHeight();
+        }
+        else
+        {
+            const auto actor=remotePlayers.find(inPlayerId);
+            if(actor==remotePlayers.end())return std::nullopt;
+            ground=actor->second.displayedPosition;
+            headHeight=actor->second.idleAnimation.GetTopOffset();
+        }
+        const auto position=camera.WorldToScreen(ground);
+        if(position.x<0 || position.x>camera.GetViewportWidth() || position.y-height<0
+            || position.y-height>camera.GetViewportHeight()+96)return std::nullopt;
+        return Vector2{position.x,position.y-height-headHeight};
+    }
+
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
     {
+        chatUi.CancelInput();
+        GameWindow::SetChatInputMode(false);
         commandQueue.Clear();
         skillUi.CancelDrag();
         inventoryUi.Close();
@@ -767,9 +853,43 @@ namespace ActionRPG
             || pendingPartyInvitation.has_value() || partyKickedNotice;
     }
 
+    bool GameWorld::HandleChatEvent(const TownEvent& inEvent)
+    {
+        if(const auto message=std::get_if<TownProtocol::ChatMessage>(&inEvent))
+        {
+            const bool self=message->senderPlayerId==localPlayerId;
+            const auto channel=message->channel==TownProtocol::ChatChannel::Party ? ChatChannel::Party:ChatChannel::General;
+            chatUi.Receive(message->messageId,message->senderPlayerId,channel,Utf8ToWide(message->senderName),
+                Utf8ToWide(message->message),self,ChatBubblePosition(message->senderPlayerId).has_value());
+            if(self) pendingChatResults.erase(message->requestSequence);
+            return true;
+        }
+        if(const auto result=std::get_if<TownProtocol::ChatResult>(&inEvent))
+        {
+            if(pendingChatResults.erase(result->sequence)==0)return true;
+            using Code=TownProtocol::ChatResultCode;
+            switch(result->result)
+            {
+            case Code::Succeeded: break; // ACK has no body; only ChatMessage enters history.
+            case Code::NotInParty: chatUi.Notice(L"파티가 없어 전송할 수 없습니다.");break;
+            case Code::RateLimited: chatUi.Notice(L"너무 빠르게 전송했습니다. 잠시 후 다시 보내 주세요.");break;
+            case Code::InvalidMessage: chatUi.Notice(L"빈 문장과 제어 문자는 전송할 수 없습니다. 입력 한도는 50자입니다.");break;
+            case Code::NotEntered: chatUi.Notice(L"캐릭터 입장 후 채팅할 수 있습니다.");break;
+            case Code::StaleSequence:
+            case Code::SequenceConflict: chatUi.Notice(L"채팅 요청 순서가 맞지 않습니다. 다시 접속해 주세요.");break;
+            default: chatUi.Notice(L"서버가 채팅 요청을 처리하지 못했습니다.");break;
+            }
+            return true;
+        }
+        return false;
+    }
+
     void GameWorld::ProcessNetworkEvents(const InputState& inInput)
     {
         auto incoming = townClient.ConsumeEvents();
+        // Chat is ordered by TCP receipt even while gameplay room cleanup defers
+        // world events. It must never acquire a network worker's UI state.
+        std::erase_if(incoming,[this](const auto& event){return HandleChatEvent(event);});
         if (completionStopping)
         {
             for (auto& event : incoming) deferredTownEvents.push_back(std::move(event));
@@ -2613,6 +2733,7 @@ namespace ActionRPG
 
     void GameWorld::ApplyMap(const TownProtocol::MapInfo& inMap, const Vector2 inPosition)
     {
+        chatUi.ClearBubbles();
         if (dungeonEntryState != DungeonEntryState::Idle) ResetDungeonEntry();
         lastTownMap = inMap;
         remotePlayers.clear();
@@ -2648,6 +2769,7 @@ namespace ActionRPG
 
     void GameWorld::ApplyDungeonMap(const std::string& inMapId, const Vector2 inPosition)
     {
+        chatUi.ClearBubbles();
         const auto& room = dungeonWorld->GetMap(inMapId);
         if (dungeonMapId.empty())
         {

@@ -39,6 +39,8 @@ namespace ActionRPG
         void Draw(D2DRenderer& inRenderer, float inCenterX, float inBottomY,
             bool inFlipHorizontal) const;
 
+        // Distance from the drawing ground pivot to the current sprite's top.
+        [[nodiscard]] float GetTopOffset() const;
         [[nodiscard]] std::uint32_t GetCurrentFrame() const { return currentFrame; }
         [[nodiscard]] std::uint32_t GetFrameCount() const { return frameCount; }
         [[nodiscard]] float GetDuration() const { return frameEndSeconds.back(); }

@@ -1,12 +1,23 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace TownProtocol
 {
+    inline constexpr std::size_t MAX_CHAT_UTF8_BYTES = 800;
+    inline constexpr std::size_t MAX_CHAT_CODE_POINTS = 200;
+
+    enum class ChatChannel : std::uint8_t { General = 1, Party = 2 };
+    enum class ChatResultCode : std::uint8_t
+    {
+        Succeeded = 0, InvalidChannel = 1, InvalidMessage = 2, RateLimited = 3,
+        NotInParty = 4, NotEntered = 5, StaleSequence = 6, SequenceConflict = 7, Unavailable = 8
+    };
+
     struct Vector2
     {
         float x{};
@@ -222,4 +233,7 @@ namespace TownProtocol
     [[nodiscard]] std::optional<PartyDirectoryPage> DecodePartyDirectoryPage(const std::vector<std::uint8_t>& inPacket);
     [[nodiscard]] std::optional<PartyDirectoryChanged> DecodePartyDirectoryChanged(const std::vector<std::uint8_t>& inPacket);
     [[nodiscard]] std::optional<PartyCreateRequest> DecodePartyCreateRequest(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const ChatRequest& inPacket);
+    [[nodiscard]] std::optional<ChatResult> DecodeChatResult(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<ChatMessage> DecodeChatMessage(const std::vector<std::uint8_t>& inPacket);
 }

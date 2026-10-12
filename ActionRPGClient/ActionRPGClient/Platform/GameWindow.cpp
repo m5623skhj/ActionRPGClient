@@ -1,6 +1,8 @@
+#include "Platform/ShutdownTrace.h"
 #include "Platform/GameWindow.h"
 
 #include <Windowsx.h>
+#include <imm.h>
 
 #include <algorithm>
 #include <stdexcept>
@@ -95,17 +97,27 @@ namespace ActionRPG
 
     bool GameWindow::ProcessMessages()
     {
+        if (closeRequested) return false;
         MSG message{};
         while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != FALSE)
         {
             if (message.message == WM_QUIT)
             {
-                OutputDebugStringA("ActionRPGClient: WM_QUIT received\n");
+                TraceShutdown("ActionRPGClient: WM_QUIT received\n");
                 return false;
             }
 
             TranslateMessage(&message);
             DispatchMessageW(&message);
+            if (closeRequested) return false;
+        }
+
+        // Complete the requested IME commit before submitting. Result strings
+        // enter the edit queue first, even if commit/end arrive in this drain.
+        if (chatSubmitRequested && !imeComposing && !imeCandidateOpen && composition.empty())
+        {
+            pendingTextEdits.push_back({TextEditEvent::Kind::Submit, {}});
+            chatSubmitRequested = false;
         }
 
         if (presentationPending && windowHandle != nullptr && !isMinimized)
@@ -184,6 +196,8 @@ namespace ActionRPG
         keyStates.fill(false);
         pendingPressedKeys.clear();
         pendingTextInput.clear();
+        pendingTextEdits.clear();
+        chatSubmitRequested = false;
         pendingMouseWheelDelta = 0;
         pendingLeftMousePressed = pendingLeftMouseReleased = pendingRightMousePressed = leftMouseDown = false;
         pendingCancelDrag = true;
@@ -272,13 +286,53 @@ namespace ActionRPG
         window.pendingLeftMouseReleased=window.pendingRightMousePressed=window.pendingCancelDrag=false;
     }
 
+    void GameWindow::SetChatInputMode(const bool inEnabled, const float inX, const float inY)
+    {
+        if (!activeWindow) return;
+        auto& window = *activeWindow;
+        if (window.chatInputMode != inEnabled)
+        {
+            window.ClearInput();
+            // This mode switch already cancels hotbar drags in GameWorld. Do not
+            // turn it into a focus-loss event that cancels chat on the next tick.
+            window.pendingCancelDrag = false;
+            window.pendingTextInput.clear();
+            window.pendingTextEdits.clear();
+            window.composition.clear();
+            window.imeComposing = false;
+            window.imeCandidateOpen = false;
+            if (const HIMC context = ImmGetContext(window.windowHandle))
+            {
+                ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+                ImmReleaseContext(window.windowHandle, context);
+            }
+            window.chatInputMode = inEnabled;
+        }
+        if (inEnabled)
+        {
+            if (const HIMC context = ImmGetContext(window.windowHandle))
+            {
+                const float scale = window.GetClientWidth() / static_cast<float>(window.screenSettings.width);
+                const float verticalScale = window.GetClientHeight() / static_cast<float>(window.screenSettings.height);
+                const float fit = std::min(scale, verticalScale);
+                const POINT position{static_cast<LONG>(inX * fit + (window.GetClientWidth() - window.screenSettings.width * fit) / 2),
+                    static_cast<LONG>(inY * fit + (window.GetClientHeight() - window.screenSettings.height * fit) / 2)};
+                COMPOSITIONFORM form{}; form.dwStyle = CFS_POINT; form.ptCurrentPos = position;
+                ImmSetCompositionWindow(context, &form);
+                CANDIDATEFORM candidate{}; candidate.dwStyle = CFS_CANDIDATEPOS; candidate.ptCurrentPos = position;
+                ImmSetCandidateWindow(context, &candidate);
+                ImmReleaseContext(window.windowHandle, context);
+            }
+        }
+    }
+
     InputState GameWindow::ConsumeInputState()
     {
         InputState inputState{
-            .moveLeft = IsKeyDown(VK_LEFT),
-            .moveRight = IsKeyDown(VK_RIGHT),
-            .moveUp = IsKeyDown(VK_UP),
-            .moveDown = IsKeyDown(VK_DOWN),
+            .moveLeft = !chatInputMode && IsKeyDown(VK_LEFT),
+            .moveRight = !chatInputMode && IsKeyDown(VK_RIGHT),
+            .moveUp = !chatInputMode && IsKeyDown(VK_UP),
+            .moveDown = !chatInputMode && IsKeyDown(VK_DOWN),
             .mouseX = mouseX,
             .mouseY = mouseY,
             .clickX = pendingClickX,
@@ -289,6 +343,8 @@ namespace ActionRPG
             .rightMousePressed = pendingRightMousePressed, .cancelDrag = pendingCancelDrag,
             .shiftHeld = IsKeyDown(VK_SHIFT), .rightClickX = pendingRightClickX, .rightClickY = pendingRightClickY,
             .textInput = std::move(pendingTextInput),
+            .textEdits = std::move(pendingTextEdits),
+            .composition = composition, .imeComposing = imeComposing,
             .pressedKeys = std::move(pendingPressedKeys)
         };
 
@@ -299,6 +355,7 @@ namespace ActionRPG
         pendingMouseWheelDelta = 0;
         pendingLeftMousePressed = false;
         pendingTextInput.clear();
+        pendingTextEdits.clear();
         return inputState;
     }
 
@@ -453,6 +510,50 @@ namespace ActionRPG
             return 0;
 
         case WM_KEYDOWN:
+            if (chatInputMode)
+            {
+                const auto chatKey = inWParam == VK_PROCESSKEY ? ImmGetVirtualKey(windowHandle) : inWParam;
+                if (chatKey != VK_RETURN) chatSubmitRequested = false;
+                if (chatKey == VK_TAB)
+                {
+                    if (!(inLParam & (static_cast<LPARAM>(1) << 30)))
+                        pendingTextEdits.push_back({TextEditEvent::Kind::CycleChannel, {}});
+                    // Keep the draft/preedit and prevent Tab from changing IME focus.
+                    return 0;
+                }
+                if (chatKey == VK_RETURN)
+                {
+                    // Candidate selection belongs to the IME, not chat submission.
+                    if (imeCandidateOpen) return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);
+                    if (inLParam & (static_cast<LPARAM>(1) << 30)) return 0;
+                    chatSubmitRequested = true;
+                    if (imeComposing)
+                    {
+                        const HIMC context = ImmGetContext(windowHandle);
+                        if (!context) chatSubmitRequested = false;
+                        else
+                        {
+                            if (!ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_COMPLETE, 0)) chatSubmitRequested = false;
+                            ImmReleaseContext(windowHandle, context);
+                        }
+                    }
+                    return 0;
+                }
+                if (inWParam == VK_ESCAPE)
+                {
+                    if (imeComposing)
+                    {
+                        if (const HIMC context = ImmGetContext(windowHandle))
+                        {
+                            ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+                            ImmReleaseContext(windowHandle, context);
+                        }
+                    }
+                    else pendingTextEdits.push_back({TextEditEvent::Kind::Cancel, {}});
+                }
+                // IME consumes VK_PROCESSKEY; committed text arrives in WM_IME_COMPOSITION.
+                return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);
+            }
             if (inWParam < keyStates.size())
             {
                 const bool wasKeyDown = keyStates[inWParam];
@@ -519,7 +620,66 @@ namespace ActionRPG
             pendingMouseWheelDelta += GET_WHEEL_DELTA_WPARAM(inWParam);
             return 0;
 
+        case WM_IME_NOTIFY:
+            if (chatInputMode)
+            {
+                if (inWParam == IMN_OPENCANDIDATE) imeCandidateOpen = true;
+                else if (inWParam == IMN_CLOSECANDIDATE) imeCandidateOpen = false;
+            }
+            return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);
+        case WM_IME_STARTCOMPOSITION:
+            if (chatInputMode) { imeComposing = true; composition.clear(); }
+            return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);
+        case WM_IME_ENDCOMPOSITION:
+            if (chatInputMode) { imeComposing = false; imeCandidateOpen = false; composition.clear(); }
+            return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);
+        case WM_IME_COMPOSITION:
+            if (chatInputMode)
+            {
+                if (const HIMC context = ImmGetContext(windowHandle))
+                {
+                    const auto readText = [context](const DWORD inKind)
+                    {
+                        std::wstring result;
+                        const LONG bytes = ImmGetCompositionStringW(context, inKind, nullptr, 0);
+                        if (bytes > 0 && bytes <= 4096 && bytes % sizeof(wchar_t) == 0)
+                        {
+                            result.resize(static_cast<std::size_t>(bytes) / sizeof(wchar_t));
+                            if (ImmGetCompositionStringW(context, inKind, result.data(), bytes) != bytes) result.clear();
+                        }
+                        return result;
+                    };
+                    if (inLParam & GCS_RESULTSTR)
+                    {
+                        const auto result = readText(GCS_RESULTSTR);
+                        if (!result.empty()) pendingTextEdits.push_back({TextEditEvent::Kind::Insert, result});
+                        else chatSubmitRequested = false; // Never send without a failed commit's last text.
+                        if (!(inLParam & GCS_COMPSTR)) { composition.clear(); imeComposing = false; }
+                    }
+                    if (inLParam & GCS_COMPSTR)
+                    {
+                        composition = readText(GCS_COMPSTR);
+                        imeComposing = !composition.empty();
+                    }
+                    ImmReleaseContext(windowHandle, context);
+                }
+                // We render preedit ourselves and consume results once; default handling
+                // would also produce WM_IME_CHAR and duplicate Hangul commits.
+                return 0;
+            }
+            return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);
+        case WM_IME_CHAR:
+            if (chatInputMode) return 0;
+            return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);
         case WM_CHAR:
+            if (chatInputMode)
+            {
+                if (inWParam == VK_BACK && !imeComposing)
+                    pendingTextEdits.push_back({TextEditEvent::Kind::Backspace, {}});
+                else if (inWParam >= 32 && inWParam <= 0xFFFF)
+                    pendingTextEdits.push_back({TextEditEvent::Kind::Insert, std::wstring(1, static_cast<wchar_t>(inWParam))});
+                return 0;
+            }
             if (inWParam <= 0xFFFF)
             {
                 pendingTextInput.push_back(static_cast<wchar_t>(inWParam));
@@ -531,12 +691,18 @@ namespace ActionRPG
             return 0;
 
         case WM_CLOSE:
-            OutputDebugStringA("ActionRPGClient: WM_CLOSE received\n");
-            DestroyWindow(windowHandle);
+            TraceShutdown("ActionRPGClient: WM_CLOSE requested application exit\n");
+            closeRequested = true;
+            presentationPending = false;
+            ClearInput();
+            // Leave the HWND alive until Application releases its swap chain,
+            // audio and network owners. GameWindow is the last member destroyed.
+            ShowWindow(windowHandle, SW_HIDE);
             return 0;
 
         case WM_DESTROY:
-            OutputDebugStringA("ActionRPGClient: window destroyed\n");
+            closeRequested = true;
+            TraceShutdown("ActionRPGClient: window destroyed\n");
             PostQuitMessage(0);
             return 0;
 

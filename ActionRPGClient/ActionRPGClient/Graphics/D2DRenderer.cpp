@@ -210,6 +210,22 @@ namespace ActionRPG
         }
     }
 
+    D2D1_SIZE_F D2DRenderer::MeasureUiText(const std::wstring_view inText, const float inWidth, const float inSize) const
+    {
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
+        ThrowIfFailed(graphicsDevice.GetDWriteFactory()->CreateTextFormat(uiFontFamily.c_str(), nullptr,
+            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            inSize, L"ko-KR", &format), "Create chat text format");
+        format->SetWordWrapping(DWRITE_WORD_WRAPPING_EMERGENCY_BREAK);
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        ThrowIfFailed(graphicsDevice.GetDWriteFactory()->CreateTextLayout(inText.data(),
+            static_cast<UINT32>(inText.size()), format.Get(), std::max(1.0f, inWidth), 10000.0f,
+            &layout), "Measure chat text");
+        DWRITE_TEXT_METRICS metrics{};
+        ThrowIfFailed(layout->GetMetrics(&metrics), "Get chat text metrics");
+        return D2D1::SizeF(metrics.widthIncludingTrailingWhitespace, metrics.height);
+    }
+
     void D2DRenderer::SetUiFontFamily(std::wstring_view inFamily)
     { uiFontFamily=inFamily; uiTextFormats.clear(); }
 

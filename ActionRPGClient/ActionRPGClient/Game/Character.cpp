@@ -953,6 +953,13 @@ namespace ActionRPG
         animation.Seek(lastCombatAnimationSeconds, loop);
     }
 
+    float Character::GetChatHeadHeight() const
+    {
+        // The idle sprite defines upright head height. A larger running sheet
+        // must not lift speech above a standing character.
+        return std::max(HEIGHT,idleAnimation.GetTopOffset());
+    }
+
     void Character::Render(D2DRenderer& inRenderer, const Camera& inCamera) const
     {
         const Vector2 groundScreenPosition = inCamera.WorldToScreen(groundPosition);

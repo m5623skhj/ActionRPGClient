@@ -1,3 +1,4 @@
+#include "Platform/ShutdownTrace.h"
 #include "Graphics/GraphicsDevice.h"
 
 #include <d2d1_1helper.h>
@@ -34,6 +35,23 @@ namespace ActionRPG
         CreateD2DDevice();
         CreateSwapChain(inWindowHandle, inWidth, inHeight);
         CreateRenderTarget();
+    }
+
+    GraphicsDevice::~GraphicsDevice()
+    {
+        TraceShutdown("ActionRPGClient: releasing graphics resources\n");
+        // Remove context-owned back-buffer references before releasing the HWND
+        // swap chain. The window remains valid until GameWindow's destructor.
+        if (d2dContext) d2dContext->SetTarget(nullptr);
+        d2dTargetBitmap.Reset();
+        d2dContext.Reset();
+        if (d3dContext)
+        {
+            d3dContext->ClearState();
+            d3dContext->Flush();
+        }
+        swapChain.Reset();
+        TraceShutdown("ActionRPGClient: graphics swap chain released\n");
     }
 
     void GraphicsDevice::Resize(const std::uint32_t inWidth, const std::uint32_t inHeight)

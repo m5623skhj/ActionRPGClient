@@ -1,3 +1,4 @@
+#include "Platform/ShutdownTrace.h"
 #include "Network/AuthClient.h"
 #include "Network/AuthHttps.h"
 
@@ -351,9 +352,11 @@ namespace ActionRPG
         ~Impl()
         {
             Cancel();
+            TraceShutdown("ActionRPGClient: stopping authentication worker\n");
             worker.request_stop();
             changed.notify_all();
             worker.join();
+            TraceShutdown("ActionRPGClient: authentication worker stopped\n");
         }
         void Cancel()
         {

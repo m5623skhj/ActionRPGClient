@@ -35,6 +35,7 @@ namespace ActionRPG
         [[nodiscard]] static bool IsScreenSettingsPending();
         static void ConsumeUiPointer(InputState& inInput);
         static void ResetInput();
+        static void SetChatInputMode(bool inEnabled, float inX = 0, float inY = 0);
         [[nodiscard]] bool ProcessMessages();
         [[nodiscard]] bool ConsumeResize(std::uint32_t& outWidth, std::uint32_t& outHeight);
         [[nodiscard]] InputState ConsumeInputState();
@@ -62,6 +63,7 @@ namespace ActionRPG
         std::uint32_t clientWidth{};
         std::uint32_t clientHeight{};
         bool resizePending{};
+        bool closeRequested{};
         bool isMinimized{};
         float mouseX{};
         float mouseY{};
@@ -76,6 +78,9 @@ namespace ActionRPG
         HMONITOR requestedMonitor{};
         bool presentationPending{}, presentationChanged{}, applyingPresentation{};
         std::wstring pendingTextInput;
+        std::vector<TextEditEvent> pendingTextEdits;
+        std::wstring composition;
+        bool chatInputMode{}, imeComposing{}, imeCandidateOpen{}, chatSubmitRequested{};
         std::array<bool, 256> keyStates{};
         std::vector<InputKey> pendingPressedKeys;
     };

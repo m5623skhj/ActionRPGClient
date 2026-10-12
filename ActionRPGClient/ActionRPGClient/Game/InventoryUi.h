@@ -77,6 +77,7 @@ namespace ActionRPG
         [[nodiscard]] static D2D1_RECT_F QuickslotBounds(const D2D1_RECT_F& inSkillBar);
         void Reset();
         void Close();
+        [[nodiscard]] bool IsDragging() const { return !dragging.empty() || !dragCandidate.empty(); }
         [[nodiscard]] InventoryUiAction Update(float inDeltaSeconds, const InputState& inInput,
             float inWidth, float inHeight, bool inVisible, bool inBarVisible, const D2D1_RECT_F& inSkillBar);
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inDungeon) const;

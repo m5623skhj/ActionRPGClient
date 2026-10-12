@@ -1,7 +1,9 @@
+#include "Platform/ShutdownTrace.h"
 #include "Network/TownClient.h"
 #include <nlohmann/json.hpp>
 #include <asio.hpp>
 #include <asio/ssl.hpp>
+#include <Windows.h>
 #include <openssl/ssl.h>
 #include <algorithm>
 #include <array>
@@ -10,6 +12,7 @@
 #include <fstream>
 #include <future>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -224,14 +227,16 @@ namespace ActionRPG
     {
         attempt.store(0);
         connected.store(false);
-        asio::post(strand, [this]
-        {
-            if (session) session->Close();
-            session.reset();
-            workGuard.reset();
-            ioContext.stop();
-        });
+        TraceShutdown("ActionRPGClient: stopping town I/O worker\n");
+        // stop() is thread-safe and wakes run() directly. Do not depend on a
+        // queued handler to stop the executor we are about to join.
+        ioContext.stop();
         if (worker.joinable()) worker.join();
+        // No callback can access the session now; retain its buffers until join.
+        if (session) session->Close();
+        session.reset();
+        workGuard.reset();
+        TraceShutdown("ActionRPGClient: town I/O worker stopped\n");
     }
     void TownClient::Impl::SetStatus(const std::uint64_t inAttempt,
         const TownConnectionState inState, std::wstring inMessage)
@@ -278,6 +283,7 @@ namespace ActionRPG
         std::filesystem::path inCa, std::string inTicket, const Clock::time_point inExpiry)
     {
         selectedCharacterId = 0;
+        chatSequence = 0;
         {
             std::scoped_lock lock(impl->mutex);
             impl->attempt.store(inAttempt);
@@ -581,6 +587,18 @@ namespace ActionRPG
         });
     }
 
+    std::optional<std::uint32_t> TownClient::SendChat(const TownProtocol::ChatChannel inChannel, std::string inMessage)
+    {
+        if(!IsConnected() || chatSequence==std::numeric_limits<std::uint32_t>::max())return std::nullopt;
+        const auto sequence=++chatSequence;
+        asio::post(impl->strand,[this,attempt=impl->attempt.load(),packet=TownProtocol::Encode(
+            TownProtocol::ChatRequest{sequence,inChannel,std::move(inMessage)})]() mutable
+        {
+            if(impl->connected.load() && attempt==impl->attempt.load())QueuePacket(std::move(packet));
+        });
+        return sequence;
+    }
+
     void TownClient::RequestPartyDetail(const std::uint64_t inPartyId)
     {
         asio::post(impl->strand, [this, attempt = impl->attempt.load(), packet = TownProtocol::Encode(
@@ -709,6 +727,14 @@ namespace ActionRPG
             break;
         case TownProtocol::PacketType::DungeonSelectionOpen:
             if (auto packet = TownProtocol::DecodeDungeonSelectionOpen(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::ChatResult:
+            if(auto packet=TownProtocol::DecodeChatResult(receiveBody))PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::ChatMessage:
+            if(auto packet=TownProtocol::DecodeChatMessage(receiveBody))PushEvent(std::move(*packet));
             else HandleDisconnect();
             break;
         case TownProtocol::PacketType::PartyInvitation:

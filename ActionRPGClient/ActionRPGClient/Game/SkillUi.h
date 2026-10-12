@@ -33,6 +33,7 @@ namespace ActionRPG
         void ResetCombatState();
         void Invalidate();
         void CancelDrag();
+        [[nodiscard]] bool IsDragging() const { return !dragging.empty() || !dragCandidate.empty(); }
         void SetConnected(bool inConnected)
         {
             if (!inConnected && ready) Invalidate();
