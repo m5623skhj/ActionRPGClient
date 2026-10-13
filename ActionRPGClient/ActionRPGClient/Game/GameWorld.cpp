@@ -1335,6 +1335,7 @@ namespace ActionRPG
                 {
                     if (inEvent.mapEpoch <= pendingMapEpoch) return;
                     pendingMapEpoch = inEvent.mapEpoch;
+                    player.ClearCombatKnockback();
                     targetMonsterId = 0; targetHp = {};
                     inventoryUi.Close();
                     player.ClearPredictedAttackFacing();
@@ -1394,8 +1395,16 @@ namespace ActionRPG
         if (!snapshot.realtime && combatBuffer.HasFreshRealtime() && !snapshot.cleared) return;
         if (!snapshot.realtime && hasCombatTick && snapshot.serverTick == lastCombatTick
             && !(snapshot.cleared && !dungeonCleared)) return;
-        for (auto& actor : snapshot.players) actor.presentationTimeMs = static_cast<double>(snapshot.serverTimeMs);
-        for (auto& actor : snapshot.monsters) actor.presentationTimeMs = static_cast<double>(snapshot.serverTimeMs);
+        for (auto& actor : snapshot.players)
+        {
+            actor.presentationTimeMs = static_cast<double>(snapshot.serverTimeMs);
+            if (snapshot.cleared) ClearCombatKnockback(actor);
+        }
+        for (auto& actor : snapshot.monsters)
+        {
+            actor.presentationTimeMs = static_cast<double>(snapshot.serverTimeMs);
+            if (snapshot.cleared) ClearCombatKnockback(actor);
+        }
         const auto self = std::find_if(snapshot.players.begin(), snapshot.players.end(), [this](const auto& inPlayer)
             { return inPlayer.playerId == localPlayerId; });
         if (self == snapshot.players.end()) throw std::runtime_error("Combat snapshot omits the local player.");
@@ -1437,6 +1446,13 @@ namespace ActionRPG
                 [this](const auto& actor) { return actor.playerId == localPlayerId; });
             if (previous != combatSnapshot->players.end() && self->skillSequence > previous->skillSequence)
                 (void)audio.PlayEffect();
+        }
+        if (combatSnapshot && combatSnapshot->mapEpoch == snapshot.mapEpoch && combatSnapshot->mapId == snapshot.mapId)
+        {
+            const auto previous = std::find_if(combatSnapshot->players.begin(), combatSnapshot->players.end(),
+                [this](const auto& actor) { return actor.playerId == localPlayerId; });
+            if (previous != combatSnapshot->players.end() && self->hasKnockbackState
+                && self->knockbackSequence != previous->knockbackSequence) commandQueue.Clear();
         }
         player.ApplyCombatState(*self, rules);
         if (self->moveSequence >= lastDungeonStateSequence) player.ReconcileCombatGroundPosition(*self, gameplayMap);

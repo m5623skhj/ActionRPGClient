@@ -5,6 +5,7 @@
 #include <bit>
 #include <cmath>
 #include <limits>
+#include <iterator>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -112,6 +113,29 @@ namespace
             || (inActor.hitstopDurationSeconds > 0.0f && (inActor.hitstopSequence == 0 || inActor.hitstopStartTimeMs == 0)))
             throw std::runtime_error("Invalid combat actor timing.");
     }
+    void ValidateKnockback(const ActionRPG::CombatActorState& inActor)
+    {
+        using Reaction = ActionRPG::CombatReaction;
+        if (inActor.knockbackSequence != inActor.reactionSequence)
+            throw std::runtime_error("Knockback/reaction sequence mismatch.");
+        if (!inActor.knockbackActive)
+        {
+            if (inActor.knockbackDirectionX != 0.0f || inActor.knockbackDirectionY != 0.0f
+                || inActor.knockbackDistance != 0.0f || inActor.knockbackElapsedSeconds != 0.0f
+                || inActor.knockbackDurationSeconds != 0.0f)
+                throw std::runtime_error("Invalid inactive knockback state.");
+            return;
+        }
+        const float length = std::hypot(inActor.knockbackDirectionX, inActor.knockbackDirectionY);
+        if (inActor.knockbackSequence == 0 || inActor.hp == 0 || inActor.reaction == Reaction::None
+            || length < 0.999f || length > 1.001f || inActor.knockbackDistance <= 0.0f
+            || inActor.knockbackDistance > 500.0f || inActor.knockbackDurationSeconds <= 0.0f
+            || inActor.knockbackDurationSeconds > 1.0f
+            || inActor.knockbackElapsedSeconds > inActor.knockbackDurationSeconds
+            || (inActor.height == 0.0f && inActor.knockbackDurationSeconds
+                > inActor.reactionSeconds + inActor.knockbackElapsedSeconds + 0.001f))
+            throw std::runtime_error("Invalid active knockback state.");
+    }
     ActionRPG::CombatActorState Actor(const Json& inActor)
     {
         ActionRPG::CombatActorState actor;
@@ -138,6 +162,22 @@ namespace
         if (actor.maxHp == 0 || actor.hp > actor.maxHp || ((actor.hp == 0) != (actor.reaction == Reaction::Dead)))
             throw std::runtime_error("Invalid combat HP/reaction.");
         ValidateActorTiming(actor);
+        // Legacy v3 JSON has no extension; partially present KBK1-equivalent fields are invalid.
+        constexpr const char* KNOCKBACK_FIELDS[] = { "knockbackSequence", "knockbackActive", "knockbackDirectionX",
+            "knockbackDirectionY", "knockbackDistance", "knockbackElapsedSeconds", "knockbackDurationSeconds" };
+        if (std::any_of(std::begin(KNOCKBACK_FIELDS), std::end(KNOCKBACK_FIELDS),
+            [&inActor](const char* name) { return inActor.contains(name); }))
+        {
+            actor.hasKnockbackState = true;
+            actor.knockbackSequence = Integer(inActor.at("knockbackSequence"));
+            actor.knockbackActive = inActor.at("knockbackActive").get<bool>();
+            actor.knockbackDirectionX = Number(inActor.at("knockbackDirectionX"), true);
+            actor.knockbackDirectionY = Number(inActor.at("knockbackDirectionY"), true);
+            actor.knockbackDistance = Number(inActor.at("knockbackDistance"));
+            actor.knockbackElapsedSeconds = Number(inActor.at("knockbackElapsedSeconds"));
+            actor.knockbackDurationSeconds = Number(inActor.at("knockbackDurationSeconds"));
+            ValidateKnockback(actor);
+        }
         return actor;
     }
 }
@@ -158,6 +198,31 @@ namespace ActionRPG
         return inActor.hp != 0 && inActor.reaction == CombatReaction::None
             && inActor.hitstopDurationSeconds > 0.0f && inTimeMs >= begin
             && inTimeMs < begin + static_cast<double>(inActor.hitstopDurationSeconds) * 1000.0;
+    }
+
+    void ClearCombatKnockback(CombatActorState& inActor)
+    {
+        // Keep the ending sequence as a tombstone, including hits completed within one server tick.
+        inActor.knockbackActive = false;
+        inActor.knockbackDirectionX = inActor.knockbackDirectionY = inActor.knockbackDistance = 0.0f;
+        inActor.knockbackElapsedSeconds = inActor.knockbackDurationSeconds = 0.0f;
+    }
+
+    Vector2 PredictCombatKnockbackPosition(const CombatActorState& inActor, const float inCombatAgeSeconds)
+    {
+        if (!inActor.knockbackActive || inActor.hp == 0 || inActor.reaction == CombatReaction::None
+            || inActor.knockbackDurationSeconds <= 0.0f) return inActor.position;
+        const float remaining = inActor.knockbackDurationSeconds - inActor.knockbackElapsedSeconds;
+        float age = std::clamp(inCombatAgeSeconds, 0.0f, std::max(0.0f, remaining));
+        if (inActor.height == 0.0f) age = std::min(age, inActor.reactionSeconds);
+        const double begin = std::clamp(static_cast<double>(inActor.knockbackElapsedSeconds)
+            / inActor.knockbackDurationSeconds, 0.0, 1.0);
+        const double end = std::clamp((static_cast<double>(inActor.knockbackElapsedSeconds) + age)
+            / inActor.knockbackDurationSeconds, begin, 1.0);
+        const float distance = static_cast<float>(inActor.knockbackDistance
+            * ((2.0 * end - end * end) - (2.0 * begin - begin * begin)));
+        return {inActor.position.x + inActor.knockbackDirectionX * distance,
+            inActor.position.y + inActor.knockbackDirectionY * distance};
     }
 
     CombatRules CombatRules::Parse(const std::string_view inJson)
@@ -181,6 +246,8 @@ namespace ActionRPG
         rules.gravity = positive("gravity"); rules.jumpPrepareSeconds = positive("jumpPrepareSeconds");
         rules.hitStunSeconds = positive("hitStunSeconds"); rules.downSeconds = positive("downSeconds");
         rules.riseSeconds = positive("riseSeconds"); rules.projectileSpeed = positive("projectileSpeed");
+        rules.knockbackSeconds = static_cast<float>(PlayerSkills::Catalog::Number(
+            value.value("knockbackSeconds", Json(0.18)), 0.01, 1.0));
         rules.muzzleHeight = Number(value.at("muzzleHeight")); rules.airFireLift = Number(value.at("airFireLift"));
         rules.airRecoilDistance = Number(value.at("airRecoilDistance"));
         rules.shotHitstopSeconds = Number(value.at("shotHitstopSeconds"), false, true);
@@ -486,6 +553,42 @@ namespace ActionRPG
         {
             const auto tag = reader.UInt(4);
             if (!extensionTags.insert(tag).second) throw std::runtime_error("Duplicate realtime extension.");
+            if (tag == 0x314B424B) // KBK1: full actor lists, 33 bytes/record, little endian without padding.
+            {
+                const auto readKnockback = [&reader](CombatActorState& outActor)
+                {
+                    outActor.hasKnockbackState = true;
+                    outActor.knockbackSequence = static_cast<std::uint32_t>(reader.UInt(4));
+                    outActor.knockbackActive = reader.Bool();
+                    outActor.knockbackDirectionX = reader.Float(true); outActor.knockbackDirectionY = reader.Float(true);
+                    outActor.knockbackDistance = reader.Float(); outActor.knockbackElapsedSeconds = reader.Float();
+                    outActor.knockbackDurationSeconds = reader.Float();
+                    ValidateKnockback(outActor);
+                };
+                if (reader.UInt(2) != playerCount) throw std::runtime_error("Knockback player count mismatch.");
+                std::unordered_set<std::uint64_t> seen;
+                for (std::uint64_t index = 0; index < playerCount; ++index)
+                {
+                    const auto id = reader.UInt(8);
+                    const auto found = std::find_if(result.players.begin(), result.players.end(),
+                        [id](const auto& value) { return value.playerId == id; });
+                    if (found == result.players.end() || !seen.insert(id).second)
+                        throw std::runtime_error("Invalid knockback player ID.");
+                    readKnockback(*found);
+                }
+                if (reader.UInt(2) != monsterCount) throw std::runtime_error("Knockback monster count mismatch.");
+                seen.clear();
+                for (std::uint64_t index = 0; index < monsterCount; ++index)
+                {
+                    const auto id = reader.UInt(8);
+                    const auto found = std::find_if(result.monsters.begin(), result.monsters.end(),
+                        [id](const auto& value) { return value.instanceId == id; });
+                    if (found == result.monsters.end() || !seen.insert(id).second)
+                        throw std::runtime_error("Invalid knockback monster ID.");
+                    readKnockback(*found);
+                }
+                continue;
+            }
             if (tag == 0x31445548) // HUD1: confirmed hits and authoritative resource/monster metadata.
             {
                 if (reader.UInt(2) != playerCount) throw std::runtime_error("HUD player count mismatch.");

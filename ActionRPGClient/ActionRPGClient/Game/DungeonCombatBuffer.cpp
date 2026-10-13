@@ -22,7 +22,13 @@ namespace ActionRPG
         bool Continuous(const CombatActorState& inA, const CombatActorState& inB)
         {
             const float dx = inB.position.x - inA.position.x, dy = inB.position.y - inA.position.y;
-            return inA.hp != 0 && inB.hp != 0 && dx * dx + dy * dy < TELEPORT_DISTANCE * TELEPORT_DISTANCE;
+            if (inA.hp == 0 || inB.hp == 0) return false;
+            if (dx * dx + dy * dy < TELEPORT_DISTANCE * TELEPORT_DISTANCE) return true;
+            // Authored force can exceed the teleport threshold over dropped snapshots in the same epoch.
+            if (!inA.hasKnockbackState || !inB.hasKnockbackState || (!inA.knockbackActive && !inB.knockbackActive))
+                return false;
+            const float limit = std::max(inA.knockbackDistance, inB.knockbackDistance) + 1.0f;
+            return dx * dx + dy * dy <= limit * limit;
         }
         bool ContinuousPlayer(const CombatPlayerState& inA, const CombatPlayerState& inB, const float inSeconds, const float inTempoScale)
         {
@@ -86,9 +92,40 @@ namespace ActionRPG
             outState.presentationSpeed = std::sqrt(dx * dx + dy * dy) / std::max(0.001f, inSeconds);
             outState.presentationMoving = outState.presentationSpeed > 1.0f;
         }
+        // Interpolate known poses, but never turn a completed hit's measured velocity into idle movement.
+        // New reactions (including start+end in one tick) take effect at the same buffered instant as their XY.
+        void ForcedPose(CombatActorState& outState, const CombatActorState& inA, const CombatActorState& inB,
+            const float inRatio, const float inAgeSeconds, const bool inAllowPrediction)
+        {
+            const bool newReaction = inA.hasKnockbackState && inB.hasKnockbackState
+                && inA.knockbackSequence != inB.knockbackSequence;
+            if (inRatio < 1.0f && newReaction)
+            {
+                outState.position = PredictCombatKnockbackPosition(inA,
+                    inAllowPrediction ? inAgeSeconds : 0.0f);
+                outState.height = inA.height; outState.verticalSpeed = inA.verticalSpeed;
+                outState.presentationMoving = false; outState.presentationSpeed = 0.0f;
+            }
+            else if (inRatio >= 1.0f && (newReaction || inA.knockbackActive || inB.knockbackActive
+                || inA.reaction != CombatReaction::None || inB.reaction != CombatReaction::None))
+            {
+                outState.position = PredictCombatKnockbackPosition(inB, inAllowPrediction ? inAgeSeconds : 0.0f);
+                outState.presentationMoving = false; outState.presentationSpeed = 0.0f;
+            }
+        }
         void Advance(CombatActorState& outState, const float inSeconds)
         {
+            if (outState.knockbackActive)
+            {
+                const float age = outState.height > 0.0f ? inSeconds : std::min(inSeconds, outState.reactionSeconds);
+                outState.knockbackElapsedSeconds = std::min(outState.knockbackDurationSeconds,
+                    outState.knockbackElapsedSeconds + age);
+            }
             outState.reactionSeconds = std::max(0.0f, outState.reactionSeconds - inSeconds);
+            if (outState.knockbackElapsedSeconds >= outState.knockbackDurationSeconds
+                || outState.hp == 0 || outState.reaction == CombatReaction::None
+                || (outState.height == 0.0f && outState.reactionSeconds == 0.0f))
+                ClearCombatKnockback(outState);
         }
     }
 
@@ -179,6 +216,8 @@ namespace ActionRPG
             }
             Pose(player, *pa, *pb, playerRatio, FrameActiveSeconds(playerTimeline, *pa,
                 static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs)));
+            ForcedPose(player, *pa, *pb, span > 0.0 ? boundedRatio : useB ? 2.0f : 0.0f,
+                std::min(actionAge, 0.1f * inRules.tempoScale), !latest.cleared && !stalled);
             // Pose ratios/measured velocity use real time; only action clocks advance in combat time.
             Advance(player, actionAge); player.shotSeconds += actionAge; player.jumpSeconds += actionAge;
             player.presentationTimeMs = target;
@@ -219,6 +258,8 @@ namespace ActionRPG
                 static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs), poseTime);
             Pose(monster, *ma, *mb, monsterRatio, FrameActiveSeconds(monsterTimeline, *ma,
                 static_cast<double>(a->serverTimeMs), static_cast<double>(b->serverTimeMs)));
+            ForcedPose(monster, *ma, *mb, span > 0.0 ? boundedRatio : useB ? 2.0f : 0.0f,
+                std::min(actionAge, 0.1f * inRules.tempoScale), !latest.cleared && !stalled);
             Advance(monster, actionAge); monster.actionSeconds += actionAge;
             monster.presentationTimeMs = target;
             if (IsCombatHitstopped(monster, target)) monster.presentationMoving = false;

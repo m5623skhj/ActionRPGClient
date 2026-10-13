@@ -122,6 +122,7 @@ namespace ActionRPG
         void ApplyCombatState(const CombatPlayerState& inState, const CombatRules& inRules,
             bool inSetPosition = false);
         void ApplyBufferedCombatState(const CombatPlayerState& inState, const CombatRules& inRules);
+        void ClearCombatKnockback();
         void UpdateCombatPresentation(float inDeltaSeconds, const GameplayMap& inMap,
             const Vector2* inLocalDirection = nullptr, bool inRun = false);
         [[nodiscard]] bool IsAttacking() const { return attackPhase != AttackPhase::None; }
@@ -138,6 +139,7 @@ namespace ActionRPG
         [[nodiscard]] const CombatPlayerState* GetCombatPlayerState() const { return combatState ? &*combatState : nullptr; }
         [[nodiscard]] float GetCombatElapsedSeconds() const { return combatPresentationSeconds; }
         [[nodiscard]] float GetCombatTempoScale() const { return combatRules.tempoScale; }
+        [[nodiscard]] bool UsesForcedCombatPosition() const { return combatPositionForced; }
         // Server-driven monster presentation needs a pose without the player action controller.
         explicit Character(Vector2 inInitialPosition) : groundPosition(inInitialPosition) {}
         Character(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,
@@ -270,7 +272,7 @@ namespace ActionRPG
         std::uint32_t predictedAttackFacingSequence{};
         bool predictedAttackFacingLeft{};
         float predictedAttackFacingSeconds{};
-        bool bufferedPresentation{}, combatAnimationChanged{true};
+        bool bufferedPresentation{}, combatPositionForced{}, combatAnimationChanged{true};
         const SpriteAnimation* lastCombatAnimation{};
         float lastCombatAnimationSeconds{}, movementAnimationScale{1.0f};
         float combatPresentationSeconds{}, combatWallSeconds{}, deathPresentationSeconds{};

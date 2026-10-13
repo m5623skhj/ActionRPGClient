@@ -465,11 +465,17 @@ namespace ActionRPG
         {
             serverPresentationSeconds = std::min(0.25f, CombatActiveSeconds(*serverState, serverState->presentationTimeMs,
                 serverState->presentationTimeMs + serverWallSeconds * 1000.0)) * serverRules.tempoScale;
-            const float blend = 1.0f - std::exp(-12.0f * activeWallDelta);
-            auto position = GetGroundPosition();
-            position.x += (serverState->position.x - position.x) * blend;
-            position.y += (serverState->position.y - position.y) * blend;
-            SetGroundPosition(position);
+            if (serverState->reaction != CombatReaction::None)
+                SetGroundPosition(PredictCombatKnockbackPosition(*serverState,
+                    std::min(0.1f, serverWallSeconds) * serverRules.tempoScale));
+            else
+            {
+                const float blend = 1.0f - std::exp(-12.0f * activeWallDelta);
+                auto position = GetGroundPosition();
+                position.x += (serverState->position.x - position.x) * blend;
+                position.y += (serverState->position.y - position.y) * blend;
+                SetGroundPosition(position);
+            }
             float height = serverState->height;
             if (height > 0.0f && serverState->hp != 0)
                 height = std::max(0.0f, height + serverState->verticalSpeed * serverPresentationSeconds
@@ -556,7 +562,12 @@ namespace ActionRPG
         bufferedPresentation = inBuffered;
         SetFacingLeft(inState.facingLeft);
         SetPresentationHeight(inState.height);
-        if (!serverState || inBuffered || (newStop && inState.hitstopDurationSeconds > 0.0f)) SetGroundPosition(inState.position);
+        const bool forcedPosition = inState.knockbackActive || inState.reaction != CombatReaction::None
+            || (inState.hasKnockbackState && inState.knockbackSequence
+                != (serverState ? serverState->knockbackSequence : 0))
+            || (serverState && (serverState->knockbackActive || serverState->reaction != CombatReaction::None));
+        if (!serverState || inBuffered || forcedPosition || (newStop && inState.hitstopDurationSeconds > 0.0f))
+            SetGroundPosition(inState.position);
         if (next != Motion::Death)
         {
             auto& animation = clips.at(motion).animation;

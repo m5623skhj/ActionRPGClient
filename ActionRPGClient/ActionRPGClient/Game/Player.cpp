@@ -156,6 +156,8 @@ namespace ActionRPG
     /** Align a matching slide snapshot to local preview time; ignore poses preceding its input. */
     void Player::ReconcileCombatGroundPosition(const CombatPlayerState& inState, const GameplayMap& inMap)
     {
+        // ApplyCombatState already consumed the exact hit/termination XY, irrespective of move acknowledgements.
+        if (UsesForcedCombatPosition()) return;
         const auto pending = GetPendingSlideSequence();
         if (pending != 0 && inState.actionSequence < pending) return;
         Vector2 target = inState.position;

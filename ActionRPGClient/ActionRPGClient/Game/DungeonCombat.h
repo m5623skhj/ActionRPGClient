@@ -18,6 +18,7 @@ namespace ActionRPG
         float tempoScale{1.0f};
         float walkSpeed{}, runSpeed{}, shotPrepareSeconds{}, shotIntervalSeconds{}, shotRecoverSeconds{};
         float jumpSpeed{}, gravity{}, jumpPrepareSeconds{}, hitStunSeconds{}, downSeconds{}, riseSeconds{};
+        float knockbackSeconds{0.18f};
         float projectileSpeed{}, muzzleHeight{}, airFireLift{}, airRecoilDistance{}, shotHitstopSeconds{};
         std::uint32_t maxHp{}, maxShots{};
         double tickIntervalSeconds{0.05};
@@ -35,6 +36,11 @@ namespace ActionRPG
         double presentationTimeMs{};
         bool facingLeft{};
         std::uint32_t reactionSequence{};
+        // KBK1 distances/durations already include server HR scaling; never apply HR again.
+        bool hasKnockbackState{}, knockbackActive{};
+        std::uint32_t knockbackSequence{};
+        float knockbackDirectionX{}, knockbackDirectionY{}, knockbackDistance{};
+        float knockbackElapsedSeconds{}, knockbackDurationSeconds{};
         bool presentationMoving{};
         float presentationSpeed{};
         CombatReaction reaction{ CombatReaction::None };
@@ -42,6 +48,9 @@ namespace ActionRPG
     // Return real seconds outside the wall-clock attacker-only stop interval; callers convert action time once.
     [[nodiscard]] float CombatActiveSeconds(const CombatActorState& inActor, double inStartMs, double inEndMs);
     [[nodiscard]] bool IsCombatHitstopped(const CombatActorState& inActor, double inTimeMs);
+    // Predict only the unconsumed eased distance from a received XY, within the caller's bounded combat age.
+    [[nodiscard]] Vector2 PredictCombatKnockbackPosition(const CombatActorState& inActor, float inCombatAgeSeconds);
+    void ClearCombatKnockback(CombatActorState& inActor);
     struct CombatBuffState { std::string skillId; float remainingSeconds{}; };
     struct CombatPlayerState : CombatActorState
     {

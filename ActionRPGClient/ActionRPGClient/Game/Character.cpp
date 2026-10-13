@@ -250,7 +250,7 @@ namespace ActionRPG
     {
         ClearSlidePrediction();
         bufferedPresentation = false; combatAnimationChanged = true; lastCombatAnimation = nullptr; lastCombatAnimationSeconds = 0;
-        combatState.reset(); combatWallSeconds = 0.0f; combatPresentationSeconds = deathPresentationSeconds = slidePresentationSeconds = 0.0f;
+        combatState.reset(); combatPositionForced = false; combatWallSeconds = 0.0f; combatPresentationSeconds = deathPresentationSeconds = slidePresentationSeconds = 0.0f;
         if (slideAnimation) slideAnimation->Reset();
         CancelAttack();
         bufferedActions.clear();
@@ -712,6 +712,8 @@ namespace ActionRPG
     {
         if (combatState && inState.hitstopSequence < combatState->hitstopSequence) return;
         const bool newStop = !combatState || inState.hitstopSequence != combatState->hitstopSequence;
+        const bool newKnockback = inState.hasKnockbackState && inState.knockbackSequence
+            != (combatState ? combatState->knockbackSequence : 0);
         ConfigureHitRecovery(inState.hitRecovery);
         combatAnimationChanged = newStop || combatAnimationChanged || !combatState || combatState->reaction != inState.reaction
             || combatState->reactionSequence != inState.reactionSequence
@@ -733,7 +735,7 @@ namespace ActionRPG
         if (slidePrediction)
         {
             auto& slide = *slidePrediction;
-            if (inSetPosition || inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive)
+            if (inSetPosition || newKnockback || inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive)
                 ClearSlidePrediction();
             else if (inState.slideSequence == slide.sequence && inState.slideActive)
             {
@@ -746,15 +748,21 @@ namespace ActionRPG
             else if (inState.actionSequence >= slide.sequence)
                 ClearSlidePrediction();
         }
-        if (inSetPosition || (newStop && inState.hitstopDurationSeconds > 0.0f)) groundPosition = inState.position;
+        // A new inactive sequence may contain the entire high-HR displacement from one server tick.
+        // Snap its final XY too; normal movement dead zones/partial correction must never eat a hit.
+        combatPositionForced = inState.knockbackActive || inState.reaction != CombatReaction::None
+            || newKnockback
+            || (combatState && (combatState->knockbackActive || combatState->reaction != CombatReaction::None));
+        if (inSetPosition || combatPositionForced || (newStop && inState.hitstopDurationSeconds > 0.0f))
+            groundPosition = inState.position;
         combatState = inState; combatRules = inRules; combatPresentationSeconds = combatWallSeconds = 0.0f;
         if (!wasDead && inState.hp == 0) deathPresentationSeconds = 0.0f;
-        if (inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive
+        if (newKnockback || inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive
             || landed
             || (predictedAttackFacingSequence != 0 && inState.actionSequence >= predictedAttackFacingSequence
                 && (inState.shotPhase != CombatShotPhase::None || inState.shotCount > 0)))
             ClearPredictedAttackFacing();
-        if (inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive)
+        if (newKnockback || inState.hp == 0 || inState.reaction != CombatReaction::None || inState.skillActive)
             ClearSlidePrediction();
         height = inState.height;
         facingLeft = slidePrediction ? slidePrediction->facingLeft
@@ -778,6 +786,14 @@ namespace ActionRPG
         runningRequested = isMoving && (inState.running || inState.presentationSpeed > (inRules.walkSpeed + inRules.runSpeed) * 0.5f * inRules.tempoScale);
         const float speed = runningRequested ? inRules.runSpeed : inRules.walkSpeed;
         movementAnimationScale = isMoving ? std::clamp(inState.presentationSpeed / speed, 0.25f * inRules.tempoScale, 2.0f * inRules.tempoScale) : 1.0f;
+    }
+
+    void Character::ClearCombatKnockback()
+    {
+        if (!combatState) return;
+        ActionRPG::ClearCombatKnockback(*combatState);
+        combatState->position = groundPosition;
+        combatPositionForced = false;
     }
 
     bool Character::IsItemUseMotionActive() const
@@ -860,7 +876,15 @@ namespace ActionRPG
             }
         }
         if (state.hp == 0) deathPresentationSeconds += inDeltaSeconds * combatRules.tempoScale;
-        if (inLocalDirection && activeDelta > 0.0f)
+        if (!bufferedPresentation && state.reaction != CombatReaction::None)
+        {
+            // Forced motion is independent of input/slide prediction and bounded to 100ms of packet loss.
+            const float age = std::min(0.1f, combatWallSeconds) * combatRules.tempoScale;
+            const auto target = PredictCombatKnockbackPosition(state, age);
+            groundPosition = inMap.ConstrainGroundMovement(state.position, target, HORIZONTAL_RADIUS, DEPTH_RADIUS);
+            isMoving = runningRequested = false;
+        }
+        else if (inLocalDirection && activeDelta > 0.0f)
         {
             const auto previous = groundPosition;
             if (slidePrediction || state.slideActive)
