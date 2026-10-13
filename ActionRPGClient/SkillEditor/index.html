@@ -26,6 +26,9 @@
    <label>쿨다운 (초)<input type="number" data-bind="cooldownSeconds" min="0" max="86400" step="0.05"></label></div>
    <section data-type="direct projectile">
     <label>피해량<input type="number" data-bind="execution.damage" min="1" max="1000000" step="1"></label>
+    <label>Force · 대상 수평 밀림 거리 (월드 단위)<input type="number" data-bind="execution.force" min="0" max="500" step="any"></label>
+    <label>대상 피격 유형<select data-bind="execution.hitType"><option value="Normal">Normal · 일반 경직</option><option value="Airborne">Airborne · 에어본</option></select></label>
+    <small>Force 0은 수평 밀림 없음입니다. 피격 유형은 맞은 대상에 적용하며 시전자의 지상·공중 모드와 별개입니다.</small>
     <label>역경직 시간 (초)<input type="number" data-bind="execution.hitstopSeconds" min="0" step="any"></label>
     <small>명중 시 공격자만 정지합니다. 0은 비활성입니다.</small>
    </section>

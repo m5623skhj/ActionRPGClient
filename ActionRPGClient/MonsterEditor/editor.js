@@ -519,7 +519,9 @@
       field(content, "쿨다운 (초)", "number", entry.cooldownSeconds, value => { entry.cooldownSeconds = value; touch(); }, { min: 0 });
       field(content, "최소 거리", "number", entry.minRange, value => { entry.minRange = value; touch(); }, { min: 0 });
       field(content, "최대 거리", "number", entry.maxRange, value => { entry.maxRange = value; touch(); }, { min: 0 });
-      selectField(content, "피격 유형", entry.hitType, [{ id: "Normal", label: "일반 경직" }, { id: "Airborne", label: "에어본" }], value => { entry.hitType = value; touch(); });
+      field(content, "Force · 대상 수평 밀림 거리 (월드 단위)", "number", entry.force, value => { entry.force = value; touch(); }, { min: 0, max: AI.MAX_FORCE_DISTANCE });
+      selectField(content, "대상 피격 유형", entry.hitType, [{ id: "Normal", label: "Normal · 일반 경직" }, { id: "Airborne", label: "Airborne · 에어본" }], value => { entry.hitType = value; touch(); });
+      content.append(element("p", "muted", "Force 0은 수평 밀림 없음입니다. 피격 유형은 맞은 대상에 적용하며 시전자의 공중 상태가 아닙니다."));
     } else field(content, "반복 재생", "checkbox", entry.loop, value => { entry.loop = value; touch(); });
     content.append(element("p", "muted", "외부 이미지 파일과 실제 스킬 효과는 이 도구가 생성하지 않습니다. 게임에 동일한 정의를 연결해야 합니다."));
     button(content, "정의 삭제", () => {
@@ -562,7 +564,7 @@
     if (approve && result.errors > 0) return;
     const documentAtStart = state.document;
     const revision = state.revision;
-    const snapshot = AI.clone(documentAtStart);
+    const snapshot = AI.normalizeSkillForces(AI.clone(documentAtStart));
     if (approve) snapshot.approval = {
       status: "approved", validatorVersion: AI.VALIDATOR_VERSION,
       approvedAt: new Date().toISOString(), scope: "structure-and-progress",
@@ -631,6 +633,7 @@
     const text = (await file.text()).replace(/^\uFEFF/, "");
     const next = JSON.parse(text);
     if (!AI.isEditableDocument(next)) throw new Error("지원하지 않는 버전 또는 편집할 수 없는 구조입니다. schemaVersion 1과 nodes/edges/parameters 구조를 확인하세요.");
+    AI.normalizeSkillForces(next);
     const approvedSource = next.approval?.status === "approved" || file.name.endsWith(".approved.ai.json");
     // Approval from a file is never trusted; a modified file must be re-approved.
     AI.resetApproval(next);
@@ -796,7 +799,7 @@
     if (list.length >= 2048) return alert("정의 목록 한도에 도달했습니다.");
     const id = uniqueId(list, state.catalogType === "skill" ? "Skill" : "Motion");
     list.push(state.catalogType === "skill"
-      ? { id, label: "새 스킬", animationId: id + "Animation", durationSeconds: 0.5, cooldownSeconds: 1, minRange: 0, maxRange: 70, hitType: "Normal" }
+      ? { id, label: "새 스킬", animationId: id + "Animation", durationSeconds: 0.5, cooldownSeconds: 1, minRange: 0, maxRange: 70, hitType: "Normal", force: 0 }
       : { id, label: "새 동작", animationId: id + "Animation", durationSeconds: 0.5, loop: false });
     state.catalogIndex = list.length - 1;
     touch();

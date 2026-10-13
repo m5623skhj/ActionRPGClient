@@ -4,6 +4,7 @@
   const SCHEMA_VERSION = 1;
   const VALIDATOR_VERSION = 1;
   const MAX_MONSTERS = 256;
+  const MAX_FORCE_DISTANCE = 500;
   const MAX_NODES = 512;
   const MAX_EDGES = 2048;
   const MAX_CONDITION_DEPTH = 8;
@@ -43,6 +44,7 @@
     { id: "Immediate", label: "즉시 전환 (같은 업데이트)" }
   ];
   const clone = value => JSON.parse(JSON.stringify(value));
+  const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
   const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const defaults = definitions => Object.fromEntries(definitions.map(field => [field.id, field.defaultValue]));
   function createAction(type, document) {
@@ -72,6 +74,11 @@
         edges: []
       }
     };
+  }
+  // Normalize only absent legacy force values; invalid explicit values remain repairable drafts.
+  function normalizeSkillForces(document) {
+    for (const skill of document.skills) if (!own(skill, "force")) skill.force = 0;
+    return document;
   }
   function createDocument() {
     return {
@@ -169,7 +176,7 @@
     for (const skill of document.skills) {
       if (!isObject(skill)) continue;
       const context = { recordType: "skill", recordId: skill.id };
-      keys(skill, ["id", "label", "animationId", "durationSeconds", "cooldownSeconds", "minRange", "maxRange", "hitType"], "스킬", context);
+      keys(skill, ["id", "label", "animationId", "durationSeconds", "cooldownSeconds", "minRange", "maxRange", "hitType", "force"], "스킬", context);
       text(skill.label, "스킬 이름", context);
       validId(skill.animationId, "스킬 애니메이션", context);
       finite(skill.durationSeconds, "스킬 동작 시간", 0.001, undefined, context);
@@ -178,6 +185,7 @@
       finite(skill.maxRange, "스킬 최대 거리", 0, undefined, context);
       if (skill.minRange > skill.maxRange) error("스킬 최소 거리가 최대 거리보다 큽니다.", context);
       if (!["Normal", "Airborne"].includes(skill.hitType)) error("스킬 피격 유형은 Normal 또는 Airborne이어야 합니다.", context);
+      finite(own(skill, "force") ? skill.force : 0, "Force · 대상 수평 밀림 거리 (월드 단위)", 0, MAX_FORCE_DISTANCE, context);
     }
     for (const motion of document.motions) {
       if (!isObject(motion)) continue;
@@ -366,9 +374,9 @@
   }
 
   window.MonsterAI = Object.freeze({
-    SCHEMA_VERSION, VALIDATOR_VERSION, MAX_MONSTERS, MAX_NODES, MAX_EDGES, MAX_CONDITION_DEPTH,
+    SCHEMA_VERSION, VALIDATOR_VERSION, MAX_MONSTERS, MAX_FORCE_DISTANCE, MAX_NODES, MAX_EDGES, MAX_CONDITION_DEPTH,
     MAX_CONDITION_TERMS, ID_PATTERN, actionDefinitions, conditionDefinitions, triggers,
     clone, createDocument, createMonster, createAction, createCondition, formatAction, formatCondition,
-    resetApproval, validateDocument, isEditableDocument
+    resetApproval, validateDocument, isEditableDocument, normalizeSkillForces
   });
 }());

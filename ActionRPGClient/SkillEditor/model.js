@@ -12,6 +12,7 @@
   const KEYS = ["Left", "Right", "Up", "Down", "Z", "X", "C", "V"];
   const TYPES = ["direct", "projectile", "buff"];
   const COORDINATES = "groundXY-height-facingRight-worldUnits";
+  const MAX_FORCE_DISTANCE = 500;
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   function Keys(value, names, label) {
     assert(object(value) && Object.keys(value).length === names.length && names.every(name => own(value, name)), label + ": 필드 형식 오류");
@@ -62,6 +63,17 @@
     return value;
   }
 
+  function ForceDistance(execution) {
+    const value = own(execution, "force") ? execution.force : 0;
+    number(value, 0, MAX_FORCE_DISTANCE, "Force · 대상 수평 밀림 거리 (월드 단위)");
+    return value;
+  }
+  function HitType(execution) {
+    const value = own(execution, "hitType") ? execution.hitType : "Normal";
+    assert(value === "Normal" || value === "Airborne", "대상 피격 유형은 Normal 또는 Airborne이어야 합니다.");
+    return value;
+  }
+
   function NewProject() {
     return { format: "PlayerSkillEditorProject", schemaVersion: 1, characters: [], animations: null,
       hurtRects: null, skills: [], images: {} };
@@ -97,8 +109,8 @@
   }
   function SetType(skill, type) {
     assert(TYPES.includes(type), "스킬 유형 오류"); skill.type = type;
-    skill.execution = type === "direct" ? { damage: 20, depthRadius: 24, hitstopSeconds: 0.05 }
-      : type === "projectile" ? { damage: 20, speed: 1000, radius: 4, range: 900, hitstopSeconds: 0 }
+    skill.execution = type === "direct" ? { damage: 20, depthRadius: 24, force: 0, hitType: "Normal", hitstopSeconds: 0.05 }
+      : type === "projectile" ? { damage: 20, speed: 1000, radius: 4, range: 900, force: 0, hitType: "Normal", hitstopSeconds: 0 }
       : { target: "self", stat: "damageMultiplier", multiplier: 1.25, durationSeconds: 5, refresh: "replaceDuration" };
     for (const variant of [skill.ground, skill.air].filter(Boolean)) {
       delete variant.attackRects; delete variant.spawn; delete variant.yawDegrees; delete variant.pitchDegrees;
@@ -167,9 +179,13 @@
       assert(!commands.has(command), label + ": 동일 캐릭터의 중복 커맨드 " + commands.get(command)); commands.set(command, label);
       assert(skill.ground || skill.air, label + ": 지상 또는 공중 모션 필요");
       const execution = clone(skill.execution);
-      if (skill.type !== "buff") execution.hitstopSeconds = HitstopSeconds(execution);
-      Keys(execution, skill.type === "direct" ? ["damage", "depthRadius", "hitstopSeconds"] : skill.type === "projectile"
-        ? ["damage", "speed", "radius", "range", "hitstopSeconds"] : ["target", "stat", "multiplier", "durationSeconds", "refresh"], label);
+      if (skill.type !== "buff") {
+        execution.hitstopSeconds = HitstopSeconds(execution);
+        execution.force = ForceDistance(execution);
+        execution.hitType = HitType(execution);
+      }
+      Keys(execution, skill.type === "direct" ? ["damage", "depthRadius", "force", "hitType", "hitstopSeconds"] : skill.type === "projectile"
+        ? ["damage", "speed", "radius", "range", "force", "hitType", "hitstopSeconds"] : ["target", "stat", "multiplier", "durationSeconds", "refresh"], label);
       if (skill.type === "buff") {
         assert(execution.target === "self" && execution.refresh === "replaceDuration"
           && ["damageMultiplier", "movementMultiplier"].includes(execution.stat), label + ": 지원하지 않는 버프 정책");
@@ -244,8 +260,10 @@
         && typeof skill.name === "string" && TYPES.includes(skill.type) && object(skill.input)
         && Array.isArray(skill.input.command) && skill.input.command.length <= 16 && skill.input.command.every(key => typeof key === "string")
         && object(skill.execution), "작업 스킬 형식 오류");
-      if (skill.type !== "buff") HitstopSeconds(skill.execution);
-      else assert(!own(skill.execution, "hitstopSeconds"), "버프에는 역경직 시간을 지정할 수 없습니다.");
+      if (skill.type !== "buff") {
+        HitstopSeconds(skill.execution); ForceDistance(skill.execution); HitType(skill.execution);
+      } else assert(!["hitstopSeconds", "force", "hitType"].some(name => own(skill.execution, name)),
+        "버프에는 역경직 시간, Force 또는 피격 유형을 지정할 수 없습니다.");
       skillIds.add(skill.id);
       for (const mode of ["ground", "air"]) {
         const v = skill[mode]; if (v === null) continue;
@@ -265,8 +283,11 @@
       total += data.length; assert(total <= 140 * 1024 * 1024, "작업 이미지 총량 초과");
     }
     const output = clone(value);
-    for (const skill of output.skills)
-      if (skill.type !== "buff" && !own(skill.execution, "hitstopSeconds")) skill.execution.hitstopSeconds = 0;
+    for (const skill of output.skills) if (skill.type !== "buff") {
+      skill.execution.hitstopSeconds = HitstopSeconds(skill.execution);
+      skill.execution.force = ForceDistance(skill.execution);
+      skill.execution.hitType = HitType(skill.execution);
+    }
     return output;
   }
   function Velocity(variant, facingLeft, speed) {
