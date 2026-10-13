@@ -81,8 +81,19 @@ ID는 영문자로 시작하는 1~64자의 영문·숫자·밑줄·마침표·�
 | `PlayMotion` | `motionId` | 실제 동작 시간이 지난 뒤 완료; 반복 동작은 완료하지 않음 |
 
 스킬 정의는 `id`, `label`, `animationId`, `durationSeconds`,
-`cooldownSeconds`, `minRange`, `maxRange`, `hitType`을 가집니다.
-피격 유형은 `Normal` 또는 `Airborne`입니다.
+`cooldownSeconds`, `minRange`, `maxRange`, `hitType`과 선택 `force`를 가집니다.
+**대상 피격 유형**은 `Normal` 또는 `Airborne`이며 맞은 대상의 반응입니다. 시전자의 공중 상태가 아닙니다.
+**Force · 대상 수평 밀림 거리 (월드 단위)**는 유한 숫자 0~500의 총 수평 밀림 거리입니다. 0은 수평 밀림 없음입니다.
+새 스킬의 Force는 0이며 기존 문서에서 force가 없으면 불러오기·저장·승인 출력에서 0으로 보완합니다.
+명시한 0과 기존 hitType은 보존합니다. 몬스터의 기존 hitType 필드는 계속 필수입니다.
+null·문자열·음수·500 초과 Force와 잘못된 hitType은 정적 검사 오류로 승인 출력을 차단합니다.
+수정이 필요한 값은 일반 작업 문서로 불러오고 저장할 수 있으며 스킬 정의에서 바로 고칩니다.
+Force는 `skills[].hitType`과 같은 객체의 `skills[].force`로 저장하고 Combat.json의 몬스터 전투 프로필에 중복하지 않습니다.
+
+대상 HR에 대해 `k=1/(1+HR/100)`을 경직 시간·밀림 시간·밀림 거리에 각각 적용하는 런타임 계약입니다.
+밀림 시간은 Combat.json 전역의 `reactions.knockbackSeconds`(기본 0.18 combat초)를 사용하며 스킬별 duration을 추가하지 않습니다.
+밀림은 경직 종료를 넘지 않고 피격 해제 시 종료합니다. 에어본 높이는 이번 HR 감소 대상이 아닙니다.
+편집기는 실제 전투·밀림·에어본 물리나 HR 반응을 시뮬레이션하지 않습니다.
 
 동작 정의는 `id`, `label`, `animationId`, `durationSeconds`, `loop`를 가집니다.
 스킬·동작 시간을 0으로 지정할 수 없습니다.
@@ -215,6 +226,7 @@ AI 실행은 GameRoomCombat.cpp에서 개체별로 처리하며 한 틱의 전�
 1. AI 문서를 서버 `ActionRPGServer/GameRoomServer/Data/Monsters/`에 두고 MonsterCatalog.json의
    `{dataId, definitionFile, monsterId}`로 숫자 배치 ID와 문서의 문자열 몬스터 ID를 연결합니다.
 2. 스킬의 damage/hitSeconds/reachHeight와 이동·감지·피격 크기는 서버 `Data/Combat.json`에 별도로 정의합니다.
+   Force와 hitType은 AI 문서의 skills[]에만 두며 Combat.monsters[].skills[]에 중복하지 않습니다.
    MonsterEditor의 minRange/maxRange/cooldown/duration만으로 실제 피해량이 완성되지 않습니다.
 3. 클라이언트 `Assets/Data/monsters.json`의 같은 dataId/monsterId, 모션 메타데이터·PNG·renderHeight를 맞춥니다.
    `animationId`는 외형 모션 참조이며 AI 노드 ID와 별개입니다.

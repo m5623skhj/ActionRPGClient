@@ -16,8 +16,8 @@ T[0]=0, T[i+1]=T[i]+frameDurationsSeconds[i]이며 durationSeconds는 T[frameCou
 
 | 유형 | execution | 모드별 추가 필드 |
 |---|---|---|
-| direct | damage, depthRadius, hitstopSeconds(선택) | attackRects: `{index, rect:{x,y,width,height}}` 배열 |
-| projectile | damage, speed, radius, range, hitstopSeconds(선택) | spawn:{x,y,height}, yawDegrees, pitchDegrees |
+| direct | damage, depthRadius, force(선택), hitType(선택), hitstopSeconds(선택) | attackRects: `{index, rect:{x,y,width,height}}` 배열 |
+| projectile | damage, speed, radius, range, force(선택), hitType(선택), hitstopSeconds(선택) | spawn:{x,y,height}, yawDegrees, pitchDegrees |
 | buff | target:self, stat:damageMultiplier 또는 movementMultiplier, multiplier, durationSeconds, refresh:replaceDuration | 없음 |
 
 `PlayerSkills.schemaVersion`과 작업 schemaVersion은 1을 유지합니다.
@@ -28,7 +28,22 @@ T[0]=0, T[i+1]=T[i]+frameDurationsSeconds[i]이며 durationSeconds는 T[frameCou
 수치는 유한·비음수이며 IEEE754 binary32로 변환해 유한한 값이어야 합니다.
 float 최대값 3.4028234663852886e38을 넘거나, 양수인데 float 변환 후 0이 되는 값은 거절합니다. 임의의 게임 시간 상한은 없습니다.
 null·문자열을 누락으로 취급하지 않습니다. 적용 대상은 명중한 공격자이며 대상의 경직이나 버프 지속시간이 아닙니다.
-`hitRecovery`는 일반 경직만 단축하는 별도 공통 캐릭터 능력치이고, PlayerSkills나 이 편집기의 출력 필드에 추가하지 않습니다.
+`hitRecovery`(HR)는 대상의 피격 반응을 조절하는 별도 공통 캐릭터 능력치이며, PlayerSkills나 이 편집기의 출력 필드에 추가하지 않습니다.
+
+## Force와 대상 피격 유형
+
+`execution.force`와 `execution.hitType`은 direct/projectile의 선택 필드입니다.
+Force는 속도나 지속시간이 아닌 **총 수평 밀림 거리(월드 단위)**이며 유한 숫자 0~500입니다. 0은 수평 밀림 없음입니다.
+hitType은 정확히 `Normal` 또는 `Airborne`이며 **맞은 대상의 피격 유형**입니다. 시전자의 ground/air 모드와 별개입니다.
+새 공격과 기존 작업의 누락값은 force=0, hitType=Normal입니다. 명시한 0과 기존 Airborne은 그대로 보존합니다.
+null·문자열·음수·500 초과 force, 알 수 없는 hitType은 불러오기·검사·공용 출력에서 거절합니다.
+불러온 작업은 다음 저장에 기본값을 포함하고 공용 PlayerSkills 출력에는 두 필드를 명시합니다. buff에는 두 필드를 허용하지 않습니다.
+유형 변경은 기존 유형별 설정과 함께 Force·피격 유형도 새 유형의 기본값으로 초기화합니다.
+
+런타임 계약은 대상 HR에 대해 `k=1/(1+HR/100)`을 경직 시간·밀림 시간·밀림 거리에 각각 곱합니다.
+밀림 시간은 Combat.json의 전역 `reactions.knockbackSeconds`(기본 0.18 combat초)를 사용하며 스킬별 duration을 추가하지 않습니다.
+밀림은 경직 종료를 넘지 않으며 피격 해제 시 종료합니다. 에어본 높이는 이번 HR 감소 대상이 아닙니다.
+편집기는 HR·전역 밀림 시간이나 실제 피격 물리를 편집·실행하지 않습니다.
 
 공격 rect의 x는 오른쪽 기준 전방 X, y는 캐릭터 발 기준 아래쪽 경계의 높이, width/height는 양수 월드 크기입니다.
 서버에서 왼쪽 rect의 X 구간은 [-x-width, -x], 높이 구간은 [actorHeight+y, actorHeight+y+height]입니다.
