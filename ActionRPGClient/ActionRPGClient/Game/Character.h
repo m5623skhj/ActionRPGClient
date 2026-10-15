@@ -220,6 +220,7 @@ namespace ActionRPG
         float verticalVelocity{};
         float jumpSpeed{};
         bool facingLeft{};
+        std::optional<bool> movementFacingLeft;
         bool isMoving{};
         AttackPhase attackPhase{ AttackPhase::None };
         JumpPhase jumpPhase{ JumpPhase::Grounded };

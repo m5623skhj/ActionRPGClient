@@ -156,6 +156,7 @@ namespace ActionRPG
         }
 
         isMoving = jumpPhase == JumpPhase::Grounded && !IsAttacking() && lengthSquared > 0.0f;
+        if (isMoving && direction.x != 0.0f) movementFacingLeft = direction.x < 0.0f;
         if (isMoving && IsRunning())
         {
             runAnimation.Update(inDeltaSeconds);
@@ -249,6 +250,7 @@ namespace ActionRPG
     void Character::ResetActionState()
     {
         ClearSlidePrediction();
+        movementFacingLeft.reset();
         bufferedPresentation = false; combatAnimationChanged = true; lastCombatAnimation = nullptr; lastCombatAnimationSeconds = 0;
         combatState.reset(); combatPositionForced = false; combatWallSeconds = 0.0f; combatPresentationSeconds = deathPresentationSeconds = slidePresentationSeconds = 0.0f;
         if (slideAnimation) slideAnimation->Reset();
@@ -712,6 +714,7 @@ namespace ActionRPG
     {
         if (combatState && inState.hitstopSequence < combatState->hitstopSequence) return;
         const bool newStop = !combatState || inState.hitstopSequence != combatState->hitstopSequence;
+        if (!combatState) movementFacingLeft.reset();
         const bool newKnockback = inState.hasKnockbackState && inState.knockbackSequence
             != (combatState ? combatState->knockbackSequence : 0);
         ConfigureHitRecovery(inState.hitRecovery);
@@ -774,6 +777,7 @@ namespace ActionRPG
     void Character::ApplyBufferedCombatState(const CombatPlayerState& inState, const CombatRules& inRules)
     {
         const bool previousMoving = isMoving, previousRunning = runningRequested;
+        const Vector2 previousPosition = groundPosition;
         ApplyCombatState(inState, inRules, true);
         bufferedPresentation = true;
         if (IsHitstopped())
@@ -784,6 +788,11 @@ namespace ActionRPG
         slidePresentationSeconds = inState.slideSeconds;
         isMoving = inState.presentationMoving && inState.hp != 0 && inState.reaction == CombatReaction::None;
         runningRequested = isMoving && (inState.running || inState.presentationSpeed > (inRules.walkSpeed + inRules.runSpeed) * 0.5f * inRules.tempoScale);
+        const auto& animation = GetCombatAnimation();
+        const float horizontalMovement = groundPosition.x - previousPosition.x;
+        if ((&animation == &walkAnimation || &animation == &runAnimation) && !inState.knockbackActive
+            && std::abs(horizontalMovement) > 0.01f)
+            movementFacingLeft = horizontalMovement < 0.0f;
         const float speed = runningRequested ? inRules.runSpeed : inRules.walkSpeed;
         movementAnimationScale = isMoving ? std::clamp(inState.presentationSpeed / speed, 0.25f * inRules.tempoScale, 2.0f * inRules.tempoScale) : 1.0f;
     }
@@ -916,7 +925,11 @@ namespace ActionRPG
                     const float speed = IsRunning() ? runSpeed : walkSpeed;
                     groundPosition.x += direction.x / length * speed * activeDelta;
                     groundPosition.y += direction.y / length * speed * activeDelta;
-                    if (activeDelta > 0.0f && direction.x != 0.0f && !IsAttackFacingLocked()) facingLeft = direction.x < 0.0f;
+                    if (direction.x != 0.0f)
+                    {
+                        movementFacingLeft = direction.x < 0.0f;
+                        if (!IsAttackFacingLocked()) facingLeft = *movementFacingLeft;
+                    }
                     groundPosition = inMap.ConstrainGroundMovement(previous, groundPosition, HORIZONTAL_RADIUS, DEPTH_RADIUS);
                 }
             }
@@ -997,7 +1010,11 @@ namespace ActionRPG
 
         if (combatState)
         {
-            GetCombatAnimation().Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+            const auto& animation = GetCombatAnimation();
+            // Combo facing still owns shots; locomotion follows movement immediately.
+            const bool locomotion = &animation == &walkAnimation || &animation == &runAnimation;
+            animation.Draw(inRenderer, groundScreenPosition.x, bodyBottom,
+                locomotion ? movementFacingLeft.value_or(facingLeft) : facingLeft);
         }
         else if (IsHitReacting())
         {
@@ -1025,11 +1042,11 @@ namespace ActionRPG
         }
         else if (isMoving && IsRunning())
         {
-            runAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+            runAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, movementFacingLeft.value_or(facingLeft));
         }
         else if (isMoving)
         {
-            walkAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+            walkAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, movementFacingLeft.value_or(facingLeft));
         }
         else
         {
