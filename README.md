@@ -60,7 +60,3 @@ msbuild ./ActionRPGClient/ActionRPGClient/ActionRPGClient.vcxproj /t:Rebuild /p:
 - [스킬 에디터](ActionRPGClient/SkillEditor/README.md)
 
 편집기 출력, 서버 데이터 설치, 클라이언트 에셋 반영과 실제 플레이 검증은 각각 확인해야 합니다. 미니맵 파일 출력과 현재 게임의 미니맵 HUD 구현도 구분합니다.
-
-## 확인 범위
-
-2026-10-07 사용자가 Google 로그인과 정상 입장을 확인했습니다. 이번 문서 갱신은 기존 런타임 문서·프로젝트/데이터 경로와의 정적 대조이며 에이전트는 빌드·게임/서버 실행·DB 접속을 하지 않았습니다. 새 PC 최초 설치와 다중 클라이언트·던전 전체 검증은 별개이며 구현/미구현/미검증 범위는 각 상세 문서에 기록합니다.
