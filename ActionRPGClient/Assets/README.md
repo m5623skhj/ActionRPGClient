@@ -24,7 +24,11 @@
 | [Data/system_menu.ini](Data/system_menu.ini) | Esc 메뉴 순서·라벨·아이콘·Action |
 | `Images/Characters`, `Images/UI`, `Images/Effects` | 캐릭터 시트, 메뉴/스킬 아이콘, 효과 |
 | `Images/Towns`, `Images/Dungeons` | 서버 맵의 배경/오브젝트 asset 상대 경로에 대응하는 로컬 이미지 |
-| `Audio/` | 오디오 파일 배치와 경로 등록. 현재 게임 재생 경로는 연결되어 있지 않음 |
+| `Audio/` | MP3/WAV 효과음·BGM 원본. assets.ini의 Audio ID를 AudioMixer가 재생하며 빌드 시 런타임 Assets로 복사 |
+
+오디오는 `GunShot`(일반 공격 총소리), `TownBgm`(마을), `DungeonFieldBgm`(두 던전 일반 필드), `DungeonBossBgm`(두 던전 보스룸)을 등록합니다. 보스룸은 방의 보스 몬스터 배치 정보로 구분하며 보스 사망 후에도 방을 나갈 때까지 BGM을 유지합니다. 같은 BGM을 쓰는 방 이동에서는 재시작하지 않고, 마을 복귀·던전 재도전은 실제 적용된 맵에 맞춰 전환합니다. 마을에서는 총알 생성 시점, 던전에서는 서버의 사격 순번·발사 수 증가 시점(원격 플레이어는 표시 버퍼 시간)에 총소리를 재생합니다. 처음 관측한 상태·동일 순번·오래된 상태는 재생하지 않고, 누락된 여러 발은 현재 총소리 한 번으로 합칩니다. 앞차기와 투척물에는 총소리를 연결하지 않습니다.
+
+MP3는 Windows [Media Foundation Source Reader](https://learn.microsoft.com/en-us/windows/win32/medfound/tutorial--decoding-audio)로 PCM16으로 디코딩합니다. 짧은 효과음은 최초 한 번 읽어 보관하고, BGM은 매 업데이트에서 제한된 수의 버퍼만 채워 XAudio2로 반복 재생합니다. 제출한 버퍼는 소비 완료까지 보관하며, 종료 시 음성·디코더를 해제한 뒤 Media Foundation을 종료합니다. 게임 코드에 새 작업 스레드를 만들지 않으며, 기존 마스터·효과음·BGM 볼륨 버스를 그대로 사용합니다.
 
 마을·던전 맵 JSON은 서버가 읽고 배치·이동 영역을 네트워크로 보냅니다. 배경 이미지 자체는 전송하지 않습니다. `images[].asset`은 Assets 상대 경로를 직접 사용하므로 모든 배경을 assets.ini의 Images 논리 ID로 등록할 필요는 없습니다.
 

@@ -184,6 +184,8 @@ namespace ActionRPG
         void ApplyMap(const TownProtocol::MapInfo& inMap, Vector2 inPosition);
         void ResetDungeonEntry();
         void ApplyDungeonMap(const std::string& inMapId, Vector2 inPosition);
+        void QueueCombatShotSounds(const DungeonCombatSnapshot& inPrevious,
+            const DungeonCombatSnapshot& inCurrent, bool inLocalPlayer);
         void UpdateRemotePlayers(float inDeltaSeconds);
         void SendMovementInput(const InputState& inInput, float inDeltaSeconds);
         void RenderTransitionZones(D2DRenderer& inRenderer) const;
@@ -239,6 +241,8 @@ namespace ActionRPG
         std::optional<DungeonCombatSnapshot> presentationSnapshot;
         std::uint32_t appliedMapEpoch{}, pendingMapEpoch{};
         std::optional<DungeonCombatSnapshot> combatSnapshot;
+        struct ShotSoundState { std::uint32_t sequence{}, count{}; };
+        std::unordered_map<std::uint64_t, ShotSoundState> shotSounds;
         std::unordered_map<std::uint64_t, std::unique_ptr<Player>> combatPlayers;
         std::uint64_t lastCombatTick{};
         bool hasCombatTick{}, dungeonCleared{};

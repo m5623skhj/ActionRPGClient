@@ -3,15 +3,21 @@
 
 #include <Windows.h>
 #include <xaudio2.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 #include <wrl/client.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <deque>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -81,6 +87,162 @@ namespace
             throw std::runtime_error("Incomplete PCM samples.");
         return result;
     }
+    void CheckAudioResult(const HRESULT inResult)
+    {
+        if (FAILED(inResult)) throw std::runtime_error("Audio decoding/playback failed.");
+    }
+
+    // Decode local MP3/WAV samples to PCM16. COM is owned by wWinMain; the reader stays
+    // on the game thread and is released before MFShutdown/CoUninitialize.
+    class AudioReader final
+    {
+    public:
+        explicit AudioReader(const std::filesystem::path& inPath)
+        {
+            CheckAudioResult(MFCreateSourceReaderFromURL(inPath.c_str(), nullptr, reader.GetAddressOf()));
+            CheckAudioResult(reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE));
+            CheckAudioResult(reader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE));
+            Microsoft::WRL::ComPtr<IMFMediaType> requested, actual;
+            CheckAudioResult(MFCreateMediaType(requested.GetAddressOf()));
+            CheckAudioResult(requested->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio));
+            CheckAudioResult(requested->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM));
+            CheckAudioResult(requested->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16));
+            CheckAudioResult(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, requested.Get()));
+            CheckAudioResult(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, actual.GetAddressOf()));
+            WAVEFORMATEX* waveFormat{};
+            UINT32 formatBytes{};
+            const HRESULT result = MFCreateWaveFormatExFromMFMediaType(actual.Get(), &waveFormat, &formatBytes);
+            const std::unique_ptr<WAVEFORMATEX, decltype(&CoTaskMemFree)> ownedFormat(waveFormat, CoTaskMemFree);
+            CheckAudioResult(result);
+            if (!waveFormat || formatBytes < sizeof(WAVEFORMATEX)) throw std::runtime_error("Missing audio format.");
+            format = *waveFormat;
+            if (format.wFormatTag != WAVE_FORMAT_PCM || (format.nChannels != 1 && format.nChannels != 2)
+                || format.wBitsPerSample != 16 || format.nSamplesPerSec < 8000 || format.nSamplesPerSec > 192000
+                || format.nBlockAlign != format.nChannels * 2
+                || format.nAvgBytesPerSec != format.nSamplesPerSec * format.nBlockAlign)
+                throw std::runtime_error("Expected decoded PCM16 mono/stereo audio.");
+            format.cbSize = 0;
+        }
+        [[nodiscard]] const WAVEFORMATEX& GetFormat() const { return format; }
+        [[nodiscard]] std::vector<BYTE> ReadChunk(bool& outEnd)
+        {
+            DWORD flags{};
+            Microsoft::WRL::ComPtr<IMFSample> sample;
+            CheckAudioResult(reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0,
+                nullptr, &flags, nullptr, sample.GetAddressOf()));
+            if (flags & MF_SOURCE_READERF_ERROR) throw std::runtime_error("Audio stream failed.");
+            if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)
+            {
+                Microsoft::WRL::ComPtr<IMFMediaType> actual;
+                CheckAudioResult(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, actual.GetAddressOf()));
+                UINT32 channels{}, rate{}, bits{};
+                GUID subtype{};
+                CheckAudioResult(actual->GetGUID(MF_MT_SUBTYPE, &subtype));
+                CheckAudioResult(actual->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels));
+                CheckAudioResult(actual->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate));
+                CheckAudioResult(actual->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, &bits));
+                if (!IsEqualGUID(subtype, MFAudioFormat_PCM) || channels != format.nChannels
+                    || rate != format.nSamplesPerSec || bits != format.wBitsPerSample)
+                    throw std::runtime_error("Audio stream format changed.");
+            }
+            outEnd = (flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0;
+            if (!sample) return {};
+            Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
+            CheckAudioResult(sample->ConvertToContiguousBuffer(buffer.GetAddressOf()));
+            DWORD length{};
+            CheckAudioResult(buffer->GetCurrentLength(&length));
+            constexpr DWORD MAX_SAMPLE_BYTES = 4 * 1024 * 1024;
+            if (length > MAX_SAMPLE_BYTES || length % format.nBlockAlign != 0)
+                throw std::runtime_error("Invalid decoded audio sample size.");
+            std::vector<BYTE> bytes(length);
+            if (length != 0)
+            {
+                BYTE* source{};
+                CheckAudioResult(buffer->Lock(&source, nullptr, nullptr));
+                std::memcpy(bytes.data(), source, length);
+                CheckAudioResult(buffer->Unlock());
+            }
+            return bytes;
+        }
+        void Rewind()
+        {
+            PROPVARIANT position{};
+            position.vt = VT_I8;
+            position.hVal.QuadPart = 0;
+            CheckAudioResult(reader->SetCurrentPosition(GUID_NULL, position));
+        }
+    private:
+        Microsoft::WRL::ComPtr<IMFSourceReader> reader;
+        WAVEFORMATEX format{};
+    };
+
+    std::shared_ptr<WaveData> ReadEffect(const std::filesystem::path& inPath)
+    {
+        if (inPath.extension() == L".wav") return ReadWave(inPath);
+        AudioReader reader(inPath);
+        auto result = std::make_shared<WaveData>();
+        result->format = reader.GetFormat();
+        constexpr std::size_t MAX_EFFECT_BYTES = 64 * 1024 * 1024;
+        unsigned emptyReads{};
+        for (;;)
+        {
+            bool end{};
+            const auto chunk = reader.ReadChunk(end);
+            if (chunk.size() > MAX_EFFECT_BYTES - result->samples.size())
+                throw std::runtime_error("Effect exceeds decoded audio size limit.");
+            result->samples.insert(result->samples.end(), chunk.begin(), chunk.end());
+            if (end) break;
+            emptyReads = chunk.empty() ? emptyReads + 1 : 0;
+            if (emptyReads >= 128) throw std::runtime_error("Empty audio stream.");
+        }
+        if (result->samples.empty()) throw std::runtime_error("Effect has no audio samples.");
+        return result;
+    }
+
+    struct MusicPlayback final
+    {
+        MusicPlayback(IXAudio2& inEngine, IXAudio2SubmixVoice* inBus, const std::filesystem::path& inPath)
+            : decoder(inPath), path(inPath)
+        {
+            XAUDIO2_SEND_DESCRIPTOR send{0, inBus};
+            XAUDIO2_VOICE_SENDS sends{1, &send};
+            CheckAudioResult(inEngine.CreateSourceVoice(&voice, &decoder.GetFormat(), 0,
+                XAUDIO2_DEFAULT_FREQ_RATIO, nullptr, &sends));
+        }
+        ~MusicPlayback() { if (voice) voice->DestroyVoice(); }
+        MusicPlayback(const MusicPlayback&) = delete;
+        MusicPlayback& operator=(const MusicPlayback&) = delete;
+
+        // Retain every submitted buffer until XAudio2 consumes it. Decode a bounded
+        // queue each update instead of loading an entire BGM or creating a worker.
+        void Fill()
+        {
+            XAUDIO2_VOICE_STATE state{};
+            voice->GetState(&state, XAUDIO2_VOICE_NOSAMPLESPLAYED);
+            while (buffers.size() > state.BuffersQueued) buffers.pop_front();
+            constexpr std::size_t TARGET_BUFFERS = 24;
+            constexpr unsigned MAX_READS_PER_UPDATE = 32;
+            for (unsigned read = 0; read < MAX_READS_PER_UPDATE && buffers.size() < TARGET_BUFFERS; ++read)
+            {
+                bool end{};
+                auto chunk = decoder.ReadChunk(end);
+                if (!chunk.empty())
+                {
+                    buffers.push_back(std::move(chunk));
+                    XAUDIO2_BUFFER buffer{};
+                    buffer.AudioBytes = static_cast<UINT32>(buffers.back().size());
+                    buffer.pAudioData = buffers.back().data();
+                    CheckAudioResult(voice->SubmitSourceBuffer(&buffer));
+                }
+                if (end) decoder.Rewind();
+            }
+            if (buffers.empty()) throw std::runtime_error("Music has no playable samples.");
+        }
+        AudioReader decoder;
+        std::filesystem::path path;
+        IXAudio2SourceVoice* voice{};
+        std::deque<std::vector<BYTE>> buffers;
+    };
 }
 
 namespace ActionRPG
@@ -101,11 +263,11 @@ namespace ActionRPG
         IXAudio2SubmixVoice* effectsBus{};
         IXAudio2SubmixVoice* musicBus{};
         std::array<float, 3> volumes{1.0f, 1.0f, 1.0f};
-        std::unique_ptr<Playback> music;
-        std::shared_ptr<WaveData> effect;
+        std::unique_ptr<MusicPlayback> music;
+        std::unordered_map<std::string, std::shared_ptr<WaveData>> loadedEffects;
         std::vector<std::unique_ptr<Playback>> effects;
         std::wstring notice;
-        bool available{};
+        bool available{}, mediaStarted{};
 
         Impl()
         {
@@ -115,23 +277,25 @@ namespace ActionRPG
                 || FAILED(engine->CreateSubmixVoice(&musicBus, 2, 48000)))
             { notice = L"오디오 장치를 사용할 수 없습니다."; return; }
             available = true;
+            mediaStarted = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET));
         }
         ~Impl()
         {
             TraceShutdown("ActionRPGClient: stopping audio engine\n");
-            effects.clear(); music.reset(); effect.reset();
+            effects.clear(); music.reset(); loadedEffects.clear();
             if (engine) engine->StopEngine();
             if (effectsBus) effectsBus->DestroyVoice();
             if (musicBus) musicBus->DestroyVoice();
             if (mastering) mastering->DestroyVoice();
             engine.Reset();
+            if (mediaStarted) (void)MFShutdown();
             TraceShutdown("ActionRPGClient: audio engine stopped\n");
         }
-        std::unique_ptr<Playback> Start(std::shared_ptr<WaveData> inData, bool inLoop)
+        std::unique_ptr<Playback> Start(std::shared_ptr<WaveData> inData)
         {
             auto playback = std::make_unique<Playback>();
             playback->data = std::move(inData);
-            XAUDIO2_SEND_DESCRIPTOR send{0, inLoop ? musicBus : effectsBus};
+            XAUDIO2_SEND_DESCRIPTOR send{0, effectsBus};
             XAUDIO2_VOICE_SENDS sends{1, &send};
             if (FAILED(engine->CreateSourceVoice(&playback->voice, &playback->data->format, 0,
                 XAUDIO2_DEFAULT_FREQ_RATIO, nullptr, &sends))) return {};
@@ -139,7 +303,6 @@ namespace ActionRPG
             buffer.Flags = XAUDIO2_END_OF_STREAM;
             buffer.AudioBytes = static_cast<UINT32>(playback->data->samples.size());
             buffer.pAudioData = playback->data->samples.data();
-            buffer.LoopCount = inLoop ? XAUDIO2_LOOP_INFINITE : 0;
             if (FAILED(playback->voice->SubmitSourceBuffer(&buffer)) || FAILED(playback->voice->Start())) return {};
             return playback;
         }
@@ -170,34 +333,48 @@ namespace ActionRPG
         if (!impl->available) return false;
         try
         {
-            auto music = impl->Start(ReadWave(inPath), true);
-            if (!music) throw std::runtime_error("Unable to start music voice.");
+            if (impl->music && impl->music->path == inPath) return true;
+            if (!impl->mediaStarted) throw std::runtime_error("Media Foundation is unavailable.");
+            auto music = std::make_unique<MusicPlayback>(*impl->engine.Get(), impl->musicBus, inPath);
+            music->Fill();
+            CheckAudioResult(music->voice->Start());
             impl->music = std::move(music);
             return true;
         }
-        catch (const std::exception&) { impl->notice = L"배경음악을 읽거나 재생하지 못했습니다. PCM16 WAV를 확인해 주세요."; return false; }
+        catch (const std::exception&) { impl->notice = L"배경음악을 읽거나 재생하지 못했습니다. MP3/WAV를 확인해 주세요."; return false; }
     }
-    bool AudioMixer::LoadEffect(const std::filesystem::path& inPath)
+    bool AudioMixer::LoadEffect(const std::filesystem::path& inPath, const std::string_view inId)
     {
         if (!impl->available) return false;
-        try { impl->effect = ReadWave(inPath); return true; }
-        catch (const std::exception&) { impl->notice = L"효과음을 읽지 못했습니다. PCM16 WAV를 확인해 주세요."; return false; }
+        try { impl->loadedEffects[std::string(inId)] = ReadEffect(inPath); return true; }
+        catch (const std::exception&) { impl->notice = L"효과음을 읽지 못했습니다. MP3/WAV를 확인해 주세요."; return false; }
     }
-    bool AudioMixer::PlayEffect()
+    bool AudioMixer::PlayEffect(const std::string_view inId)
     {
-        if (!impl->available || !impl->effect) return false;
+        if (!impl->available) return false;
+        const auto effect = impl->loadedEffects.find(std::string(inId));
+        if (effect == impl->loadedEffects.end()) return false;
         Update();
         constexpr std::size_t MAX_EFFECT_VOICES = 16;
         if (impl->effects.size() >= MAX_EFFECT_VOICES) return false;
-        auto playback = impl->Start(impl->effect, false);
+        auto playback = impl->Start(effect->second);
         if (!playback) { impl->notice = L"효과음을 재생하지 못했습니다."; return false; }
         impl->effects.push_back(std::move(playback));
         return true;
     }
-    bool AudioMixer::HasSounds() const { return impl->music != nullptr || impl->effect != nullptr; }
+    bool AudioMixer::HasSounds() const { return impl->music != nullptr || !impl->loadedEffects.empty(); }
     std::wstring_view AudioMixer::GetNotice() const { return impl->notice; }
     void AudioMixer::Update()
     {
+        if (impl->music)
+        {
+            try { impl->music->Fill(); }
+            catch (const std::exception&)
+            {
+                impl->music.reset();
+                impl->notice = L"배경음악 재생을 계속하지 못했습니다.";
+            }
+        }
         // Poll completed voices on their owner thread; audio callbacks never touch game/UI state.
         std::erase_if(impl->effects, [](const auto& playback)
         {
@@ -208,7 +385,7 @@ namespace ActionRPG
     }
     void AudioMixer::Stop()
     {
-        impl->effects.clear(); impl->music.reset(); impl->effect.reset();
+        impl->effects.clear(); impl->music.reset(); impl->loadedEffects.clear();
         if (impl->available) impl->notice.clear();
     }
 }

@@ -399,7 +399,8 @@ namespace ActionRPG
         , monsterCatalog(inAssetCatalog)
     {
         audio.Stop();
-        if (assetCatalog.HasAudio("StageBgm")) (void)audio.PlayMusic(assetCatalog.GetAudioPath("StageBgm"));
+        if (assetCatalog.HasAudio("TownBgm")) (void)audio.PlayMusic(assetCatalog.GetAudioPath("TownBgm"));
+        if (assetCatalog.HasAudio("GunShot")) (void)audio.LoadEffect(assetCatalog.GetAudioPath("GunShot"), "GunShot");
         const IniDocument effects(assetCatalog.GetDataPath("Effects"));
         const auto effectAudio = effects.GetOptionalValue("DirectionalStrike", "audio_asset");
         if (!effectAudio.empty())
@@ -685,6 +686,8 @@ namespace ActionRPG
         while (const std::optional<CharacterProjectileRequest> request = player.ConsumeProjectileRequest())
         {
             if (dungeonEntryState == DungeonEntryState::Entered) continue;
+            if (request->type == CharacterProjectileType::Straight || request->type == CharacterProjectileType::AirStraight)
+                (void)audio.PlayEffect("GunShot");
             const std::string_view definitionId = request->type == CharacterProjectileType::AirStraight
                 ? "PlayerAirBullet"
                 : request->type == CharacterProjectileType::Straight ? "PlayerBullet" : "PlayerRock";
@@ -1479,7 +1482,11 @@ namespace ActionRPG
             ApplyDungeonMap(snapshot.mapId, self->position);
             combatBuffer.Clear(); presentationSnapshot.reset();
         }
-        if (combatSnapshot) QueueCombatHitEffects(*combatSnapshot, snapshot, true);
+        if (combatSnapshot)
+        {
+            QueueCombatHitEffects(*combatSnapshot, snapshot, true);
+            QueueCombatShotSounds(*combatSnapshot, snapshot, true);
+        }
         if (snapshot.mapEpoch != appliedMapEpoch)
         {
             targetMonsterId = 0; targetHp = {};
@@ -1650,7 +1657,11 @@ namespace ActionRPG
         for (auto& effect : combatHitEffects) (void)effect.animation.AdvanceOnce(effectDelta);
         std::erase_if(combatHitEffects, [](const auto& effect) { return effect.animation.IsFinished(); });
         auto sampled = dungeonWorld ? combatBuffer.Sample(dungeonWorld->GetCombatRules()) : std::nullopt;
-        if (sampled && presentationSnapshot) QueueCombatHitEffects(*presentationSnapshot, *sampled, false);
+        if (sampled && presentationSnapshot)
+        {
+            QueueCombatHitEffects(*presentationSnapshot, *sampled, false);
+            QueueCombatShotSounds(*presentationSnapshot, *sampled, false);
+        }
         presentationSnapshot = std::move(sampled);
         if (!presentationSnapshot || !dungeonWorld) return;
         const auto& rules = dungeonWorld->GetCombatRules();
@@ -1667,6 +1678,29 @@ namespace ActionRPG
             for (const auto& state : presentationSnapshot->monsters)
                 for (const auto& actor : monsters->second)
                     if (actor->GetInstanceId() == state.instanceId) actor->ApplyCombatState(state, rules, true, presentationSnapshot->mapEpoch);
+    }
+
+    // Shot counts advance on actual fire, not on input/Prepare. Local sound follows authority;
+    // remote sound follows the same buffered clock as its pose. Never replay a snapshot baseline.
+    void GameWorld::QueueCombatShotSounds(const DungeonCombatSnapshot& inPrevious,
+        const DungeonCombatSnapshot& inCurrent, const bool inLocalPlayer)
+    {
+        if (inPrevious.roomId != inCurrent.roomId || inPrevious.mapId != inCurrent.mapId
+            || inPrevious.mapEpoch != inCurrent.mapEpoch || inCurrent.cleared || inCurrent.state != "Running") return;
+        for (const auto& actor : inCurrent.players)
+        {
+            if ((actor.playerId == localPlayerId) != inLocalPlayer) continue;
+            const auto previous = std::find_if(inPrevious.players.begin(), inPrevious.players.end(),
+                [&actor](const auto& old) { return old.playerId == actor.playerId; });
+            const auto& baseline = previous != inPrevious.players.end() ? *previous : actor;
+            auto& played = shotSounds.try_emplace(actor.playerId,
+                ShotSoundState{baseline.shotSequence, baseline.shotCount}).first->second;
+            if (actor.shotSequence < played.sequence
+                || (actor.shotSequence == played.sequence && actor.shotCount <= played.count)) continue;
+            played = {actor.shotSequence, actor.shotCount};
+            // Collapse missed shots to one current sound rather than a delayed burst.
+            if (actor.shotCount != 0) (void)audio.PlayEffect("GunShot");
+        }
     }
 
     // Server reactionSequence advances only on actual damage. HP arrives before buffered reactions,
@@ -2834,6 +2868,7 @@ namespace ActionRPG
         chatUi.ClearBubbles();
         if (dungeonEntryState != DungeonEntryState::Idle) ResetDungeonEntry();
         lastTownMap = inMap;
+        if (assetCatalog.HasAudio("TownBgm")) (void)audio.PlayMusic(assetCatalog.GetAudioPath("TownBgm"));
         remotePlayers.clear();
         gameplayMap.Configure(inMap);
         mapBackground.Configure(inMap);
@@ -2869,6 +2904,11 @@ namespace ActionRPG
     {
         chatUi.ClearBubbles();
         const auto& room = dungeonWorld->GetMap(inMapId);
+        // Spawn metadata survives boss death, so the room keeps its boss BGM until departure.
+        const bool bossRoom = std::any_of(room.monsters.begin(), room.monsters.end(),
+            [](const auto& monster) { return monster.isBoss; });
+        const std::string_view musicId = bossRoom ? "DungeonBossBgm" : "DungeonFieldBgm";
+        if (assetCatalog.HasAudio(musicId)) (void)audio.PlayMusic(assetCatalog.GetAudioPath(musicId));
         if (dungeonMapId.empty())
         {
             if (const auto& initial = dungeonWorld->GetInitialPlayerHud(); initial)
@@ -2901,6 +2941,7 @@ namespace ActionRPG
         inventoryUi.Close();
         combatBuffer.Clear(); presentationSnapshot.reset(); combatHitEffects.clear();
         combatPlayers.clear(); combatSnapshot.reset(); combatSnapshotAge = 0.0f;
+        shotSounds.clear();
         skillUi.CancelDrag();
         remotePlayers.clear();
         player.SetGroundPosition(inPosition); player.ResetActionState(); player.ResetMovementSpeeds(); player.SetRunningEnabled(true);
@@ -2930,6 +2971,7 @@ namespace ActionRPG
         dungeonWorld.reset(); dungeonMonsters.clear(); dungeonMapId.clear();
         combatBuffer.Clear(); presentationSnapshot.reset(); combatHitEffects.clear(); appliedMapEpoch = pendingMapEpoch = 0;
         combatPlayers.clear(); combatSnapshot.reset(); hasCombatTick = dungeonCleared = false;
+        shotSounds.clear();
         targetMonsterId = lastHudHitSequence = 0; targetHp = {}; dungeonHp = {}; dungeonMp = {};
         lastCombatTick = 0; combatActionSequence = lastCombatActionResult = combatInputsThisSecond = 0;
         combatInputWindowSeconds = combatSnapshotAge = rejectedActionSeconds = 0.0f;

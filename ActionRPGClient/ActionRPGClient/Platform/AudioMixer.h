@@ -21,8 +21,8 @@ namespace ActionRPG
         [[nodiscard]] float GetVolume(AudioChannel inChannel) const;
         [[nodiscard]] bool SetVolume(AudioChannel inChannel, float inVolume);
         [[nodiscard]] bool PlayMusic(const std::filesystem::path& inPath);
-        [[nodiscard]] bool LoadEffect(const std::filesystem::path& inPath);
-        [[nodiscard]] bool PlayEffect();
+        [[nodiscard]] bool LoadEffect(const std::filesystem::path& inPath, std::string_view inId = {});
+        [[nodiscard]] bool PlayEffect(std::string_view inId = {});
         [[nodiscard]] bool HasSounds() const;
         [[nodiscard]] std::wstring_view GetNotice() const;
         void Update();
