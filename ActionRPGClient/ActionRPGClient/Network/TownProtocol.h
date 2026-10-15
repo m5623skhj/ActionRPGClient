@@ -159,6 +159,7 @@ namespace TownProtocol
 
     [[nodiscard]] std::vector<std::uint8_t> Encode(const AdmissionTicketRequest& inPacket);
     [[nodiscard]] std::optional<AdmissionResult> DecodeAdmissionResult(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<SessionStatus> DecodeSessionStatus(const std::vector<std::uint8_t>& inPacket);
 
     [[nodiscard]] std::vector<std::uint8_t> Encode(const PartyDetailRequest& inPacket);
     [[nodiscard]] std::vector<std::uint8_t> Encode(const PartyDetailResponse& inPacket);
@@ -233,6 +234,10 @@ namespace TownProtocol
     [[nodiscard]] std::optional<PartyDirectoryPage> DecodePartyDirectoryPage(const std::vector<std::uint8_t>& inPacket);
     [[nodiscard]] std::optional<PartyDirectoryChanged> DecodePartyDirectoryChanged(const std::vector<std::uint8_t>& inPacket);
     [[nodiscard]] std::optional<PartyCreateRequest> DecodePartyCreateRequest(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const QuestStateRequest& inPacket);
+    [[nodiscard]] std::vector<std::uint8_t> Encode(const QuestActionRequest& inPacket);
+    [[nodiscard]] std::optional<QuestStatePage> DecodeQuestStatePage(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<QuestActionResult> DecodeQuestActionResult(const std::vector<std::uint8_t>& inPacket);
     [[nodiscard]] std::vector<std::uint8_t> Encode(const ChatRequest& inPacket);
     [[nodiscard]] std::optional<ChatResult> DecodeChatResult(const std::vector<std::uint8_t>& inPacket);
     [[nodiscard]] std::optional<ChatMessage> DecodeChatMessage(const std::vector<std::uint8_t>& inPacket);

@@ -1,6 +1,6 @@
 # 인증 및 타운 네트워크
 
-2026-10-08 클라이언트 소스 기준입니다. 이 문서는 클라이언트의 인증·타운 TLS·콘텐츠 이벤트 연결을 설명합니다. 서버 인증·DB 설정은 [AuthServer](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md), 타운 규칙은 [TownServer](../../ActionRPGServer/ActionRPGServer/TownServer/DEVELOPMENT.md), 마이그레이션은 [DB 작업 문서](../../ActionRPGServer/docs/workflows/DATABASE_MIGRATIONS.md)에서 관리합니다.
+2026-10-14 중복 접속 정리 대기·종료 사유 연동을 포함한 클라이언트 소스 기준입니다. 이 문서는 클라이언트의 인증·타운 TLS·콘텐츠 이벤트 연결을 설명합니다. 서버 인증·DB 설정은 [AuthServer](../../ActionRPGServer/ActionRPGServer/AuthServer/DEVELOPMENT.md), 타운 규칙은 [TownServer](../../ActionRPGServer/ActionRPGServer/TownServer/DEVELOPMENT.md), 마이그레이션은 [DB 작업 문서](../../ActionRPGServer/docs/workflows/DATABASE_MIGRATIONS.md)에서 관리합니다.
 
 ## 로그인에서 타운 입장까지
 
@@ -11,10 +11,11 @@
  -> loopback 콜백의 code -> Google ID token
  -> Auth POST /v1/login -> gameToken
  -> 타운 선택
- -> Auth POST /v1/tickets -> ready=true인 단기 ticket
+ -> Auth POST /v1/tickets -> ready=true/false인 단기 ticket
  -> Town TLS
  -> AdmissionTicketRequest(36)
- -> AdmissionResult(37, result=0)
+ -> SessionStatus(52, code=1)이면 같은 연결에서 기존 접속 정리 대기
+ -> AdmissionResult(37, result=0) 이후에만 다음 단계 허용
  -> CharacterListRequest/Response(38/39)
  -> 저장된 캐릭터 선택 또는 CharacterCreateRequest/Response(40/41)
  -> CharacterSelectRequest/Response(42/43)
@@ -129,9 +130,13 @@ EXE가 수정 소스보다 오래됐다면 **Debug | x64 다시 빌드**가 필�
 
 ## 취소·실패·세션 전환
 
-HTTPS 전체 요청 한도는 15초이고 타운 TLS·승인·EnterTown은 티켓 잔여 시간과 15초 중 작은 한도를 적용합니다. 브라우저 대기는 challenge 만료까지입니다. UI 취소는 대기 화면을 즉시 빠져나오고 늦게 완료된 결과는 시도 ID로 거릅니다. 불확실한 HTTP 결과를 자동 재시도하지 않습니다.
+HTTPS 전체 요청 한도는15초이고 초기 타운 TLS·티켓 응답 대기는 티켓 잔여 시간과15초 중 작은 한도를 적용합니다. 서버가 SessionStatus.code=1을 보낸 경우에만 기존 접속 정리 대기로 전환합니다. 서버 대기 한도는30초이며, 클라이언트는 첫 대기 알림부터 최종 사유 전달 여유5초를 포함한35초로 연결을 제한합니다. 반복 알림으로 이 제한을 연장하지 않습니다. 캐릭터 선택·목록 및 선택 후 월드 입장 확인은 기존10초 한도를 유지합니다. 브라우저 대기는 challenge 만료까지입니다. UI 취소는 대기 화면을 즉시 빠져나오고 늦게 완료된 결과는 시도 ID로 거릅니다. 불확실한 HTTP 결과를 자동 재시도하지 않습니다.
 
-`ready=false`는 기존 접속 종료 대기 상태입니다. 받은 티켓을 타운에 보내지 않으며 사용자가 다시 입장할 때 새 티켓을 발급합니다. HTTP 오류는 로그인 준비·Google 브라우저 인증·Google 토큰 교환·Auth 로그인 검증·타운 입장 티켓·로그아웃 단계를 구분합니다. HTTP 응답을 받은 거절에는 상태 숫자를 표시하고 Google 토큰 교환은 허용 목록과 일치하는 OAuth error 코드만 추가합니다. Google error가 invalid_request이고 error_description이 정확히 client_secret is missing.과 일치할 때만 내부 enum으로 분류해 고정 문구 “Google 클라이언트 자격 증명 누락”을 추가합니다. 다른 설명은 버립니다. 응답 원문·error_description·인증 코드·토큰·verifier·nonce·state는 출력하지 않습니다. Auth의 503은 준비 중으로 안내하며, 오류 코드만으로 client_secret 누락 등 특정 원인을 단정하지 않습니다. 브라우저의 콜백 수신 문구는 게임에서 검증이 진행 중임을 알리고 로그인 성공으로 표시하지 않습니다. 타운 연결 종료만으로 중복 로그인·정지 등 상세 이유를 추측하지 않습니다. 기존 TCP 자동 연결·자동 재접속 경로는 제거되었습니다.
+`ready=false`도 받은 유효 티켓으로 Town에 연결합니다. Pending은 인증/게임 입장 성공이 아니며 같은 연결에서 서버 정리 결과를 기다립니다. 대기 중에는 캐릭터 목록·게임 패킷을 보내지 않고 AdmissionResult.result=0 뒤에만 정상 캐릭터 선택을 시작합니다. 대기 알림의 retryAfterMs는 서버 안내 값으로 보관하며 클라이언트가 재조회·새 티켓 발급에 사용하지 않습니다. 대기 취소·시간 초과는 현재 연결과 로컬 인증을 정리하고 로그인 화면으로 돌아갑니다. 재로그인·티켓 자동 재발급은 하지 않습니다. HTTP 오류는 로그인 준비·Google 브라우저 인증·Google 토큰 교환·Auth 로그인 검증·타운 입장 티켓·로그아웃 단계를 구분합니다. HTTP 응답을 받은 거절에는 상태 숫자를 표시하고 Google 토큰 교환은 허용 목록과 일치하는 OAuth error 코드만 추가합니다. Google error가 invalid_request이고 error_description이 정확히 client_secret is missing.과 일치할 때만 내부 enum으로 분류해 고정 문구 “Google 클라이언트 자격 증명 누락”을 추가합니다. 다른 설명은 버립니다. 응답 원문·error_description·인증 코드·토큰·verifier·nonce·state는 출력하지 않습니다. Auth의 503은 준비 중으로 안내하며, 오류 코드만으로 client_secret 누락 등 특정 원인을 단정하지 않습니다. 브라우저의 콜백 수신 문구는 게임에서 검증이 진행 중임을 알리고 로그인 성공으로 표시하지 않습니다. 명시적인 SessionStatus 종료 코드2~8은 고정된 사유 문구로 표시합니다. 단순 EOF·연결 종료만으로 중복 로그인·정지 등 상세 이유를 추측하지 않습니다. 기존 TCP 자동 연결·자동 재접속 경로는 제거되었습니다.
+
+SessionStatus는 기존ID1~51 뒤에 추가한52입니다. body는 ID:u16 + code:u8 + retryAfterMs:u32의7바이트이고 기존big-endian·외부4바이트 길이 framing을 유지합니다. code1=WaitingForPriorOwner,2=Replaced,3=AdmissionTimeout,4=AuthUnavailable,5=AuthorizationExpired,6=LoggedOut,7=ServerTransfer,8=AccountUnavailable입니다. 디코더는 코드 범위·잘린 데이터·여분 바이트를 검증하며 code1은 승인 전 상태에서만 허용합니다. 서버 소유 TownPacketDefine.yml의 동일 생성기를 사용하되 서버 담당은 서버 TownPacket.generated.h만, 클라이언트 담당은 클라이언트 헤더만 갱신합니다. 클라이언트는 수동 TownProtocol 디코더를 연결합니다. 이전 클라이언트에는 이 대기 흐름이 없으므로 같은 계약으로 배포합니다.
+
+code2는 “다른 곳에서 접속하여 연결이 종료되었습니다”를 표시합니다. 코드3~8도 시간 초과·인증 서버 불가·인증 만료·로그아웃·서버 이동·계정 확인 불가를 구분합니다. 종료 사유는 TownConnectionInfo의 mutex 보호된 스냅샷으로 게임 스레드에 전달하고, 세션 close 이후의 읽기/쓰기/타이머 콜백이 덮어쓰지 않습니다. LoginFlow는 사유를 복사한 뒤 시도ID·로컬 토큰·Town/Dungeon 연결·캐릭터 문맥을 정리합니다. 종료 안내가 일반 연결 끊김이나 Auth logout 완료 문구로 바뀌지 않습니다. 서버에 의해 교체된 접속은 이전 토큰으로 /logout을 보내지 않고 로컬 상태만 정리하며 새 접속의 소유권을 건드리지 않습니다. 던전 정리는 기존 비동기 완료 확인을 사용합니다.
 
 | 메뉴 | 처리 |
 | --- | --- |
@@ -174,6 +179,11 @@ AuthServer/DB는 Google 계정 식별과 로그인 상태를 관리하고, TownS
 | 27~29 | SkillStateRequest, LearnSkillRequest, SkillStateResponse |
 | 30~35 | PartyDetailRequest/Response, PartyJoinRequest/Answer/RequestUpdate, PartyKicked |
 | 36~37 | AdmissionTicketRequest, AdmissionResult |
+| 38~43 | CharacterList/Create/Select Request/Response |
+| 44~48 | InventoryState/Operation Request/Response, ItemDefinitionsResponse |
+| 49~51 | ChatRequest, ChatResult, ChatMessage |
+| 52 | SessionStatus |
+| 53~56 | QuestStateRequest/Page, QuestActionRequest/Result |
 
 마을 TCP/TLS의 big-endian framing을 던전 NetBuffer나 실시간 payload 직렬화에 적용하지 않습니다. 던전 계약은 [COMBAT_CLIENT](COMBAT_CLIENT.md)에서 따로 설명합니다.
 
@@ -251,3 +261,20 @@ Enter로 입력·전송, Esc로 취소합니다. 채팅 입력 중 Tab은 일반
 현재 화면에 보이는 발신 캐릭터에만 4초 말풍선을 붙입니다. 말풍선은 12px, 최대 본문 폭 220px·측정 기준 3줄, 어두운 배경/밝은 얇은 테두리입니다. 넘치는 본문은 surrogate pair를 유지해 줄이고 말줄임표로 표시하며 전체 내용은 기록에서 볼 수 있습니다. 머리 위 위치는 발에서 고정 100px 또는 더 큰 달리기 시트의 최대 높이 대신 각 캐릭터의 대기 스프라이트 renderHeight/anchor 또는 frame pivot/scale로 계산하고 점프 높이·카메라를 적용합니다. 머리 위 10px 간격을 두며 화면 위쪽에 공간이 없으면 캐릭터 위에 겹쳐 내리지 않고 말풍선을 숨깁니다. 다른 장소나 화면 밖 발신자는 기록만 표시합니다. 방/맵 이동과 연결 종료에서는 말풍선을 비우며 기록은 같은 Game 세션 동안 유지합니다. 채팅과 말풍선은 월드 위, 기존 메뉴/인벤토리/스킬 창 아래에 렌더링합니다. 채팅 시간은 실제 시간이며 던전 0.7 전투 템포를 적용하지 않습니다.
 
 이번 검증은 생성 선언·코덱 필드 순서·스레드 소유·입력/배율/렌더 경로의 정적 검토입니다. 빌드·실행·IME 실기·시각 캡처·두 클라이언트 AOI/파티 전송 테스트는 수행하지 않았습니다.
+
+## 중복 접속 연동의 정적 확인 범위
+
+2026-10-14: ready=false 티켓 보존, AdmissionResult0 이전 송신 제한, SessionStatus의 패킷 크기/필드와 코드 매핑, 첫 대기 알림 기준 제한·반복 알림 미연장, 취소/종료 시도ID 정리와 종료 사유 유지 경로를 소스로 대조했습니다. 기존 게임 스레드/strand·mutex 전달을 유지하고 DB/던전 소유권 해제 확인을 우회하지 않습니다. 빌드·실행·기능 테스트·DB 조회/적용·프로세스 종료·커밋·푸시·실행 폴더 배포는 수행하지 않았습니다. 실제 두 클라이언트의 교체, 정리 지연/실패, 패킷 전달 직후 EOF, 마을/던전 종료, 대기 취소/시간 초과 및 모든 종료 코드의 표시·서버 일회용 티켓/소유권 판정은 실행 미검증입니다.
+
+
+## 퀘스트 v1
+
+- TownPacketDefine.yml의 기존 1~52는 유지하며 53 QuestStateRequest, 54 QuestStatePage, 55 QuestActionRequest, 56 QuestActionResult를 사용한다. 네 패킷 모두 외부 BE u32 길이 + body BE u16 ID/u16 UTF-8 JSON 길이이며 요청 2 KiB, 응답 14 KiB/page, 최대 48 page·합계 512 KiB다. 클라이언트 generated 헤더는 서버 YAML로 생성한다.
+- 퀘스트 정의는 서버 StatePage에서 수신하며 별도 로컬 Quests.json은 배포하지 않는다. 정의는 id/version/title/description/category/repeat/accept/complete/event/steps/fixedRewards/choiceRewards이며 수락 당시 snapshot을 표시한다. 현재 catalog 64종 외에 이전 배포의 live snapshot 16종을 받을 수 있어 최대 80행/정의를 허용한다. 목표는 StatePage.objectives의 현재 단계 current/required/done을 사용하며 DB counters를 재계산하지 않는다. 목표 이름은 definition.steps[].objectives[].description을 우선 사용하고 선택 StatePage.objectives[].description은 보조로만 사용한다.
+- 같은 requestId/snapshotId/저장 characterId/revision/serverNowMs/pageCount/trackedQuestIds의 모든 페이지가 모인 뒤에만 상태를 교체한다. 중복·과거 snapshot과 revision 역행을 거부하고 부분 수신은 기존 표시만 보존한다. Item/SkillPoints 및 정확히 한 choiceRewards 묶음을 표시한다. 미보유 보상·제출 아이템도 itemDefinitions가 필요하다. 퀘스트 itemDefinitions의 페이지·전체 개수 방어 상한은 8192이며, 캐릭터 보유 스택 상한 167과 별개다. 정의별 8 KiB·페이지 14 KiB·전체 512 KiB 바이트 상한은 유지한다. turnInItems는 모든 HoldItem의 합산 제출 목록이며 수령 시 차감한다. AcquireItem은 신규 획득 카운트이며 별도 제출하지 않는다.
+- 저장 캐릭터 ID는 TownClient::GetSelectedCharacterId()를 사용한다. 외형용 localCharacterId와 구분한다. 캐릭터 전환 시 페이지·선택·추적 표시·요청 컨텍스트를 초기화하고 접속 attempt가 다른 TCP 이벤트는 기존 큐에서 차단한다. 수신 스레드는 payload만 enqueue하고 모든 모델·UI 적용은 게임 스레드에서 수행한다.
+- Accept/Abandon/Report/Claim/Track/Talk은 서버 권한을 사용한다. 요청은 CSPRNG requestId 64 lowercase hex 및 expectedRevision decimal string이며, 한 요청이 대기하는 동안 새 변경 요청을 차단한다. 10초 무응답·Busy·DB 장애는 지급 실패로 확정하지 않는다. 사용자가 결과 확인을 누르면 원래 ID·revision·choice를 포함한 동일 JSON만 다시 보내며 새 Claim을 자동 생성하지 않는다. 확정 결과 후 완전한 상태를 다시 조회한다. Claim 확정 후 가방과 성장 상태도 기존 경로로 갱신한다.
+- 퀘스트·인벤토리는 character_state의 revision을 공유한다. 완성 QuestStatePage/연관 ActionResult에서 관찰한 더 높은 revision마다 InventoryUi::ObserveRevision으로 가방 표시를 무효화하고 기존 경로로 조회한다. 같은 revision은 다시 무효화하지 않고 진행 중인 사용 요청 ID·원문은 보존한다. 반대로 인벤토리에서 높은 revision을 관찰하면 퀘스트도 최신 snapshot을 요구하고 성장 상태 갱신 시 퀘스트 재조회를 예약한다. 프레임별 조회 루프는 추가하지 않는다.
+- ESC 메뉴의 퀘스트창은 1280 기준 880×500이며 HudLayout/UiScaleScope로 1920에서 1.5배 표시하고 입력에 같은 역변환을 사용한다. 오른쪽 추적은 캐릭터별 최대 3퀘스트의 현재 단계 요약이다. 하단 아이템 6개·6×2 스킬과 분리하며 메뉴·클리어·선택창에서는 추적을 숨긴다. 퀘스트창에서는 이동·공격을 차단하고 전투는 계속된다. 포기는 확인 창을 거친다.
+- NPC 엔진·새 아트 없이 서버 NPC 위치에 안내소 이름과 !/? 마커를 그린다. 마을에서 거리 96 이내의 클릭/대화만 요청하며 수락·보고·수령의 NPC 조건도 확인한다. 실제 거리·자격·단계·이벤트 기간·제출/공간·중복 지급은 서버가 최종 판정한다. 지도·던전 전환 시 NPC 접점을 초기화한다.
+- 이번 구현은 소스 정적 검토 범위다. 빌드·게임/서버 실행·기능 테스트·DB 접속/마이그레이션 적용·실행 폴더 배포·커밋/푸시는 수행하지 않았다.

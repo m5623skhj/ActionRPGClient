@@ -67,6 +67,9 @@ namespace ActionRPG
         void ApplyState(InventorySnapshotView inState);
         void ResolveRequest(const std::string& inRequestId, std::wstring inMessage, bool inStateCurrent);
         void SetConnected(bool inConnected);
+        void ObserveRevision(std::uint64_t inCharacterId, std::uint64_t inRevision);
+        [[nodiscard]] std::uint64_t GetObservedRevision() const
+        { return latestServerRevision > state.revision ? latestServerRevision : state.revision; }
         void SetCombatTempoScale(float inTempoScale) { combatTempoScale = inTempoScale; }
         void Invalidate(std::wstring inMessage);
         [[nodiscard]] bool ConsumeCombatRefresh() { const bool value = combatRefresh; combatRefresh = false; return value; }

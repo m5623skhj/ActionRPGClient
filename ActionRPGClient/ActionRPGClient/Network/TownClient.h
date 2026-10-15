@@ -14,6 +14,12 @@
 
 namespace ActionRPG
 {
+    struct QuestEvent
+    {
+        enum class Kind { StatePage, ActionResult };
+        Kind kind;
+        std::string payload;
+    };
     struct SkillStateEvent { std::string payload; };
     struct CharacterEvent
     {
@@ -35,14 +41,21 @@ namespace ActionRPG
         TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult,
         TownProtocol::PartyDirectoryPage, TownProtocol::PartyDirectoryChanged,
         TownProtocol::DungeonCompletionResponse, TownProtocol::PartyDetailResponse,
-        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent, InventoryEvent, TownProtocol::ChatResult, TownProtocol::ChatMessage>;
+        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent, InventoryEvent, QuestEvent, TownProtocol::ChatResult, TownProtocol::ChatMessage>;
 
-    enum class TownConnectionState { Disconnected, Connecting, AdmissionPending, CharacterSelection, EnteringTown, Ready, Failed };
+    enum class TownSessionStatusCode : std::uint8_t
+    {
+        None = 0, WaitingForPriorOwner = 1, Replaced = 2, AdmissionTimeout = 3,
+        AuthUnavailable = 4, AuthorizationExpired = 5, LoggedOut = 6, ServerTransfer = 7, AccountUnavailable = 8
+    };
+    enum class TownConnectionState { Disconnected, Connecting, AdmissionPending, WaitingForPriorOwner, CharacterSelection, EnteringTown, Ready, Failed };
     struct TownConnectionInfo
     {
         std::uint64_t attemptId{};
         TownConnectionState state{ TownConnectionState::Disconnected };
         std::wstring message;
+        TownSessionStatusCode sessionStatusCode{TownSessionStatusCode::None};
+        std::uint32_t retryAfterMs{}; // Server hint only; the client never polls or reissues a ticket.
     };
 
     class TownClient final
@@ -74,6 +87,8 @@ namespace ActionRPG
         [[nodiscard]] std::optional<std::uint32_t> SendChat(TownProtocol::ChatChannel inChannel, std::string inMessage);
         void RequestDungeon(std::string inZoneId, std::uint32_t inDungeonId);
         void RequestDungeonCompletion(std::uint64_t inRoomId, bool inRetry);
+        void RequestQuestState(std::string inRequestId);
+        void SendQuestAction(std::string inJson);
         void RequestSkillState();
         void LearnSkill(std::string inSkillId, std::uint32_t inExpectedSkillLevel);
         void ConfirmDungeonJoin(std::uint64_t inRoomId, std::uint64_t inChallenge);

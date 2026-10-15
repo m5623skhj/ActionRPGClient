@@ -390,6 +390,7 @@ namespace ActionRPG
         , combatHitAnimation(inRenderer, inAssetCatalog, animationDefinitions, "CombatHitSpark")
         , skillUi(inAssetCatalog, inRenderer)
         , inventoryUi(inAssetCatalog, inRenderer)
+        , questUi(inAssetCatalog, inRenderer)
         , assetCatalog(inAssetCatalog)
         , renderer(inRenderer)
         , townClient(inTownClient)
@@ -419,6 +420,7 @@ namespace ActionRPG
             }
             else if (actionName == "Skills") action = SystemMenuAction::Skills;
             else if (actionName == "Inventory") action = SystemMenuAction::Inventory;
+            else if (actionName == "Quests") action = SystemMenuAction::Quests;
             else if (actionName == "GameOptions") action = SystemMenuAction::GameOptions;
             else if (actionName == "Logout") action = SystemMenuAction::Logout;
             else if (actionName == "SwitchAccount") action = SystemMenuAction::SwitchAccount;
@@ -435,7 +437,7 @@ namespace ActionRPG
             Microsoft::WRL::ComPtr<ID2D1Bitmap1> menuIcon;
             if (action == SystemMenuAction::Skills)
             { try { menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId)); } catch (const std::exception&) {} }
-            else if (action != SystemMenuAction::Inventory && action != SystemMenuAction::GameOptions) menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
+            else if (action != SystemMenuAction::Inventory && action != SystemMenuAction::Quests && action != SystemMenuAction::GameOptions) menuIcon=inRenderer.LoadBitmap(inAssetCatalog.GetImagePath(iconAssetId));
             systemMenuEntries.push_back(SystemMenuEntry{
                 Utf8ToWide(systemMenuDefinitions.GetValue(section, "Label")), action, std::move(menuIcon)});
         }
@@ -486,6 +488,7 @@ namespace ActionRPG
         uiMouseX = inInput.mouseX;
         uiMouseY = inInput.mouseY;
         uiClickConsumed = false;
+        questUi.SetCharacterContext(townClient.GetSelectedCharacterId());
         ProcessDungeonCompletion();
         ProcessNetworkEvents(inInput);
         if (!completionStopping) ProcessDungeonEvents();
@@ -592,6 +595,32 @@ namespace ActionRPG
                 action, inventoryAction.instanceId, inventoryAction.quantity,
                 inventoryAction.throwItem ? std::optional<bool>(player.GetFacingLeft()) : std::nullopt);
         }
+        questUi.SetConnected(townClient.IsConnected());
+        questUi.SetMapContext(IsDungeonUiRestricted() || !lastTownMap ? std::string{} : lastTownMap->mapId);
+        InputState questInput = interfaceInput;
+        if (uiClickConsumed) questInput = {};
+        const bool questVisible = systemUiPage == SystemUiPage::Quests && !partyKickedNotice
+            && !hadKickedNotice && !dungeonCleared && !completionStopping && !pendingPartyInvitation
+            && !isDungeonSelectionOpen;
+        const bool questPointerAllowed = hudInteractive && !chatAction.consumeInput && !chatUi.IsEditing()
+            && !skillUi.IsDragging() && !inventoryUi.IsDragging() && !hadUiAtFrameStart;
+        try
+        {
+            const auto questAction = questUi.Update(inDeltaSeconds, questInput,
+                camera.GetViewportWidth(), camera.GetViewportHeight(), chatHud.hp.top, questVisible,
+                questPointerAllowed && !IsDungeonUiRestricted(), questPointerAllowed,
+                player.GetGroundPosition(), camera);
+            if (!questAction.stateRequestId.empty()) townClient.RequestQuestState(questAction.stateRequestId);
+            if (!questAction.operationJson.empty()) townClient.SendQuestAction(questAction.operationJson);
+            if (questAction.refreshProgression) townClient.RequestSkillState();
+            if (questAction.openWindow) SetSystemUiPage(SystemUiPage::Quests);
+            if (questAction.consumePointer)
+            {
+                uiClickConsumed = true; inInput.leftMousePressed = false; inInput.mouseWheelDelta = 0;
+                interfaceInput.leftMousePressed = false; interfaceInput.mouseWheelDelta = 0;
+            }
+        }
+        catch (const std::exception&) { questUi.InvalidResponse(); }
         InputState gameplayInput = inInput;
         const bool gameplayBlocked = chatUi.IsEditing() || chatAction.consumeInput || dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
             || pendingPartyInvitation.has_value() || partyKickedNotice || hadKickedNotice || player.IsHitReacting() || hadUiAtFrameStart || interfaceInput.cancelDrag
@@ -744,8 +773,16 @@ namespace ActionRPG
                 const auto position = camera.WorldToScreen(effect.position);
                 effect.animation.Draw(inRenderer, position.x, position.y - effect.height, false);
             }
+        if (!IsDungeonUiRestricted()) questUi.RenderNpcs(inRenderer, camera);
         inRenderer.PopAxisAlignedClip();
         RenderCombatHud(inRenderer);
+        if (systemUiPage == SystemUiPage::Closed && !dungeonCleared && !completionStopping
+            && !isDungeonSelectionOpen && !pendingPartyInvitation && !partyKickedNotice)
+        {
+            const auto bar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
+            const auto hud = HudLayout::Calculate(bar, HudLayout::Scale(camera.GetViewportWidth()));
+            questUi.RenderTracker(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), hud.hp.top);
+        }
         if (!dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
             && systemUiPage==SystemUiPage::Closed)
         {
@@ -933,6 +970,7 @@ namespace ActionRPG
                     try
                     {
                         skillUi.ApplyState(inEvent.payload,localCharacterId);
+                        questUi.RequestRefresh();
                         ApplyTownResources(inEvent.payload);
                         inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(), localCharacterId, skillUi.GetProgression().level);
                         if (dungeonEntryState==DungeonEntryState::Entered) dungeonClient.RequestCombatRefresh();
@@ -940,13 +978,28 @@ namespace ActionRPG
                     catch (const std::exception& error)
                     { skillUi.Invalidate(); partyStatusText=L"스킬 상태 오류: "+Utf8ToWide(error.what()); }
                 }
+                else if constexpr (std::is_same_v<EventType, QuestEvent>)
+                {
+                    try
+                    {
+                        if (inEvent.kind == QuestEvent::Kind::StatePage) questUi.ApplyPage(inEvent.payload);
+                        else questUi.ApplyResult(inEvent.payload);
+                        inventoryUi.ObserveRevision(townClient.GetSelectedCharacterId(), questUi.GetObservedRevision());
+                    }
+                    catch (const std::exception&) { questUi.InvalidResponse(); }
+                }
                 else if constexpr (std::is_same_v<EventType, InventoryEvent>)
                 {
                     try
                     {
                         if (inEvent.kind == InventoryEvent::Kind::State) inventoryUi.HandleState(inEvent.payload);
                         else if (inEvent.kind == InventoryEvent::Kind::Definitions) inventoryUi.HandleDefinitions(inEvent.payload);
-                        else if (inventoryUi.HandleOperation(inEvent.payload)) townClient.RequestSkillState();
+                        else
+                        {
+                            if (inventoryUi.HandleOperation(inEvent.payload)) townClient.RequestSkillState();
+                            questUi.RequestRefresh();
+                        }
+                        questUi.ObserveRevision(inventoryUi.GetObservedRevision());
                         if (inventoryUi.ConsumeCombatRefresh()) dungeonClient.RequestCombatRefresh();
                     }
                     catch (const std::exception&)
@@ -2075,6 +2128,7 @@ namespace ActionRPG
             screenSettingsNotice.clear();
         }
         if (systemUiPage == SystemUiPage::Inventory) inventoryUi.Close();
+        if (systemUiPage == SystemUiPage::Quests) questUi.Close();
         systemUiPage = page;
         commandQueue.Clear(); skillUi.CancelDrag();
         if (page==SystemUiPage::Skills) townClient.RequestSkillState();
@@ -2500,9 +2554,11 @@ namespace ActionRPG
                 uiClickConsumed = true;
                 return;
             }
+            if (action == SystemMenuAction::Quests) questUi.OpenAll();
             SetSystemUiPage(action==SystemMenuAction::Party ? SystemUiPage::Party
                 : action==SystemMenuAction::Skills ? SystemUiPage::Skills
                 : action==SystemMenuAction::Inventory ? SystemUiPage::Inventory
+                : action==SystemMenuAction::Quests ? SystemUiPage::Quests
                 : action==SystemMenuAction::GameOptions ? SystemUiPage::GameOptions:SystemUiPage::ExitConfirmation);
             uiClickConsumed = true;
             return;
@@ -3002,6 +3058,18 @@ namespace ActionRPG
                 skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),true);
             return;
         }
+        if (systemUiPage == SystemUiPage::Quests)
+        {
+            if (!dungeonCleared && !completionStopping && !partyKickedNotice && !pendingPartyInvitation)
+            {
+                const auto bar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
+                const auto hud = HudLayout::Calculate(bar, HudLayout::Scale(camera.GetViewportWidth()));
+                questUi.Render(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), hud.hp.top);
+                skillUi.Render(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), false);
+                inventoryUi.RenderQuickSlots(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), bar, false);
+            }
+            return;
+        }
         if (systemUiPage == SystemUiPage::Closed && !pendingPartyInvitation.has_value())
         {
             return;
@@ -3061,6 +3129,13 @@ namespace ActionRPG
                         const float x = iconLeft + 8.0f + column * 24.0f, y = iconTop + 8.0f + row * 24.0f;
                         inRenderer.DrawRectangle(x, y, x + 19.0f, y + 19.0f, D2D1::ColorF(0.90f,0.76f,0.40f));
                     }
+                if (systemMenuEntries[index].action == SystemMenuAction::Quests)
+                {
+                    const float x = iconLeft + 20, y = iconTop + 10;
+                    inRenderer.DrawRectangle(x, y, x + 88, y + 104, D2D1::ColorF(0xC7AC74), 3);
+                    for (int row = 0; row < 4; ++row)
+                        inRenderer.DrawLine(x + 14, y + 24 + row * 20, x + 74, y + 24 + row * 20, D2D1::ColorF(0xC7AC74), 2);
+                }
                 inRenderer.DrawText(systemMenuEntries[index].label,
                     tile.left + 12.0f, tile.bottom - 42.0f,
                     tile.right - 12.0f, tile.bottom - 12.0f,

@@ -24,6 +24,24 @@ namespace
     constexpr std::uint32_t MAX_PACKET_BODY_SIZE = 1024 * 1024;
     constexpr std::size_t MAX_QUEUED_SEND_BYTES = 1024 * 1024;
     using Clock = std::chrono::steady_clock;
+    // Server admission waits at most 30s; allow 5s for its final status to reach the client.
+    constexpr auto PRIOR_OWNER_WAIT_LIMIT = std::chrono::seconds(35);
+    std::wstring SessionStatusMessage(const ActionRPG::TownSessionStatusCode inCode)
+    {
+        using Code = ActionRPG::TownSessionStatusCode;
+        switch (inCode)
+        {
+        case Code::WaitingForPriorOwner: return L"기존 접속을 정리하는 중입니다.";
+        case Code::Replaced: return L"다른 곳에서 접속하여 연결이 종료되었습니다.";
+        case Code::AdmissionTimeout: return L"기존 접속 정리 대기 시간이 초과되었습니다. 다시 로그인해 주세요.";
+        case Code::AuthUnavailable: return L"인증 서버에 연결할 수 없어 접속이 종료되었습니다. 잠시 후 다시 로그인해 주세요.";
+        case Code::AuthorizationExpired: return L"인증 유효 시간이 끝나 연결이 종료되었습니다. 다시 로그인해 주세요.";
+        case Code::LoggedOut: return L"로그아웃되어 연결이 종료되었습니다.";
+        case Code::ServerTransfer: return L"다른 서버로 접속하여 연결이 종료되었습니다.";
+        case Code::AccountUnavailable: return L"계정 상태를 확인할 수 없어 연결이 종료되었습니다. 다시 로그인해 주세요.";
+        default: return L"타운 연결이 종료되었습니다.";
+        }
+    }
 
     std::uint32_t DecodeBodySize(const std::array<std::uint8_t, 4>& inHeader)
     {
@@ -77,7 +95,8 @@ namespace ActionRPG
         std::thread worker;
         Impl() : worker([this] { ioContext.run(); }) {}
         ~Impl();
-        void SetStatus(std::uint64_t inAttempt, TownConnectionState inState, std::wstring inMessage);
+        void SetStatus(std::uint64_t inAttempt, TownConnectionState inState, std::wstring inMessage,
+            TownSessionStatusCode inCode = TownSessionStatusCode::None, std::uint32_t inRetryAfterMs = 0);
         void PushEvent(std::uint64_t inAttempt, TownEvent inEvent);
         void PushCharacterEvent(std::uint64_t inAttempt, CharacterEvent inEvent);
     };
@@ -93,7 +112,7 @@ namespace ActionRPG
         asio::steady_timer deadline;
         TownServerSettings server;
         std::string ticket;
-        bool selectionRequested{};
+        bool selectionRequested{}, priorOwnerWaitStarted{};
         TownConnectionState state{ TownConnectionState::Connecting };
         bool closed{};
         std::array<std::uint8_t, 4> receiveHeader{};
@@ -107,10 +126,11 @@ namespace ActionRPG
               server(std::move(inServer)), ticket(std::move(inTicket)) {}
 
         bool IsCurrent() const { return !closed && owner.attempt.load() == attemptId; }
-        void SetState(const TownConnectionState inState, std::wstring inMessage)
+        void SetState(const TownConnectionState inState, std::wstring inMessage,
+            const TownSessionStatusCode inCode = TownSessionStatusCode::None, const std::uint32_t inRetryAfterMs = 0)
         {
             state = inState;
-            owner.SetStatus(attemptId, state, std::move(inMessage));
+            owner.SetStatus(attemptId, state, std::move(inMessage), inCode, inRetryAfterMs);
         }
         void Close()
         {
@@ -124,12 +144,18 @@ namespace ActionRPG
             ticket.clear();
             sendQueue.clear();
         }
-        void HandleDisconnect()
+        void Fail(std::wstring inMessage, const TownSessionStatusCode inCode = TownSessionStatusCode::None)
         {
             if (!IsCurrent()) { Close(); return; }
-            SetState(TownConnectionState::Failed,
-                L"타운 연결이 종료되거나 입장이 완료되지 않았습니다. 새 티켓으로 다시 시도해 주세요.");
-            Close();
+            SetState(TownConnectionState::Failed, std::move(inMessage), inCode);
+            Close(); // Cancelling read/write/timer callbacks cannot overwrite the terminal reason.
+        }
+        void HandleDisconnect()
+        {
+            if (state == TownConnectionState::WaitingForPriorOwner)
+                Fail(L"기존 접속 정리를 기다리던 연결이 종료되었습니다. 다시 로그인해 주세요.",
+                    TownSessionStatusCode::WaitingForPriorOwner);
+            else Fail(L"타운 연결이 종료되거나 입장이 완료되지 않았습니다. 새 티켓으로 다시 시도해 주세요.");
         }
         void Start(const Clock::time_point inExpiry)
         {
@@ -142,7 +168,10 @@ namespace ActionRPG
                 { HandleDisconnect(); return; }
             deadline.expires_at(std::min(inExpiry, Clock::now() + std::chrono::seconds(15)));
             deadline.async_wait([self = shared_from_this()](const asio::error_code& inError)
-                { if (!inError) self->HandleDisconnect(); });
+            {
+                if (!inError && self->IsCurrent() && (self->state == TownConnectionState::Connecting
+                    || self->state == TownConnectionState::AdmissionPending)) self->HandleDisconnect();
+            });
             resolver.async_resolve(server.hostname, std::to_string(server.port),
                 [self = shared_from_this()](const asio::error_code& inError,
                     const asio::ip::tcp::resolver::results_type& inResults)
@@ -239,11 +268,12 @@ namespace ActionRPG
         TraceShutdown("ActionRPGClient: town I/O worker stopped\n");
     }
     void TownClient::Impl::SetStatus(const std::uint64_t inAttempt,
-        const TownConnectionState inState, std::wstring inMessage)
+        const TownConnectionState inState, std::wstring inMessage,
+        const TownSessionStatusCode inCode, const std::uint32_t inRetryAfterMs)
     {
         std::scoped_lock lock(mutex);
         if (attempt.load() != inAttempt) return;
-        status = { inAttempt, inState, std::move(inMessage) };
+        status = { inAttempt, inState, std::move(inMessage), inCode, inRetryAfterMs };
         connected.store(inState == TownConnectionState::Ready);
     }
     void TownClient::Impl::PushEvent(const std::uint64_t inAttempt, TownEvent inEvent)
@@ -465,6 +495,20 @@ namespace ActionRPG
         });
     }
 
+    void TownClient::RequestQuestState(std::string inRequestId)
+    {
+        const auto json = nlohmann::json{{"requestId", std::move(inRequestId)}}.dump();
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(),
+            packet = TownProtocol::Encode(TownProtocol::QuestStateRequest{json})]() mutable
+        { if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet)); });
+    }
+    void TownClient::SendQuestAction(std::string inJson)
+    {
+        asio::post(impl->strand, [this, attempt = impl->attempt.load(),
+            packet = TownProtocol::Encode(TownProtocol::QuestActionRequest{std::move(inJson)})]() mutable
+        { if (impl->connected.load() && attempt == impl->attempt.load()) QueuePacket(std::move(packet)); });
+    }
+
     void TownClient::RequestSkillState()
     {
         asio::post(impl->strand,[this, attempt = impl->attempt.load(), packet=TownProtocol::Encode(TownProtocol::SkillStateRequest{})]() mutable
@@ -635,7 +679,34 @@ namespace ActionRPG
             return;
         }
 
-        if (state == TownConnectionState::AdmissionPending)
+        // SessionStatus is legal before admission and during play; handle it before phase packet guards.
+        if (*type == TownProtocol::PacketType::SessionStatus)
+        {
+            const auto packet = TownProtocol::DecodeSessionStatus(receiveBody);
+            if (!packet) { HandleDisconnect(); return; }
+            const auto code = static_cast<TownSessionStatusCode>(packet->code);
+            if (code == TownSessionStatusCode::WaitingForPriorOwner)
+            {
+                if (state != TownConnectionState::AdmissionPending && state != TownConnectionState::WaitingForPriorOwner)
+                    { HandleDisconnect(); return; }
+                if (!priorOwnerWaitStarted)
+                {
+                    priorOwnerWaitStarted = true;
+                    deadline.expires_after(PRIOR_OWNER_WAIT_LIMIT);
+                    deadline.async_wait([self = shared_from_this()](const asio::error_code& error)
+                    {
+                        if (!error && self->IsCurrent() && self->state == TownConnectionState::WaitingForPriorOwner)
+                            self->Fail(SessionStatusMessage(TownSessionStatusCode::AdmissionTimeout),
+                                TownSessionStatusCode::AdmissionTimeout);
+                    });
+                }
+                // Heartbeats update the notice, never the bounded deadline or admission permission.
+                SetState(TownConnectionState::WaitingForPriorOwner, SessionStatusMessage(code), code, packet->retryAfterMs);
+            }
+            else Fail(SessionStatusMessage(code), code);
+            return;
+        }
+        if (state == TownConnectionState::AdmissionPending || state == TownConnectionState::WaitingForPriorOwner)
         {
             const auto result = TownProtocol::DecodeAdmissionResult(receiveBody);
             if (!result || result->result != 0) { HandleDisconnect(); return; }
@@ -686,6 +757,16 @@ namespace ActionRPG
         case TownProtocol::PacketType::ItemDefinitionsResponse:
             if (auto packet = TownProtocol::DecodeItemDefinitionsResponse(receiveBody))
                 PushEvent(InventoryEvent{InventoryEvent::Kind::Definitions, std::move(packet->json)});
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::QuestStatePage:
+            if (auto packet = TownProtocol::DecodeQuestStatePage(receiveBody))
+                PushEvent(QuestEvent{QuestEvent::Kind::StatePage, std::move(packet->json)});
+            else HandleDisconnect();
+            break;
+        case TownProtocol::PacketType::QuestActionResult:
+            if (auto packet = TownProtocol::DecodeQuestActionResult(receiveBody))
+                PushEvent(QuestEvent{QuestEvent::Kind::ActionResult, std::move(packet->json)});
             else HandleDisconnect();
             break;
         case TownProtocol::PacketType::SkillStateResponse:

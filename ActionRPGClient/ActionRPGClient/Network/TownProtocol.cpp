@@ -441,6 +441,21 @@ namespace TownProtocol
     std::optional<ItemDefinitionsResponse> DecodeItemDefinitionsResponse(const std::vector<std::uint8_t>& inPacket)
     { return DecodeCharacterJson<ItemDefinitionsResponse>(inPacket, PacketType::ItemDefinitionsResponse, 16384); }
 
+    std::vector<std::uint8_t> Encode(const QuestStateRequest& inPacket)
+    {
+        if (inPacket.json.size() > 2048) throw std::length_error("Quest request exceeds limit.");
+        return EncodeCharacterJson(PacketType::QuestStateRequest, inPacket.json);
+    }
+    std::vector<std::uint8_t> Encode(const QuestActionRequest& inPacket)
+    {
+        if (inPacket.json.size() > 2048) throw std::length_error("Quest action exceeds limit.");
+        return EncodeCharacterJson(PacketType::QuestActionRequest, inPacket.json);
+    }
+    std::optional<QuestStatePage> DecodeQuestStatePage(const std::vector<std::uint8_t>& inPacket)
+    { return DecodeCharacterJson<QuestStatePage>(inPacket, PacketType::QuestStatePage, 14 * 1024); }
+    std::optional<QuestActionResult> DecodeQuestActionResult(const std::vector<std::uint8_t>& inPacket)
+    { return DecodeCharacterJson<QuestActionResult>(inPacket, PacketType::QuestActionResult, 14 * 1024); }
+
     std::optional<PacketType> ReadPacketType(const std::vector<std::uint8_t>& inPacket)
     {
         PacketReader reader(inPacket);
@@ -463,6 +478,16 @@ namespace TownProtocol
         PacketReader reader(inPacket);
         AdmissionResult packet;
         if (!ReadExpectedType(reader, PacketType::AdmissionResult) || !reader.ReadUInt8(packet.result)
+            || !reader.Finished()) return std::nullopt;
+        return packet;
+    }
+
+    std::optional<SessionStatus> DecodeSessionStatus(const std::vector<std::uint8_t>& inPacket)
+    {
+        PacketReader reader(inPacket);
+        SessionStatus packet;
+        if (!ReadExpectedType(reader, PacketType::SessionStatus) || !reader.ReadUInt8(packet.code)
+            || packet.code < 1 || packet.code > 8 || !reader.ReadUInt32(packet.retryAfterMs)
             || !reader.Finished()) return std::nullopt;
         return packet;
     }

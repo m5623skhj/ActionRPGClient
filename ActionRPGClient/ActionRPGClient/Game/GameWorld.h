@@ -13,6 +13,7 @@
 #include "Game/ProjectileSystem.h"
 #include "Game/SkillUi.h"
 #include "Game/InventoryUi.h"
+#include "Game/QuestUi.h"
 #include "Game/PlayerSkillPresentation.h"
 #include "Input/InputState.h"
 #include "Network/TownClient.h"
@@ -104,6 +105,7 @@ namespace ActionRPG
             ExitConfirmation,
             Skills,
             Inventory,
+            Quests,
             GameOptions
         };
 
@@ -113,6 +115,7 @@ namespace ActionRPG
             Exit,
             Skills,
             Inventory,
+            Quests,
             Logout,
             SwitchAccount,
             SelectTown,
@@ -213,6 +216,7 @@ namespace ActionRPG
         std::vector<CombatHitEffect> combatHitEffects;
         SkillUi skillUi;
         InventoryUi inventoryUi;
+        QuestUi questUi;
         std::unordered_map<std::uint32_t,std::string> skillActionIds;
         std::uint64_t lastSkillStateTick{};
         std::uint32_t lastAcceptedSkillSequence{};

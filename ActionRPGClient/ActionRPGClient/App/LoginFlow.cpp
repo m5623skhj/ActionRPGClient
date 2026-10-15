@@ -82,12 +82,32 @@ namespace ActionRPG
     }
     void LoginFlow::CancelPending()
     {
+        if (state == State::Town && (waitingForPriorOwner
+            || town.GetConnectionInfo().state == TownConnectionState::WaitingForPriorOwner))
+        {
+            EndServerSession(L"기존 접속 정리 대기를 취소했습니다. 다시 로그인해 주세요.");
+            return;
+        }
         ++attempt;
         auth.Cancel();
         town.RequestStop();
         ClearCharacters();
         state = HasToken() ? State::ServerSelection : State::Login;
         message = L"취소했습니다. 다시 시도하면 새 인증 요청 또는 입장 티켓을 발급합니다.";
+    }
+    // Server termination revokes only this client's local state. Do not send /logout with
+    // the displaced token: another login may now own the account. Preserve the reason through cleanup.
+    void LoginFlow::EndServerSession(std::wstring inMessage)
+    {
+        ++attempt;
+        auth.Cancel();
+        gameToken.clear(); tokenExpiry = {};
+        town.RequestStop(); dungeon.RequestStop();
+        ClearCharacters();
+        nameFocused = logoutPending = false;
+        leaveAction = SessionMenuAction::Logout;
+        state = State::Leaving;
+        message = std::move(inMessage);
     }
     void LoginFlow::BeginLeave(const SessionMenuAction inAction)
     {
@@ -144,13 +164,13 @@ namespace ActionRPG
             }
             else if (event.operation == AuthOperation::Ticket)
             {
-                if (!event.ready) { state = State::ServerSelection; continue; }
                 if (!HasToken() || std::chrono::steady_clock::now() >= event.expiresAt)
                 {
                     state = State::ServerSelection;
                     message = L"입장 티켓이 만료됐습니다. 입장을 다시 눌러 주세요.";
                     continue;
                 }
+                waitingForPriorOwner = !event.ready;
                 state = State::Town;
                 town.Start(attempt, settings.servers.at(selectedServer), settings.townCaFile,
                     std::move(event.credential), event.expiresAt);
@@ -167,7 +187,7 @@ namespace ActionRPG
         characterRequest = CharacterRequest::None;
         characterRequestId.clear();
         pendingCharacter.reset();
-        charactersCurrent = characterAccepted = false;
+        charactersCurrent = characterAccepted = waitingForPriorOwner = false;
     }
 
     void LoginFlow::RequestCharacters()
@@ -342,6 +362,10 @@ namespace ActionRPG
     void LoginFlow::Update(const InputState& inInput, const float inWidth, const float inHeight)
     {
         ProcessEvents();
+        const auto info = town.GetConnectionInfo();
+        if (info.attemptId == attempt && info.state == TownConnectionState::Failed
+            && (info.sessionStatusCode != TownSessionStatusCode::None || waitingForPriorOwner))
+            EndServerSession(info.message);
         ProcessCharacterEvents();
         const auto now = std::chrono::steady_clock::now();
         if (!gameToken.empty() && !HasToken() && state != State::Leaving)
@@ -351,7 +375,6 @@ namespace ActionRPG
         }
         if (state == State::Town || state == State::CharacterSelection || state == State::CharacterCreate || state == State::Playing)
         {
-            const auto info = town.GetConnectionInfo();
             if (info.attemptId == attempt)
             {
                 if (info.state == TownConnectionState::Failed)
@@ -359,22 +382,30 @@ namespace ActionRPG
                     if (state == State::Playing)
                     {
                         BeginLeave(SessionMenuAction::Logout);
-                        message = L"게임 연결이 종료됐습니다. 다시 로그인해 주세요.";
+                        message = info.message;
                     }
                     else
                     {
                         town.RequestStop();
                         ClearCharacters();
                         state = HasToken() ? State::ServerSelection : State::Login;
-                        message = L"타운 연결이 종료됐습니다. 새 입장 티켓으로 다시 시도해 주세요.";
+                        message = info.message;
                     }
                 }
                 else if (state == State::Town)
                 {
                     if (info.state == TownConnectionState::Ready && characterAccepted
                         && town.GetSelectedCharacterId() != 0) state = State::Playing;
+                    else if (info.state == TownConnectionState::WaitingForPriorOwner)
+                    {
+                        waitingForPriorOwner = true;
+                        message = info.message;
+                    }
                     else if (info.state == TownConnectionState::CharacterSelection && !characterAccepted)
+                    {
+                        waitingForPriorOwner = false;
                         RequestCharacters();
+                    }
                     else if (!characterAccepted) message = info.message;
                 }
             }
@@ -506,7 +537,8 @@ namespace ActionRPG
         const auto white = D2D1::ColorF(0.94f, 0.94f, 0.94f);
         const wchar_t* title = state == State::ServerSelection ? L"타운 선택"
             : state == State::CharacterSelection ? L"캐릭터 선택"
-            : state == State::CharacterCreate ? L"캐릭터 생성" : L"Action RPG · Google 로그인";
+            : state == State::CharacterCreate ? L"캐릭터 생성"
+            : state == State::Town && waitingForPriorOwner ? L"기존 접속 정리 대기" : L"Action RPG · Google 로그인";
         inRenderer.DrawUiText(title, layout.Rect(16, 12, 568, 36), white, 24);
         if (state == State::ServerSelection)
         {
@@ -574,6 +606,7 @@ namespace ActionRPG
         else
         {
             inRenderer.DrawUiText(state == State::Leaving ? L"연결을 정리하고 있습니다."
+                : waitingForPriorOwner ? L"기존 접속의 저장·던전 정리를 기다리고 있습니다. 완료 후 캐릭터 선택으로 넘어갑니다."
                 : L"타운 인증과 캐릭터 선택을 완료하면 게임 화면이 열립니다.",
                 layout.Rect(16, 66, 568, 76), white, 18, true);
             if (state != State::Leaving) Button(inRenderer, layout.Rect(16, 228, 164, 36), L"취소 (Esc)");

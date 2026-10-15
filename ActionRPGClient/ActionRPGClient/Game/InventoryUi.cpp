@@ -461,6 +461,16 @@ namespace ActionRPG
         status = std::move(inMessage);
     }
 
+    // Shared character revisions may advance through quests without an inventory packet.
+    // Keep any in-flight operation/UseStatus identity; invalidate only once per newer revision.
+    void InventoryUi::ObserveRevision(const std::uint64_t inCharacterId, const std::uint64_t inRevision)
+    {
+        if (inCharacterId != expectedCharacterId || inRevision <= GetObservedRevision()) return;
+        latestServerRevision = inRevision;
+        if (assembly && assembly->revision >= inRevision) return;
+        Invalidate(L"변경된 캐릭터 상태와 가방을 확인합니다");
+    }
+
     void InventoryUi::SetConnected(const bool inConnected)
     {
         if (!inConnected)

@@ -32,6 +32,7 @@ namespace ActionRPG
         void StartLogin();
         void EnterSelectedTown();
         void CancelPending();
+        void EndServerSession(std::wstring inMessage);
         void ProcessEvents();
         void ProcessCharacterEvents();
         void RequestCharacters();
@@ -68,6 +69,6 @@ namespace ActionRPG
         std::wstring playerName;
         std::uint32_t characterId{};
         SessionMenuAction leaveAction{ SessionMenuAction::None };
-        bool chooseAccount{}, nameFocused{}, logoutPending{}, exitRequested{};
+        bool chooseAccount{}, nameFocused{}, logoutPending{}, exitRequested{}, waitingForPriorOwner{};
     };
 }

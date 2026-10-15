@@ -60,6 +60,11 @@ namespace TownProtocol
         ChatRequest = 49,
         ChatResult = 50,
         ChatMessage = 51,
+        SessionStatus = 52,
+        QuestStateRequest = 53,
+        QuestStatePage = 54,
+        QuestActionRequest = 55,
+        QuestActionResult = 56,
     };
 
     struct EnterTownRequest
@@ -382,6 +387,32 @@ namespace TownProtocol
         std::uint64_t senderCharacterId{};
         std::string senderName{};
         std::string message{};
+    };
+
+    struct SessionStatus
+    {
+        std::uint8_t code{};
+        std::uint32_t retryAfterMs{};
+    };
+
+    struct QuestStateRequest
+    {
+        std::string json{};
+    };
+
+    struct QuestStatePage
+    {
+        std::string json{};
+    };
+
+    struct QuestActionRequest
+    {
+        std::string json{};
+    };
+
+    struct QuestActionResult
+    {
+        std::string json{};
     };
 
 }

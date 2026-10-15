@@ -423,8 +423,8 @@ namespace ActionRPG
                     throw std::runtime_error("Invalid ticket.");
                 const bool ready = response.at("ready").get<bool>();
                 Emit(inJob, AuthEventKind::Complete,
-                    ready ? L"타운 입장: 보안 연결 준비" : L"기존 접속 종료 대기. 잠시 후 입장을 다시 눌러 주세요.",
-                    ready ? ticket : std::string{}, ticketStarted + std::chrono::seconds(Lifetime(response, 30)), ready);
+                    ready ? L"타운 입장: 보안 연결 준비" : L"기존 접속을 정리하는 중입니다. 타운 연결에서 완료를 기다립니다.",
+                    ticket, ticketStarted + std::chrono::seconds(Lifetime(response, 30)), ready);
             }
             else
             {
