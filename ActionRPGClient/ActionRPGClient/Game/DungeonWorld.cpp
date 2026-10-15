@@ -63,9 +63,11 @@ namespace ActionRPG
                 throw std::runtime_error("Invalid character attack power.");
             SlideDefinition definition{Number(source.at("durationSeconds")), ActorNumber(source.at("distancePerRunSpeedSeconds")),
                 ActorNumber(source.at("hitRecovery")), ActorNumber(source.at("hitstopSeconds")), attack.get<std::uint32_t>(),
-                source.at("motionId").get<std::string>()};
+                source.at("motionId").get<std::string>(),
+                ActorNumber(source.at("hitStartRatio")), ActorNumber(source.at("hitEndRatio"))};
             if (definition.durationSeconds < 0.05f || definition.durationSeconds > 2.0f
                 || definition.distancePerRunSpeedSeconds < 0.05f || definition.distancePerRunSpeedSeconds > 5.0f
+                || definition.hitStartRatio >= definition.hitEndRatio || definition.hitEndRatio > 1.0f
                 || definition.motionId != "slide" || !result.slideDefinitions.emplace(id, std::move(definition)).second)
                 throw std::runtime_error("Invalid slide definition.");
         }

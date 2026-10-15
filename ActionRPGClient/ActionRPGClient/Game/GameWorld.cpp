@@ -2185,6 +2185,17 @@ namespace ActionRPG
             skillUi.CancelDrag();
             return;
         }
+        if (IsPartyJoinNoticeVisible() && inInput.WasPressed(InputKey::ToggleSystemMenu))
+        {
+            uiClickConsumed = true;
+            skillUi.CancelDrag();
+            if (answeringPartyJoinRequestId == 0)
+            {
+                answeringPartyJoinRequestId = partyJoinRequests.front().requestId;
+                townClient.AnswerPartyJoin(answeringPartyJoinRequestId, false);
+            }
+            return;
+        }
         if (!IsPartyJoinNoticeVisible() || !inInput.leftMousePressed || uiClickConsumed) return;
         const auto layout = CalculatePartyNoticeLayout(camera.GetViewportWidth(),
             skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight()).top - 12.0f);
@@ -2454,25 +2465,40 @@ namespace ActionRPG
         if (uiClickConsumed) return;
         if (pendingPartyInvitation.has_value())
         {
+            if (inInput.WasPressed(InputKey::ToggleSystemMenu))
+            {
+                uiClickConsumed = true;
+                if (!partyInvitationAnswerPending)
+                {
+                    townClient.AnswerPartyInvitation(pendingPartyInvitation->invitationId, false);
+                    partyInvitationAnswerPending = true;
+                }
+            }
             return;
         }
         if (inInput.WasPressed(InputKey::ToggleSystemMenu))
         {
-            if (systemUiPage == SystemUiPage::Closed)
+            // One Escape dismisses the current UI; only an empty UI opens the menu.
+            if (isDungeonSelectionOpen)
             {
-                SetSystemUiPage(SystemUiPage::Menu);
                 isDungeonSelectionOpen = false;
                 activeDungeonZoneId.clear();
                 dungeonOptions.clear();
             }
-            else if (systemUiPage == SystemUiPage::Menu)
+            else if (systemUiPage != SystemUiPage::Closed)
             {
                 SetSystemUiPage(SystemUiPage::Closed);
+            }
+            else if (skillUi.IsDragging() || inventoryUi.IsDragging())
+            {
+                skillUi.CancelDrag();
+                inventoryUi.Close();
             }
             else
             {
                 SetSystemUiPage(SystemUiPage::Menu);
             }
+            uiClickConsumed = true;
             return;
         }
 

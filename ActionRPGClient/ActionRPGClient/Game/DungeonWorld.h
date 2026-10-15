@@ -15,6 +15,8 @@ namespace ActionRPG
         float durationSeconds{}, distancePerRunSpeedSeconds{}, hitRecovery{}, hitstopSeconds{};
         std::uint32_t attackPower{};
         std::string motionId;
+        // Server-authoritative attack interval, normalized to action duration: [start, end).
+        float hitStartRatio{}, hitEndRatio{};
     };
     struct DungeonMap
     {
