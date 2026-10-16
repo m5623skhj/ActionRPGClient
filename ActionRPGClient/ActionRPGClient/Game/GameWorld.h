@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace ActionRPG
@@ -133,6 +134,8 @@ namespace ActionRPG
         };
 
         void ProcessNetworkEvents(const InputState& inInput);
+        [[nodiscard]] bool HandleExperienceEvent(const TownEvent& inEvent);
+        void ApplyExperienceState(std::string_view inPayload);
         [[nodiscard]] std::optional<Vector2> ChatBubblePosition(std::uint64_t inPlayerId) const;
         ChatUi chatUi;
         [[nodiscard]] bool HandleChatEvent(const TownEvent& inEvent);
@@ -158,6 +161,16 @@ namespace ActionRPG
             [[nodiscard]] float Ratio() const { return maximum == 0 ? 0.0f : static_cast<float>(value) / maximum; }
         };
         HudGauge townHp, townMp, dungeonHp, dungeonMp, targetHp;
+        struct ExperienceView
+        {
+            std::uint64_t characterId{}, revision{}, experience{}, requiredExperience{};
+            std::uint32_t level{};
+            bool atMaxLevel{};
+            bool operator==(const ExperienceView&) const = default;
+        };
+        // The game thread owns this view; only committed Town state can replace it.
+        std::optional<ExperienceView> experienceView;
+        std::uint64_t experienceCharacterId{}, experienceAttemptId{};
         std::uint64_t targetMonsterId{}, lastHudHitSequence{};
         void ProcessPlayerHits();
         void UpdateDungeonCompletion(float inDeltaSeconds, const InputState& inInput);
@@ -237,6 +250,7 @@ namespace ActionRPG
         InventoryUi inventoryUi;
         QuestUi questUi;
         std::unordered_map<std::uint32_t,std::string> skillActionIds;
+        std::unordered_set<std::uint32_t> skillBoostSequences;
         std::uint64_t lastSkillStateTick{};
         std::uint32_t lastAcceptedSkillSequence{};
         bool hasSkillStateTick{};

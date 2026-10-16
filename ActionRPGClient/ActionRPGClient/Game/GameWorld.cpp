@@ -490,7 +490,15 @@ namespace ActionRPG
         uiMouseX = inInput.mouseX;
         uiMouseY = inInput.mouseY;
         uiClickConsumed = false;
-        questUi.SetCharacterContext(townClient.GetSelectedCharacterId());
+        const auto selectedCharacterId=townClient.GetSelectedCharacterId();
+        const auto connection=townClient.GetConnectionInfo();
+        if (!townClient.IsConnected() || experienceCharacterId!=selectedCharacterId
+            || experienceAttemptId!=connection.attemptId)
+        {
+            experienceView.reset();
+            experienceCharacterId=selectedCharacterId;experienceAttemptId=connection.attemptId;
+        }
+        questUi.SetCharacterContext(selectedCharacterId);
         ProcessDungeonCompletion();
         ProcessNetworkEvents(inInput);
         if (!completionStopping) ProcessDungeonEvents();
@@ -561,7 +569,9 @@ namespace ActionRPG
                 inInput.pressedKeys.clear();
             }
             inInput.textInput.clear();inInput.textEdits.clear();
-            interfaceInput.pressedKeys.clear();interfaceInput.textInput.clear();interfaceInput.textEdits.clear();
+            // Keep Escape independent of chat; all typed action/UI keys remain consumed.
+            std::erase_if(interfaceInput.pressedKeys,[](auto key){return key!=InputKey::ToggleSystemMenu;});
+            interfaceInput.textInput.clear();interfaceInput.textEdits.clear();
         }
         if (chatAction.consumePointer)
         {
@@ -600,8 +610,11 @@ namespace ActionRPG
         const bool hudInteractive=pointerUiPage==SystemUiPage::Closed && !uiChromeConsumed && skillBarVisible;
         if (hudInteractive && interfaceInput.leftMousePressed && ContainsPoint(hudMenu,interfaceInput.clickX,interfaceInput.clickY))
         {SetSystemUiPage(SystemUiPage::Menu);uiChromeConsumed=true;uiClickConsumed=true;}
+        const bool skillHotbarInteractive=!uiChromeConsumed && !chatAction.consumePointer
+            && TopUiWindowAt(interfaceInput.mouseX,interfaceInput.mouseY)==SystemUiPage::Closed
+            && !questUi.IsTrackerAt(interfaceInput.mouseX,interfaceInput.mouseY,camera.GetViewportWidth(),camera.GetViewportHeight(),chatHud.hp.top);
         const auto skillUiAction=skillUi.Update(inDeltaSeconds,UiWindowInput(SystemUiPage::Skills,interfaceInput,true),
-            camera.GetViewportWidth(),camera.GetViewportHeight(),IsUiPageOpen(SystemUiPage::Skills),skillBarVisible);
+            camera.GetViewportWidth(),camera.GetViewportHeight(),IsUiPageOpen(SystemUiPage::Skills),skillBarVisible,skillHotbarInteractive);
         if (skillUiAction.requestState) townClient.RequestSkillState();
         if (!IsDungeonUiRestricted() && !skillUiAction.learnSkill.empty()) townClient.LearnSkill(skillUiAction.learnSkill,skillUiAction.expectedSkillLevel);
         inventoryUi.SetConnected(townClient.IsConnected());
@@ -672,7 +685,7 @@ namespace ActionRPG
                 commandQueue.Clear();
                 std::erase_if(gameplayInput.pressedKeys,[](InputKey key)
                     { return key==InputKey::ActionX || key==InputKey::ActionC || key==InputKey::ActionV; });
-                if (!id.empty() && skillUi.CanUse(id,player.GetHeight()>0,false)
+                if (!id.empty() && (hotkey.empty() || !player.BoostCatalogSkill(id)) && skillUi.CanUse(id,player.GetHeight()>0,false)
                     && player.ActivateCatalogSkill(id,skillUi.GetProgression().skillLevels)
                     && id == "Character1.FrontKick") (void)audio.PlayEffect();
                 // Unavailable skill input is discarded immediately; never reserve it for a later frame.
@@ -819,6 +832,8 @@ namespace ActionRPG
         chatUi.RenderBubbles(inRenderer,chatAnchors,camera.GetViewportWidth(),camera.GetViewportHeight());
         chatUi.Render(inRenderer,camera.GetViewportWidth());
         RenderUiWindows(inRenderer);
+        if (!dungeonCleared && !completionStopping && systemUiPage!=SystemUiPage::Menu)
+            skillUi.RenderDragOverlay(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight());
     }
 
     std::optional<Vector2> GameWorld::ChatBubblePosition(const std::uint64_t inPlayerId) const
@@ -939,12 +954,58 @@ namespace ActionRPG
         return false;
     }
 
+    // Process committed progression independently of room shutdown/deferred world events.
+    bool GameWorld::HandleExperienceEvent(const TownEvent& inEvent)
+    {
+        const auto* event=std::get_if<TownProtocol::ExperienceState>(&inEvent);
+        if (!event) return false;
+        try { ApplyExperienceState(event->json); }
+        catch (const std::exception&) { partyStatusText=L"경험치 상태를 확인하지 못했습니다."; }
+        return true;
+    }
+
+    /** Validate a complete committed snapshot, then publish it atomically on the game thread. */
+    void GameWorld::ApplyExperienceState(const std::string_view inPayload)
+    {
+        using namespace CharacterInventoryJson;
+        if (inPayload.empty() || inPayload.size()>1024) throw std::runtime_error("Invalid experience payload size.");
+        const auto value=Json::parse(inPayload);
+        PlayerSkills::Catalog::Keys(value,{"characterId","revision","level","experience","requiredExperience","atMaxLevel"});
+        ExperienceView next;
+        next.characterId=UInt64(value.at("characterId"));
+        if (next.characterId==0 || next.characterId!=townClient.GetSelectedCharacterId() || !townClient.IsConnected()) return;
+        next.revision=UInt64(value.at("revision"));
+        if (experienceView && next.revision<experienceView->revision) return;
+        next.level=UInt32(value.at("level"),1,1000000);
+        next.experience=UInt64(value.at("experience"));
+        next.requiredExperience=UInt64(value.at("requiredExperience"));
+        if (!value.at("atMaxLevel").is_boolean()) throw std::runtime_error("Invalid maximum-level flag.");
+        next.atMaxLevel=value.at("atMaxLevel").get<bool>();
+        if (next.atMaxLevel!=(next.level==1000000)
+            || (next.atMaxLevel ? (next.experience!=0 || next.requiredExperience!=0)
+                : (next.requiredExperience==0 || next.experience>=next.requiredExperience)))
+            throw std::runtime_error("Invalid experience state.");
+        if (experienceView && next.revision==experienceView->revision)
+        {
+            if (next!=*experienceView) throw std::runtime_error("Conflicting experience revision.");
+            return;
+        }
+        const bool levelChanged=!experienceView || experienceView->level!=next.level;
+        experienceView=next;
+        if (levelChanged)
+        {
+            // Refresh authoritative SP/skill permissions and level-gated views; never calculate rewards here.
+            if (skillUi.GetProgression().level!=next.level) townClient.RequestSkillState();
+            if (localCharacterId!=0) inventoryUi.SetCharacterContext(next.characterId,localCharacterId,next.level);
+            questUi.RequestRefresh();
+        }
+    }
+
     void GameWorld::ProcessNetworkEvents(const InputState& inInput)
     {
         auto incoming = townClient.ConsumeEvents();
-        // Chat is ordered by TCP receipt even while gameplay room cleanup defers
-        // world events. It must never acquire a network worker's UI state.
-        std::erase_if(incoming,[this](const auto& event){return HandleChatEvent(event);});
+        // Chat and committed EXP update on the game thread even while room cleanup defers world events.
+        std::erase_if(incoming,[this](const auto& event){return HandleChatEvent(event) || HandleExperienceEvent(event);});
         if (completionStopping)
         {
             for (auto& event : incoming) deferredTownEvents.push_back(std::move(event));
@@ -971,7 +1032,7 @@ namespace ActionRPG
                     skillUi.Invalidate();
                     townHp = {}; townMp = {}; dungeonHp = {}; dungeonMp = {};
                     inventoryUi.Reset();
-                    inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(), localCharacterId, 0);
+                    inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(),localCharacterId,experienceView ? experienceView->level:0);
                     partySnapshot = {};
                     ResetPartyRequestUi();
                     partyKickedNotice = false;
@@ -992,7 +1053,8 @@ namespace ActionRPG
                         skillUi.ApplyState(inEvent.payload,localCharacterId);
                         questUi.RequestRefresh();
                         ApplyTownResources(inEvent.payload);
-                        inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(), localCharacterId, skillUi.GetProgression().level);
+                        inventoryUi.SetCharacterContext(townClient.GetSelectedCharacterId(),localCharacterId,
+                            experienceView ? experienceView->level:skillUi.GetProgression().level);
                         if (dungeonEntryState==DungeonEntryState::Entered) dungeonClient.RequestCombatRefresh();
                     }
                     catch (const std::exception& error)
@@ -1432,7 +1494,8 @@ namespace ActionRPG
                     player.ResolvePredictedSlide(inEvent.sequence, inEvent.accepted);
                     if (const auto skill=skillActionIds.find(inEvent.sequence); skill!=skillActionIds.end())
                     {
-                        if (inEvent.accepted) { lastAcceptedSkillSequence=std::max(lastAcceptedSkillSequence,inEvent.sequence); skillUi.AcceptSkill(skill->second, dungeonWorld ? dungeonWorld->GetCombatRules().tempoScale : 1.0f); dungeonClient.RequestCombatRefresh(); }
+                        const bool boost = skillBoostSequences.erase(inEvent.sequence) != 0;
+                        if (inEvent.accepted) { lastAcceptedSkillSequence=std::max(lastAcceptedSkillSequence,inEvent.sequence); if (!boost) skillUi.AcceptSkill(skill->second, dungeonWorld ? dungeonWorld->GetCombatRules().tempoScale : 1.0f); dungeonClient.RequestCombatRefresh(); }
                         skillActionIds.erase(skill);
                     }
                     if (inEvent.sequence <= lastCombatActionResult) return;
@@ -1611,16 +1674,19 @@ namespace ActionRPG
         if (matched || !hotkey.empty())
         {
             commandQueue.Clear();
+            const bool boost = actor!=combatSnapshot->players.end() && actor->skillActive && actor->skillId==id
+                && !hotkey.empty() && playerSkillPresentation.GetDefinition(id).at("type")=="area";
             if (actor!=combatSnapshot->players.end() && actor->hp>0 && actor->reaction==CombatReaction::None
-                && !actor->skillActive && !actor->slideActive && actor->jumpPhase!=CombatJumpPhase::Prepare
+                && (!actor->skillActive || boost) && !actor->slideActive && actor->jumpPhase!=CombatJumpPhase::Prepare
                 && (actor->shotPhase==CombatShotPhase::None || actor->shotPhase==CombatShotPhase::Recover)
-                && !id.empty() && skillUi.CanUse(id,actor->height>0,true) && combatInputsThisSecond<20 && skillActionIds.size()<64)
+                && !id.empty() && (boost || skillUi.CanUse(id,actor->height>0,true)) && combatInputsThisSecond<20 && skillActionIds.size()<64)
             {
                 if (combatActionSequence==std::numeric_limits<std::uint32_t>::max()) { ResetDungeonEntry(); return; }
                 ++combatInputsThisSecond;
                 const auto sequence=++combatActionSequence;
                 skillActionIds.emplace(sequence,id);
-                player.PredictAttackFacing(sequence, true);
+                if (boost) skillBoostSequences.insert(sequence);
+                else player.PredictAttackFacing(sequence, true);
                 dungeonClient.SendSkill(sequence,id,player.GetFacingLeft());
             }
             return; // No skill reservation; an unavailable command ending in X/C cannot also fire/jump.
@@ -1996,6 +2062,34 @@ namespace ActionRPG
             inRenderer.DrawRectangle(menu.left + 1, menu.top + 1, menu.right - 1, menu.bottom - 1, D2D1::ColorF(0x74603D));
             inRenderer.DrawLine(menu.left + 2, menu.top + 2, menu.right - 2, menu.top + 2, D2D1::ColorF(0xAE9460));
             inRenderer.DrawUiText(L"메뉴 ESC", menu, D2D1::ColorF(0xEACB7C), 12, false, true);
+            const bool experienceKnown=experienceView.has_value()
+                && experienceView->characterId==townClient.GetSelectedCharacterId() && townClient.IsConnected();
+            const auto levelText=experienceKnown ? L"Lv."+std::to_wstring(experienceView->level):std::wstring(L"Lv.—");
+            inRenderer.FillRectangle(hud.level.left,hud.level.top,hud.level.right,hud.level.bottom,D2D1::ColorF(0x17130D));
+            inRenderer.DrawRectangle(hud.level.left,hud.level.top,hud.level.right,hud.level.bottom,D2D1::ColorF(0x74603D));
+            inRenderer.DrawUiText(levelText,hud.level,D2D1::ColorF(0xEACB7C),14,false,true);
+            const auto& exp= hud.experience;
+            const double ratio=experienceKnown ? (experienceView->atMaxLevel ? 1.0
+                : static_cast<double>(experienceView->experience)/static_cast<double>(experienceView->requiredExperience)):0.0;
+            inRenderer.FillRectangle(exp.left,exp.top,exp.right,exp.bottom,D2D1::ColorF(0x100D09));
+            inRenderer.FillRectangle(exp.left+2,exp.top+2,exp.left+2+(exp.right-exp.left-4)*static_cast<float>(std::clamp(ratio,0.0,1.0)),
+                exp.bottom-2,D2D1::ColorF(0x47599F));
+            inRenderer.DrawRectangle(exp.left,exp.top,exp.right,exp.bottom,D2D1::ColorF(0x74603D));
+            std::wstring experienceText=L"EXP · 확인 중";
+            if (experienceKnown)
+            {
+                if (experienceView->atMaxLevel) experienceText=L"EXP MAX";
+                else
+                {
+                    std::wostringstream percentText;percentText.imbue(std::locale::classic());
+                    percentText<<std::fixed<<std::setprecision(1)<<ratio*100.0;
+                    experienceText=L"EXP "+std::to_wstring(experienceView->experience)+L" / "
+                        +std::to_wstring(experienceView->requiredExperience)+L"  ("+percentText.str()+L"%)";
+                }
+            }
+            auto experienceShadow=exp;experienceShadow.left+=1;experienceShadow.right+=1;experienceShadow.top+=1;experienceShadow.bottom+=1;
+            inRenderer.DrawUiText(experienceText,experienceShadow,D2D1::ColorF(0x000000),13,false,true);
+            inRenderer.DrawUiText(experienceText,exp,D2D1::ColorF(0xF0EFF8),13,false,true);
         }
         if (dungeonCleared) inRenderer.DrawUiText(L"DUNGEON CLEAR", D2D1::RectF(width * 0.5f - 150, 148, width * 0.5f + 150, 182), brass, 22, false, true);
         else if (inDungeon && player.IsCombatDead()) inRenderer.DrawUiText(L"YOU ARE DOWN", D2D1::RectF(24, 148, 300, 182), D2D1::ColorF(0xBE2434), 20);
@@ -3170,7 +3264,7 @@ namespace ActionRPG
 
     void GameWorld::ResetDungeonEntry()
     {
-        skillUi.ResetCombatState(); skillActionIds.clear(); lastSkillStateTick=0; lastAcceptedSkillSequence=0; hasSkillStateTick=false;
+        skillUi.ResetCombatState(); skillActionIds.clear(); skillBoostSequences.clear(); lastSkillStateTick=0; lastAcceptedSkillSequence=0; hasSkillStateTick=false;
         commandQueue.Clear();
         completionPending = completionStopping = false;
         completionWaitSeconds = 0.0f;

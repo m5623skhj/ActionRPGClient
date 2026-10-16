@@ -48,8 +48,9 @@ namespace ActionRPG
         [[nodiscard]] const PlayerSkills::CharacterProgression& GetProgression() const { return progression; }
         [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> GetMinimumClientSize() const;
         [[nodiscard]] SkillUiAction Update(float inDeltaSeconds, const InputState& inInput,
-            float inWidth, float inHeight, bool inEditing, bool inBarVisible);
+            float inWidth, float inHeight, bool inEditing, bool inBarVisible, bool inHotbarInteractive = true);
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inEditing, bool inShowBar = true) const;
+        void RenderDragOverlay(D2DRenderer& inRenderer, float inWidth, float inHeight) const;
         [[nodiscard]] D2D1_RECT_F GetHotbarBounds(float inWidth, float inHeight) const
         {
             const float scale = HudLayout::Scale(inWidth);
@@ -95,6 +96,7 @@ namespace ActionRPG
         std::unordered_map<std::string, float> cooldowns;
         std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> icons;
         std::string selected, dragCandidate, dragging;
+        bool hotbarDropAllowed{};
         float dragStartX{}, dragStartY{}, mouseX{}, mouseY{};
         std::wstring status;
     };

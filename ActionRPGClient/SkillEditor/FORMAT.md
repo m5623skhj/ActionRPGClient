@@ -5,12 +5,12 @@ characters의 `{id: CharacterN, dataId: N}`은 characters.ini에서 읽습니다
 스킬 ID는 영문으로 시작하고 영문/숫자/`_.-` 64자 이내이며 고유합니다.
 
 각 스킬은 `id`, `name`, `characterId`, `type`, `input`, `cooldownSeconds`, `execution`, `ground`, `air`를 갖습니다.
-input은 `command` 문자열 배열과 `maxStepSeconds`입니다. type은 direct/projectile/buff입니다.
+input은 `command` 문자열 배열과 `maxStepSeconds`입니다. type은 direct/projectile/buff/area입니다.
 ground/air는 null(불허)이거나 모드별 정의입니다.
 
 모드의 공통 필드는 `motionId`, `frameCount`, `fps`, `durationSeconds`, `eventFrame`, `endFrame`입니다.
 모션과 공용 모드에는 선택 frameDurationsSeconds 배열을 지정할 수 있습니다. 프레임 index 순서로 정확히 frameCount개이며 배열이 FPS보다 우선합니다. 누락된 기존 데이터는 각 프레임을 1/fps로 해석합니다.
-T[0]=0, T[i+1]=T[i]+frameDurationsSeconds[i]이며 durationSeconds는 T[frameCount]와 0.0001초 이내로 일치해야 합니다. 프레임은 0 기반, 실행 시작은 T[eventFrame], direct의 각 attackRects 구간은 [T[index],T[index+1])입니다. 마지막 활성 시간은 T[endFrame+1]이며 한 시전의 중복 타격은 금지합니다.
+T[0]=0, T[i+1]=T[i]+frameDurationsSeconds[i]이며 durationSeconds는 T[frameCount]와 0.0001초 이내로 일치해야 합니다. 프레임은 0 기반, 실행 시작은 T[eventFrame], direct의 각 attackRects 구간은 [T[index],T[index+1])입니다. 마지막 활성 시간은 T[endFrame+1]이며 direct는 한 시전에 같은 적을 중복 타격하지 않습니다.
 각 시간은 유한한 양수이고 float 변환 후에도 유한한 양수여야 합니다. 누적 경계는 double과 float 누적 모두 엄격히 증가하며 유한해야 합니다. 본체·독립 이펙트 총시간은 공통 재생기와 같은 최대 60초이며 스킬 본체는 최소 0.001초입니다. 잘못된 길이·null·0·음수·시간 합계 불일치는 거절합니다.
 공용 PlayerSkills와 표시 motion의 명시 시간 배열은 동일하게 출력합니다. 기존 schemaVersion 1을 유지하지만 가변 시간을 적용하려면 양쪽 로더·런타임을 함께 갱신해야 합니다.
 
@@ -127,3 +127,36 @@ PNG 시전 이펙트는 클라이언트 전용이고, 타격 피해·버프와 �
 
 확인 근거: [model.js](model.js), [editor.js](editor.js), 서버 Shared/PlayerSkillCatalog.h,
 Shared/SkillTreeCatalog.h와 GameRoomSkills.cpp. 소스 대조일은 2026-10-06이며 게임 실행 검증은 하지 않았습니다.
+
+
+## 범위 공격과 난사
+
+type=area의 execution은 damageRatio(0.01~100), radius(0.1~500), hitCount(1~64 정수),
+tapSpeedStep(0.001~0.2), maxTapSpeed(1~1.2)와 공격 공통 force/hitType/hitstopSeconds입니다.
+damageRatio=1은 Combat 캐릭터 attackPower의 100%이며 가장 높은 damageMultiplier를 한 번 적용합니다.
+고정 damagePerLevel은 사용하지 않으며 attackRects/spawn은 지정하지 않습니다.
+
+활성 구간 [T[eventFrame], T[endFrame+1])을 hitCount로 나누어 시작 시점부터 균등 타격합니다.
+매 타격마다 시전자 중심 지면 XY 원 안의 생존 적을 다시 검사하고 기존 이동 가능 판정으로 벽을 확인합니다.
+한 틱에 여러 시점이 지나도 모든 타격을 처리합니다. 이동은 잠그며 피격/사망 시 기존 규칙으로 취소됩니다.
+동일 스킬 단축키의 새 누름은 현재 시전 속도만 tapSpeedStep씩 높이고 maxTapSpeed에서 제한합니다.
+키를 누르고 있을 때의 자동 반복은 제외하며 시전 번호·타격 커서·방향·쿨다운을 초기화하지 않습니다.
+서버는 룸 strand에서 순서와 현재 시전을 확인합니다. 모션·섬광·타격은 같은 가속된 전투 시간을 사용합니다.
+
+Character1.Barrage는 지상 전용, 반경 300, 100% × 20회, 1.5 전투 초, 쿨다운 8 전투 초입니다.
+기존 템포 0.7에서 기본 실제 시간은 약 2.14초이며 연타당 +2%, 최대 +20%입니다.
+SkillTrees에서 요구 레벨 1, SP 20, 최대 스킬 레벨 1, 선행 조건 없음으로 등록합니다.
+습득 후 단축키 슬롯에 등록하여 시전과 연타에 사용합니다. 기본 커맨드는 Down Z입니다.
+마을은 기존 중립 템포의 동작 미리보기이며 피해 판정은 던전 서버에서만 합니다.
+
+표시 모션 프레임의 선택 muzzles 배열은 최대 2개이며 내보낼 때 보존합니다.
+각 원소는 sourceRect 내부 x/y 픽셀과 화면 기준 directionX/directionY(-1~1, 영벡터 불가)입니다.
+pivot·표시 배율·좌우 반전을 적용한 총구에서 섬광과 빛 탄환을 표시하며 피해 투사체는 생성하지 않습니다.
+편집기의 원형 표시는 지면 XY 범위이며 연타 미리보기는 동작 재생 속도를 변경합니다.
+
+JSON player의 skillPlaybackRate는 1~1.2이고 누락은 1입니다. 실시간 v3의 기존 레코드를 보존하고
+KBK1 뒤에 RPD1을 추가합니다. ASCII RPD1 + playerCount(uint16) +
+[playerId(uint64), skillSequence(uint32), skillPlaybackRate(float32)]로 행당 16바이트,
+little endian, 패딩 없음입니다. 현재 맵의 모든 준비된 플레이어를 포함하며 비활성은 속도 1입니다.
+클라이언트는 ID 중복·수·시전 번호·유한 속도를 검사하고 시간 외삽에 적용합니다.
+RPD1이 없는 이전 프레임은 속도 1이며 새 서버·클라이언트는 함께 배포해야 합니다.

@@ -769,6 +769,10 @@ namespace ActionRPG
                 PushEvent(QuestEvent{QuestEvent::Kind::ActionResult, std::move(packet->json)});
             else HandleDisconnect();
             break;
+        case TownProtocol::PacketType::ExperienceState:
+            if (auto packet=TownProtocol::DecodeExperienceState(receiveBody)) PushEvent(std::move(*packet));
+            else HandleDisconnect();
+            break;
         case TownProtocol::PacketType::SkillStateResponse:
             if (auto packet=TownProtocol::DecodeSkillStateResponse(receiveBody)) PushEvent(SkillStateEvent{std::move(packet->payload)});
             else HandleDisconnect();

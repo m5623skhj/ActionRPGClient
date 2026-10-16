@@ -160,6 +160,7 @@ namespace TownProtocol
     [[nodiscard]] std::vector<std::uint8_t> Encode(const AdmissionTicketRequest& inPacket);
     [[nodiscard]] std::optional<AdmissionResult> DecodeAdmissionResult(const std::vector<std::uint8_t>& inPacket);
     [[nodiscard]] std::optional<SessionStatus> DecodeSessionStatus(const std::vector<std::uint8_t>& inPacket);
+    [[nodiscard]] std::optional<ExperienceState> DecodeExperienceState(const std::vector<std::uint8_t>& inPacket);
 
     [[nodiscard]] std::vector<std::uint8_t> Encode(const PartyDetailRequest& inPacket);
     [[nodiscard]] std::vector<std::uint8_t> Encode(const PartyDetailResponse& inPacket);

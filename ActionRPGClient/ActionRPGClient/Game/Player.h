@@ -24,6 +24,7 @@ namespace ActionRPG
         void SetRunningEnabled(bool inEnabled) override;
         [[nodiscard]] bool IsDungeonRunInput() const { return IsRunningEnabled() && !IsHitReacting() && runState.IsRunning(); }
         void ActivateCommandSkill(const SkillEffectDefinition& inEffect);
+        [[nodiscard]] bool BoostCatalogSkill(const std::string& inId);
         [[nodiscard]] bool ActivateCatalogSkill(const std::string& inId, const std::unordered_map<std::string,std::uint32_t>& inSkillLevels);
         [[nodiscard]] const std::unordered_map<std::string,float>& GetTownSkillCooldowns() const { return townSkillCooldowns; }
         [[nodiscard]] bool IsLocallyCasting() const { return townSkill.has_value(); }

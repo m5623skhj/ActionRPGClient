@@ -74,7 +74,7 @@ namespace ActionRPG
         std::string itemUseDefinitionId, itemUseMotionId;
         float itemUseElapsedSeconds{}, itemUseDurationSeconds{};
         bool skillActive{}, skillAirborne{};
-        float skillSeconds{}, movementMultiplier{1.0f};
+        float skillSeconds{}, movementMultiplier{1.0f}, skillPlaybackRate{1.0f};
         std::vector<CombatBuffState> buffs;
         // JSON-only fields; SKL1 binary snapshots leave hasSkillState false.
         bool hasSkillState{};

@@ -4,7 +4,7 @@
   const canvas = $("canvas"), ctx = canvas.getContext("2d");
   let project = M.NewProject(), images = Object.create(null), selectedId = "", frame = 0, effectFrame = 0;
   let dirty = false, busy = false, playing = false, elapsed = 0, lastTime = 0, drag = null, transform = null;
-  let undo = [], redo = [], saveHandle = null;
+  let undo = [], redo = [], saveHandle = null, previewRate = 1;
   const MAX_JSON = 145 * 1024 * 1024, MAX_IMAGE = 15 * 1024 * 1024, MAX_IMAGES = 100 * 1024 * 1024;
   const skill = () => project.skills.find(value => value.id === selectedId);
   const mode = () => $("mode").value;
@@ -13,7 +13,7 @@
   const rect = () => variant()?.attackRects?.[frame];
   const tell = text => { $("status").textContent = text; };
   const changed = () => { dirty = true; $("dirty").textContent = "● 미저장 변경"; };
-  const pause = () => { playing = false; $("play").textContent = "▶ 모션 재생"; };
+  const pause = () => { playing = false; previewRate = 1; $("play").textContent = "▶ 모션 재생"; };
   const Snapshot = () => M.clone({ skills: project.skills, animations: project.animations });
   function Remember() { undo.push(Snapshot()); if (undo.length > 30) undo.shift(); redo = []; }
   function Edit(action) { if (busy || !skill()) return; pause(); Remember(); action(); changed(); Refresh(); }
@@ -31,7 +31,7 @@
     const current = skill(), v = variant(), m = motion();
     const character = current?.characterId || $("character").value || project.characters[0]?.id;
     Options($("character"), project.characters.map(value => [value.id, value.id + " · ID " + value.dataId]), character);
-    const labels = { direct: "직접 공격", projectile: "투사체 공격", buff: "버프" };
+    const labels = { direct: "직접 공격", projectile: "투사체 공격", area: "범위 공격", buff: "버프" };
     Options($("skills"), project.skills.filter(value => value.characterId === character).map(value => [value.id, value.name + " [" + value.id + "] · " + labels[value.type]]), selectedId);
     $("common").hidden = !current;
     $("variantPanel").hidden = !current;
@@ -59,6 +59,7 @@
     $("hint").textContent = !v ? "현재 모드 사용을 켜고 모션을 선택하세요."
       : current.type === "direct" ? "빈 곳에서 드래그: 공격 영역 그리기 · 내부: 이동 · 모서리: 크기 조절 · Esc: 드래그 취소"
       : current.type === "projectile" ? "드래그: 발사 위치 X·높이 설정 · 지면 Y와 방향각은 오른쪽에서 설정"
+      : current.type === "area" ? "원형: 지면 XY 범위 · 매 타격마다 적 판정 · 연타 미리보기로 재생 가속"
       : "버프는 자신에게 적용합니다. 이 화면은 모션·이펙트 미리보기입니다.";
     if (current?.type === "projectile" && v) {
       const velocity = M.Velocity(v, $("flip").checked, current.execution.speed);
@@ -77,7 +78,7 @@
       const start = t.starts[v.eventFrame], end = t.starts[v.endFrame + 1];
       $("timingInfo").textContent = "총 " + t.total.toPrecision(6) + "초 · 현재 [" + t.starts[frame].toPrecision(6)
         + ", " + t.starts[frame + 1].toPrecision(6) + ")초 · 실행 " + (start ?? "미지정")
-        + "초" + (skill().type === "direct" ? " · 타격 종료 " + (end ?? "미지정") + "초" : "");
+        + "초" + (["direct", "area"].includes(skill().type) ? " · 타격 종료 " + (end ?? "미지정") + "초" : "");
     } catch (error) { $("timingInfo").textContent = error.message; }
     const count = Number.isInteger(e?.frameCount) && e.frameCount > 0 ? e.frameCount : 1;
     effectFrame = Math.max(0, Math.min(effectFrame, count - 1));
@@ -207,6 +208,8 @@
     try { elapsed = M.Timeline(motion()).starts[frame]; playing = !playing; $("play").textContent = playing ? "Ⅱ 일시 정지" : "▶ 모션 재생"; }
     catch (error) { pause(); tell(error.message); }
   };
+  $("tapPreview").onclick = () => { if (playing && skill()?.type === "area")
+    previewRate = Math.min(skill().execution.maxTapSpeed, previewRate + skill().execution.tapSpeedStep); };
   $("motionFps").onchange = () => ChangeTiming(motion(), false, next => { next.fps = Number($("motionFps").value); });
   $("frameSeconds").onchange = () => ChangeTiming(motion(), false, next => {
     next.frameDurationsSeconds = M.Timeline(next).durations; next.frameDurationsSeconds[frame] = Number($("frameSeconds").value);
@@ -369,6 +372,17 @@
         Box({ x: (hurt.x - f.pivot.x) * scaleX, y: (f.pivot.y - hurt.y - hurt.height) * scale, width: hurt.width * scaleX, height: hurt.height * scale }, "#63aeff", height, flip); }
     }
     if (current.type === "direct" && rect()) Box(rect(), seconds >= timing.starts[v.eventFrame] && seconds < timing.starts[v.endFrame + 1] ? "#ff925e" : "#72675d", height, flip, true);
+    if (current.type === "area") {
+      const active = seconds >= timing.starts[v.eventFrame] && seconds < timing.starts[v.endFrame + 1];
+      const radius = current.execution.radius * transform.zoom;
+      ctx.strokeStyle = active ? "#ffc55e" : "#72675d"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(transform.x, transform.y, radius, 0, Math.PI * 2); ctx.stroke();
+      if (active) {
+        const interval = (timing.starts[v.endFrame + 1] - timing.starts[v.eventFrame]) / current.execution.hitCount;
+        const hit = Math.min(current.execution.hitCount, Math.floor((seconds - timing.starts[v.eventFrame]) / interval) + 1);
+        ctx.fillStyle = "#ffc55e"; ctx.fillText("범위 타격 " + hit + " / " + current.execution.hitCount + " · 속도 " + previewRate.toFixed(2) + "배", 16, 50);
+      }
+    }
     if (current.type === "projectile" && v.spawn) {
       const sign = flip ? -1 : 1, velocity = M.Velocity(v, flip, current.execution.speed);
       const start = Screen(sign * v.spawn.x, height + v.spawn.height - v.spawn.y), duration = Math.min(0.35, current.execution.range / current.execution.speed);
@@ -441,7 +455,7 @@
         try { const effect = variant()?.effect; if (effect && !effect.loop) { const effectMotion = M.EffectMotion(effect, images);
           if (!Number.isInteger(effect.eventFrame) || effect.eventFrame < 0 || effect.eventFrame >= m.frameCount) throw new Error("이펙트 시작 프레임 오류");
           duration = Math.max(duration, timing.starts[effect.eventFrame] + M.Timeline(effectMotion, 60, 0).total); } } catch (_) { /* Draft effect. */ }
-        elapsed = (elapsed + delta) % duration; frame = M.FrameAt(timing, elapsed);
+        elapsed = (elapsed + delta * previewRate) % duration; frame = M.FrameAt(timing, elapsed);
         $("frame").value = frame; $("frameText").textContent = "프레임 " + frame + " / " + (m.frameCount - 1); RefreshTiming(); Draw();
         const r = rect(); for (const [name, key] of [["rectX", "x"], ["rectY", "y"], ["rectW", "width"], ["rectH", "height"]]) $(name).value = r?.[key] ?? "";
       } catch (error) { pause(); tell(error.message); }

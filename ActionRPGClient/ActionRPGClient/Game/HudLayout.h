@@ -21,7 +21,7 @@ namespace ActionRPG
         static constexpr float MENU_WIDTH = 96.0f;
         static constexpr std::size_t SKILL_COLUMNS = 6;
 
-        D2D1_RECT_F items{}, hp{}, mp{}, menu{};
+        D2D1_RECT_F items{}, hp{}, mp{}, menu{}, level{}, experience{};
 
         [[nodiscard]] static float Scale(float inViewportWidth) { return inViewportWidth / 1280.0f; }
         [[nodiscard]] static D2D1_RECT_F ScaleRectangle(const D2D1_RECT_F& inRect, float inScale)
@@ -47,6 +47,9 @@ namespace ActionRPG
             result.items = D2D1::RectF(itemRight - ITEM_WIDTH*inScale, inSkillBar.bottom - SLOT_SIZE*inScale, itemRight, inSkillBar.bottom);
             result.menu = D2D1::RectF(result.mp.right + sideGap, result.items.top,
                 result.mp.right + sideGap + MENU_WIDTH*inScale, result.items.bottom);
+            const float experienceTop=inSkillBar.bottom+8.0f*inScale;
+            result.level=D2D1::RectF(result.items.left,experienceTop,result.items.left+88.0f*inScale,experienceTop+22.0f*inScale);
+            result.experience=D2D1::RectF(result.level.right+8.0f*inScale,experienceTop,result.menu.right,experienceTop+22.0f*inScale);
             return result;
         }
     };

@@ -418,6 +418,9 @@ namespace TownProtocol
         }
     }
 
+    std::optional<ExperienceState> DecodeExperienceState(const std::vector<std::uint8_t>& inPacket)
+    { return DecodeCharacterJson<ExperienceState>(inPacket, PacketType::ExperienceState, 1024); }
+
     std::vector<std::uint8_t> Encode(const CharacterListRequest& inPacket)
     { return EncodeCharacterJson(PacketType::CharacterListRequest, inPacket.json); }
     std::vector<std::uint8_t> Encode(const CharacterCreateRequest& inPacket)

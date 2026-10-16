@@ -308,6 +308,8 @@ namespace ActionRPG
             {
                 player.characterId = Integer(source.at("characterId")); player.skillSequence = Integer(source.at("skillSequence"));
                 player.skillId = Text(source.at("skillId"), true); player.skillActive = source.at("skillActive").get<bool>(); player.skillAirborne = source.at("skillAirborne").get<bool>();
+                player.skillPlaybackRate = source.contains("skillPlaybackRate") ? Number(source.at("skillPlaybackRate")) : 1.0f;
+                if (player.skillPlaybackRate < 1.0f || player.skillPlaybackRate > 1.2f) throw std::runtime_error("Invalid skill rate.");
                 player.skillSeconds = Number(source.at("skillSeconds")); player.movementMultiplier = Number(source.at("movementMultiplier"));
                 if ((!player.skillId.empty() && !PlayerSkills::Catalog::IsId(player.skillId)) || player.skillSeconds > 600
                     || player.movementMultiplier < 0.1f || player.movementMultiplier > 10) throw std::runtime_error("Invalid skill state.");
@@ -553,6 +555,24 @@ namespace ActionRPG
         {
             const auto tag = reader.UInt(4);
             if (!extensionTags.insert(tag).second) throw std::runtime_error("Duplicate realtime extension.");
+            if (tag == 0x31445052) // RPD1: skill phase speed, 16 bytes per player.
+            {
+                if (reader.UInt(2) != playerCount) throw std::runtime_error("Skill rate count mismatch.");
+                std::unordered_set<std::uint64_t> seen;
+                for (std::uint64_t index = 0; index < playerCount; ++index)
+                {
+                    const auto id = reader.UInt(8);
+                    const auto found = std::find_if(result.players.begin(), result.players.end(),
+                        [id](const auto& value) { return value.playerId == id; });
+                    const auto sequence = reader.UInt(4);
+                    const float rate = reader.Float();
+                    if (found == result.players.end() || !seen.insert(id).second
+                        || found->skillSequence != sequence || rate < 1.0f || rate > 1.2f)
+                        throw std::runtime_error("Invalid skill rate.");
+                    found->skillPlaybackRate = rate;
+                }
+                continue;
+            }
             if (tag == 0x314B424B) // KBK1: full actor lists, 33 bytes/record, little endian without padding.
             {
                 const auto readKnockback = [&reader](CombatActorState& outActor)

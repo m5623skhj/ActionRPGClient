@@ -232,7 +232,7 @@ namespace ActionRPG
                 player.presentationMoving = false;
                 player.presentationSpeed = 0.0f;
             }
-            if (!player.skillId.empty()) player.skillSeconds += actionAge;
+            if (!player.skillId.empty()) player.skillSeconds += actionAge * player.skillPlaybackRate;
             if (player.hasItemUseState && !player.itemUseMotionId.empty())
                 player.itemUseElapsedSeconds = std::min(player.itemUseDurationSeconds, player.itemUseElapsedSeconds + actionAge);
             for (auto& buff : player.buffs) buff.remainingSeconds = std::max(0.0f, buff.remainingSeconds - age);

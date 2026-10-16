@@ -41,7 +41,7 @@ namespace ActionRPG
         TownProtocol::PartySnapshot, TownProtocol::PartyOperationResult,
         TownProtocol::PartyDirectoryPage, TownProtocol::PartyDirectoryChanged,
         TownProtocol::DungeonCompletionResponse, TownProtocol::PartyDetailResponse,
-        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent, InventoryEvent, QuestEvent, TownProtocol::ChatResult, TownProtocol::ChatMessage>;
+        TownProtocol::PartyJoinRequestUpdate, TownProtocol::PartyKicked, SkillStateEvent, InventoryEvent, QuestEvent, TownProtocol::ChatResult, TownProtocol::ChatMessage, TownProtocol::ExperienceState>;
 
     enum class TownSessionStatusCode : std::uint8_t
     {

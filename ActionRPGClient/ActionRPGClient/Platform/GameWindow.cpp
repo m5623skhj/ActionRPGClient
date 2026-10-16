@@ -296,6 +296,11 @@ namespace ActionRPG
             // This mode switch already cancels hotbar drags in GameWorld. Do not
             // turn it into a focus-loss event that cancels chat on the next tick.
             window.pendingCancelDrag = false;
+            // ClearInput intentionally drops typed action keys. Restore only physical movement
+            // keys on chat exit so holding an arrow does not require releasing and pressing it again.
+            if (!inEnabled && GetForegroundWindow()==window.windowHandle)
+                for (const int key : {VK_LEFT,VK_RIGHT,VK_UP,VK_DOWN})
+                    window.keyStates[key]=(GetAsyncKeyState(key)&0x8000)!=0;
             window.pendingTextInput.clear();
             window.pendingTextEdits.clear();
             window.composition.clear();
@@ -539,17 +544,12 @@ namespace ActionRPG
                     }
                     return 0;
                 }
-                if (inWParam == VK_ESCAPE)
+                if (chatKey == VK_ESCAPE)
                 {
-                    if (imeComposing)
-                    {
-                        if (const HIMC context = ImmGetContext(windowHandle))
-                        {
-                            ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
-                            ImmReleaseContext(windowHandle, context);
-                        }
-                    }
-                    else pendingTextEdits.push_back({TextEditEvent::Kind::Cancel, {}});
+                    // Escape belongs to the menu/window stack, never chat or its IME draft.
+                    if (!(inLParam & (static_cast<LPARAM>(1) << 30)))
+                        pendingPressedKeys.push_back(InputKey::ToggleSystemMenu);
+                    return 0;
                 }
                 // IME consumes VK_PROCESSKEY; committed text arrives in WM_IME_COMPOSITION.
                 return DefWindowProcW(windowHandle, inMessage, inWParam, inLParam);

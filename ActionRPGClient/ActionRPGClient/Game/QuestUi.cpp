@@ -390,6 +390,8 @@ namespace ActionRPG
         {
             if (!text.empty()) text += L" / ";
             if (reward.at("type") == "Item") text += ItemName(reward.at("definitionId")) + L" ×" + std::to_wstring(reward.at("count").get<unsigned>());
+            else if (reward.at("type")=="Experience")
+                text += L"경험치 +" + std::to_wstring(CharacterInventoryJson::UInt64(reward.at("amount")));
             else text += L"스킬 포인트 +" + std::to_wstring(reward.at("amount").get<unsigned>());
         }
         return text.empty() ? L"없음" : text;
@@ -670,7 +672,7 @@ namespace ActionRPG
                         if(bitmap!=icons.end() && bitmap->second) draw.DrawUiIcon(bitmap->second.Get(),rect,false);
                     }
                 }
-                else draw.DrawUiText(L"SP",rect,gold,14,false,true);
+                else draw.DrawUiText(reward.at("type")=="Experience" ? L"EXP":L"SP",rect,gold,14,false,true);
             };
             for(const auto& reward:q->definition.at("fixedRewards"))
             {

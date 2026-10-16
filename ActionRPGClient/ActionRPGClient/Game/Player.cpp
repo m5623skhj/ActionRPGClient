@@ -48,7 +48,7 @@ namespace ActionRPG
         for (auto& [id, seconds] : townSkillCooldowns) seconds = std::max(0.0f, seconds - inDeltaSeconds);
         if (townSkill)
         {
-            townSkill->skillSeconds += inDeltaSeconds;
+            townSkill->skillSeconds += inDeltaSeconds * townSkill->skillPlaybackRate;
             if (townSkill->skillSeconds < townSkillDuration)
             {
                 UpdateActions(inDeltaSeconds, CharacterActions{}, inGameplayMap);
@@ -132,6 +132,17 @@ namespace ActionRPG
         }
         activeSkillEffect = inEffect;
         skillEffectRemainingSeconds = inEffect.durationSeconds;
+    }
+
+    bool Player::BoostCatalogSkill(const std::string& inId)
+    {
+        if (!townSkill || townSkill->skillId != inId || !skillPresentation) return false;
+        const auto& definition = skillPresentation->GetDefinition(inId);
+        if (definition.at("type") != "area") return false;
+        const auto& execution = definition.at("execution");
+        townSkill->skillPlaybackRate = std::min(execution.at("maxTapSpeed").get<float>(),
+            townSkill->skillPlaybackRate + execution.at("tapSpeedStep").get<float>());
+        return true;
     }
 
     bool Player::ActivateCatalogSkill(const std::string& inId, const std::unordered_map<std::string,std::uint32_t>& inSkillLevels)
@@ -241,7 +252,7 @@ namespace ActionRPG
         if (state && !IsItemUseMotionActive() && !IsSliding() && !HasPendingSlide() && skillPresentation && !state->skillId.empty()
             && state->hp != 0 && state->reaction == CombatReaction::None)
         {
-            const float seconds = state->skillSeconds + GetCombatElapsedSeconds();
+            const float seconds = state->skillSeconds + GetCombatElapsedSeconds() * state->skillPlaybackRate;
             if (!skillPlayback || skillPlayback->sequence != state->skillSequence
                 || skillPlayback->id != state->skillId || skillPlayback->airborne != state->skillAirborne
                 || skillPlayback->hitstopSequence != state->hitstopSequence)

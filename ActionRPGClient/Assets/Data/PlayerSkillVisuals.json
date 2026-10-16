@@ -148,6 +148,577 @@
         "effect": null
       },
       "air": null
+    },
+    {
+      "id": "Character1.Barrage",
+      "characterId": "Character1",
+      "ground": {
+        "motion": {
+          "image": "Images/Characters/player_barrage.png",
+          "width": 1254,
+          "height": 1254,
+          "frameCount": 20,
+          "fps": 13.333333333333334,
+          "frameDurationsSeconds": [
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075,
+            0.075
+          ],
+          "durationSeconds": 1.5,
+          "loop": false,
+          "holdLastFrame": true,
+          "scaleToMovement": 0.68,
+          "frames": [
+            {
+              "index": 0,
+              "sourceRect": {
+                "x": 0,
+                "y": 0,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 153,
+                "y": 385
+              },
+              "muzzles": [
+                {
+                  "x": 236,
+                  "y": 185,
+                  "directionX": 1,
+                  "directionY": 0
+                },
+                {
+                  "x": 287,
+                  "y": 187,
+                  "directionX": 1,
+                  "directionY": 0
+                }
+              ]
+            },
+            {
+              "index": 1,
+              "sourceRect": {
+                "x": 314,
+                "y": 0,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 162,
+                "y": 385
+              },
+              "muzzles": [
+                {
+                  "x": 231,
+                  "y": 172,
+                  "directionX": 0.98,
+                  "directionY": -0.18
+                },
+                {
+                  "x": 275,
+                  "y": 189,
+                  "directionX": 0.98,
+                  "directionY": -0.18
+                }
+              ]
+            },
+            {
+              "index": 2,
+              "sourceRect": {
+                "x": 627,
+                "y": 0,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 157,
+                "y": 385
+              },
+              "muzzles": [
+                {
+                  "x": 35,
+                  "y": 155,
+                  "directionX": -0.95,
+                  "directionY": -0.31
+                },
+                {
+                  "x": 273,
+                  "y": 154,
+                  "directionX": 0.95,
+                  "directionY": -0.31
+                }
+              ]
+            },
+            {
+              "index": 3,
+              "sourceRect": {
+                "x": 941,
+                "y": 0,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 155,
+                "y": 385
+              },
+              "muzzles": [
+                {
+                  "x": 39,
+                  "y": 189,
+                  "directionX": -0.99,
+                  "directionY": -0.1
+                },
+                {
+                  "x": 84,
+                  "y": 174,
+                  "directionX": -0.98,
+                  "directionY": -0.18
+                }
+              ]
+            },
+            {
+              "index": 4,
+              "sourceRect": {
+                "x": 0,
+                "y": 418,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 157,
+                "y": 353
+              },
+              "muzzles": [
+                {
+                  "x": 36,
+                  "y": 154,
+                  "directionX": -1,
+                  "directionY": 0
+                }
+              ]
+            },
+            {
+              "index": 5,
+              "sourceRect": {
+                "x": 627,
+                "y": 836,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 156,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 71,
+                  "y": 54,
+                  "directionX": -0.9,
+                  "directionY": -0.45
+                },
+                {
+                  "x": 287,
+                  "y": 213,
+                  "directionX": 0.77,
+                  "directionY": 0.64
+                }
+              ]
+            },
+            {
+              "index": 6,
+              "sourceRect": {
+                "x": 627,
+                "y": 418,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 158,
+                "y": 353
+              },
+              "muzzles": [
+                {
+                  "x": 12,
+                  "y": 154,
+                  "directionX": -1,
+                  "directionY": 0
+                },
+                {
+                  "x": 303,
+                  "y": 152,
+                  "directionX": 1,
+                  "directionY": 0
+                }
+              ]
+            },
+            {
+              "index": 7,
+              "sourceRect": {
+                "x": 941,
+                "y": 418,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 162,
+                "y": 353
+              },
+              "muzzles": [
+                {
+                  "x": 277,
+                  "y": 101,
+                  "directionX": 0.92,
+                  "directionY": -0.4
+                },
+                {
+                  "x": 223,
+                  "y": 196,
+                  "directionX": 0.9,
+                  "directionY": 0.43
+                }
+              ]
+            },
+            {
+              "index": 8,
+              "sourceRect": {
+                "x": 0,
+                "y": 836,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 163,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 252,
+                  "y": 47,
+                  "directionX": 0.86,
+                  "directionY": -0.5
+                },
+                {
+                  "x": 40,
+                  "y": 230,
+                  "directionX": -0.7,
+                  "directionY": 0.7
+                }
+              ]
+            },
+            {
+              "index": 9,
+              "sourceRect": {
+                "x": 314,
+                "y": 0,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 162,
+                "y": 385
+              },
+              "muzzles": [
+                {
+                  "x": 231,
+                  "y": 172,
+                  "directionX": 0.98,
+                  "directionY": -0.18
+                },
+                {
+                  "x": 275,
+                  "y": 189,
+                  "directionX": 0.98,
+                  "directionY": -0.18
+                }
+              ]
+            },
+            {
+              "index": 10,
+              "sourceRect": {
+                "x": 314,
+                "y": 836,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 162,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 18,
+                  "y": 89,
+                  "directionX": -0.91,
+                  "directionY": -0.41
+                },
+                {
+                  "x": 287,
+                  "y": 111,
+                  "directionX": 0.96,
+                  "directionY": -0.28
+                }
+              ]
+            },
+            {
+              "index": 11,
+              "sourceRect": {
+                "x": 941,
+                "y": 0,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 155,
+                "y": 385
+              },
+              "muzzles": [
+                {
+                  "x": 39,
+                  "y": 189,
+                  "directionX": -0.99,
+                  "directionY": -0.1
+                },
+                {
+                  "x": 84,
+                  "y": 174,
+                  "directionX": -0.98,
+                  "directionY": -0.18
+                }
+              ]
+            },
+            {
+              "index": 12,
+              "sourceRect": {
+                "x": 0,
+                "y": 418,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 157,
+                "y": 353
+              },
+              "muzzles": [
+                {
+                  "x": 36,
+                  "y": 154,
+                  "directionX": -1,
+                  "directionY": 0
+                }
+              ]
+            },
+            {
+              "index": 13,
+              "sourceRect": {
+                "x": 627,
+                "y": 836,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 156,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 71,
+                  "y": 54,
+                  "directionX": -0.9,
+                  "directionY": -0.45
+                },
+                {
+                  "x": 287,
+                  "y": 213,
+                  "directionX": 0.77,
+                  "directionY": 0.64
+                }
+              ]
+            },
+            {
+              "index": 14,
+              "sourceRect": {
+                "x": 941,
+                "y": 836,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 168,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 43,
+                  "y": 47,
+                  "directionX": -0.86,
+                  "directionY": -0.51
+                },
+                {
+                  "x": 282,
+                  "y": 53,
+                  "directionX": 0.86,
+                  "directionY": -0.51
+                }
+              ]
+            },
+            {
+              "index": 15,
+              "sourceRect": {
+                "x": 314,
+                "y": 418,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 171,
+                "y": 353
+              },
+              "muzzles": [
+                {
+                  "x": 261,
+                  "y": 100,
+                  "directionX": 0.92,
+                  "directionY": -0.4
+                },
+                {
+                  "x": 218,
+                  "y": 202,
+                  "directionX": 0.92,
+                  "directionY": 0.4
+                }
+              ]
+            },
+            {
+              "index": 16,
+              "sourceRect": {
+                "x": 0,
+                "y": 836,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 163,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 252,
+                  "y": 47,
+                  "directionX": 0.86,
+                  "directionY": -0.5
+                },
+                {
+                  "x": 40,
+                  "y": 230,
+                  "directionX": -0.7,
+                  "directionY": 0.7
+                }
+              ]
+            },
+            {
+              "index": 17,
+              "sourceRect": {
+                "x": 314,
+                "y": 836,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 162,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 18,
+                  "y": 89,
+                  "directionX": -0.91,
+                  "directionY": -0.41
+                },
+                {
+                  "x": 287,
+                  "y": 111,
+                  "directionX": 0.96,
+                  "directionY": -0.28
+                }
+              ]
+            },
+            {
+              "index": 18,
+              "sourceRect": {
+                "x": 627,
+                "y": 836,
+                "width": 314,
+                "height": 418
+              },
+              "pivot": {
+                "x": 156,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 71,
+                  "y": 54,
+                  "directionX": -0.9,
+                  "directionY": -0.45
+                },
+                {
+                  "x": 287,
+                  "y": 213,
+                  "directionX": 0.77,
+                  "directionY": 0.64
+                }
+              ]
+            },
+            {
+              "index": 19,
+              "sourceRect": {
+                "x": 941,
+                "y": 836,
+                "width": 313,
+                "height": 418
+              },
+              "pivot": {
+                "x": 168,
+                "y": 315
+              },
+              "muzzles": [
+                {
+                  "x": 43,
+                  "y": 47,
+                  "directionX": -0.86,
+                  "directionY": -0.51
+                },
+                {
+                  "x": 282,
+                  "y": 53,
+                  "directionX": 0.86,
+                  "directionY": -0.51
+                }
+              ]
+            }
+          ]
+        },
+        "effect": null
+      },
+      "air": null
     }
   ]
 }

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <fstream>
 #include <stdexcept>
 #include <utility>
@@ -132,6 +133,19 @@ namespace ActionRPG
             const double x = Contract::Number(rectangle.at("x"), 0, width), y = Contract::Number(rectangle.at("y"), 0, height);
             const double w = Contract::Number(rectangle.at("width"), 0.01, width), h = Contract::Number(rectangle.at("height"), 0.01, height);
             Contract::Require(x + w <= width + 0.001 && y + h <= height + 0.001, "Visual frame exceeds image.");
+            if (frame.contains("muzzles"))
+            {
+                const auto& muzzles = frame.at("muzzles");
+                Contract::Require(muzzles.is_array() && muzzles.size() <= 2, "Invalid muzzle anchors.");
+                for (const auto& muzzle : muzzles)
+                {
+                    Contract::Keys(muzzle, { "x", "y", "directionX", "directionY" });
+                    Contract::Number(muzzle.at("x"), 0, w); Contract::Number(muzzle.at("y"), 0, h);
+                    const double dx = Contract::Number(muzzle.at("directionX"), -1, 1);
+                    const double dy = Contract::Number(muzzle.at("directionY"), -1, 1);
+                    Contract::Require(std::hypot(dx, dy) >= 0.001, "Zero muzzle direction.");
+                }
+            }
             const float pivotX = static_cast<float>(Contract::Number(pivot.at("x"), 0, w));
             const float pivotY = static_cast<float>(Contract::Number(pivot.at("y"), 0, h));
             frames[frame.at("index").get<std::uint32_t>()] = {
@@ -208,6 +222,71 @@ namespace ActionRPG
         {
             inRenderer.FillEllipse(position.x, position.y, 24, 8, D2D1::ColorF(0.0f, 0.0f, 0.0f, .3f));
             Draw(*variant.motion, seconds, false, position.x, position.y - inHeight, inState.facingLeft, inRenderer);
+            const auto& definition = catalog.skills.at(inState.skillId);
+            if (definition.at("type") == "area")
+            {
+                const auto& motion = variant.motion->definition;
+                const auto index = variant.motion->animation.GetFrameAt(std::max(0.0f, seconds), false);
+                const auto frame = std::find_if(motion.at("frames").begin(), motion.at("frames").end(),
+                    [index](const auto& value) { return value.at("index") == index; });
+                if (frame->contains("muzzles"))
+                {
+                    const auto& timeline = definition.at(inState.skillAirborne ? "air" : "ground");
+                    const double start = Contract::FrameStartSeconds(timeline, timeline.at("eventFrame").get<std::uint32_t>());
+                    const double end = Contract::FrameStartSeconds(timeline, timeline.at("endFrame").get<std::uint32_t>() + 1);
+                    if (seconds >= start && seconds < end)
+                    {
+                        const float interval = static_cast<float>((end - start) / definition.at("execution").at("hitCount").get<float>());
+                        const float phase = std::fmod(static_cast<float>(seconds - start), interval) / interval;
+                        const auto& rect = frame->at("sourceRect");
+                        const auto& pivot = frame->at("pivot");
+                        const float sx = motion.contains("renderSize") ? motion.at("renderSize").at("width").get<float>()
+                            / rect.at("width").get<float>() : motion.value("scaleToMovement", 1.0f);
+                        const float sy = motion.contains("renderSize") ? motion.at("renderSize").at("height").get<float>()
+                            / rect.at("height").get<float>() : sx;
+                        const float sign = inState.facingLeft ? -1.0f : 1.0f;
+                        std::size_t muzzleIndex{};
+                        for (const auto& muzzle : frame->at("muzzles"))
+                        {
+                            // Offset the second pistol within the same pulse; damage still uses the server's 20 hits.
+                            const float delay = muzzleIndex++ == 0 ? 0.0f : .22f;
+                            const float shotPhase = (phase - delay) / (1.0f - delay);
+                            if (shotPhase < 0.0f) continue;
+                            const float x = position.x + sign * (muzzle.at("x").get<float>() - pivot.at("x").get<float>()) * sx;
+                            const float y = position.y - inHeight + (muzzle.at("y").get<float>() - pivot.at("y").get<float>()) * sy;
+                            float dx = sign * muzzle.at("directionX").get<float>(), dy = muzzle.at("directionY").get<float>();
+                            const float length = std::hypot(dx, dy); dx /= length; dy /= length;
+                            const float travel = 180.0f * shotPhase;
+                            inRenderer.DrawLuminousProjectile(x + dx * travel, y + dy * travel, dx, dy, 2.4f, travel,
+                                D2D1::ColorF(.2f, .65f, 1.0f, 1.0f - shotPhase),
+                                D2D1::ColorF(.9f, .98f, 1.0f, 1.0f - shotPhase));
+                            if (shotPhase < .55f)
+                            {
+                                const float alpha = 1.0f - shotPhase / .55f;
+                                const float flameLength = 14.0f + 12.0f * alpha;
+                                const float sideX = -dy, sideY = dx;
+                                inRenderer.FillEllipse(x + dx * 5, y + dy * 5, 11, 9, D2D1::ColorF(1.0f, .48f, .08f, .4f * alpha));
+                                inRenderer.DrawLine(x, y, x + dx * flameLength, y + dy * flameLength,
+                                    D2D1::ColorF(1.0f, .65f, .12f, alpha), 6.0f * alpha + 1.0f);
+                                inRenderer.DrawLine(x, y, x + dx * flameLength * .8f, y + dy * flameLength * .8f,
+                                    D2D1::ColorF(1.0f, .98f, .8f, alpha), 2.0f * alpha + 1.0f);
+                                for (const float side : { -1.0f, 1.0f })
+                                {
+                                    inRenderer.DrawLine(x + dx * 4, y + dy * 4,
+                                        x + dx * 12 + sideX * side * 8 * alpha,
+                                        y + dy * 12 + sideY * side * 8 * alpha,
+                                        D2D1::ColorF(1.0f, .8f, .25f, alpha), 2.0f * alpha);
+                                    const float sparkX = x + dx * (12 + 22 * shotPhase) + sideX * side * (5 + 14 * shotPhase);
+                                    const float sparkY = y + dy * (12 + 22 * shotPhase) + sideY * side * (5 + 14 * shotPhase) + 10 * shotPhase * shotPhase;
+                                    inRenderer.DrawLine(sparkX, sparkY, sparkX - dx * 4, sparkY - dy * 4,
+                                        D2D1::ColorF(1.0f, .65f, .15f, alpha), 1.4f);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
         }
         if (variant.effect && seconds >= variant.effectSeconds)
         {

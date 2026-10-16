@@ -83,7 +83,8 @@ namespace ActionRPG
                 {
                     const auto type = Text(reward.at("type"), 16);
                     if (type == "Item") { (void)Text(reward.at("definitionId"), 64); (void)UInt32(reward.at("count"), 1, 1000000); }
-                    else { Require(type == "SkillPoints"); (void)UInt32(reward.at("amount"), 1, 1000000); }
+                    else if (type == "SkillPoints") (void)UInt32(reward.at("amount"), 1, 1000000);
+                    else { Require(type == "Experience"); Require(UInt64(reward.at("amount"))>0); }
                 }
             };
             rewards(inDefinition.at("fixedRewards")); Array(inDefinition.at("choiceRewards"), 8);

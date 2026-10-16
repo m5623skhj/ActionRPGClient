@@ -10,7 +10,7 @@
     && value >= min && value <= max, label + ": 수치 범위 " + min + "~" + max);
   const integer = (value, min, max, label) => { number(value, min, max, label); assert(Number.isInteger(value), label + ": 정수 필요"); };
   const KEYS = ["Left", "Right", "Up", "Down", "Z", "X", "C", "V"];
-  const TYPES = ["direct", "projectile", "buff"];
+  const TYPES = ["direct", "projectile", "buff", "area"];
   const COORDINATES = "groundXY-height-facingRight-worldUnits";
   const MAX_FORCE_DISTANCE = 500;
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -111,6 +111,7 @@
     assert(TYPES.includes(type), "스킬 유형 오류"); skill.type = type;
     skill.execution = type === "direct" ? { damage: 20, depthRadius: 24, force: 0, hitType: "Normal", hitstopSeconds: 0.05 }
       : type === "projectile" ? { damage: 20, speed: 1000, radius: 4, range: 900, force: 0, hitType: "Normal", hitstopSeconds: 0 }
+      : type === "area" ? { damageRatio: 1, radius: 300, hitCount: 20, tapSpeedStep: .02, maxTapSpeed: 1.2, force: 0, hitType: "Normal", hitstopSeconds: 0 }
       : { target: "self", stat: "damageMultiplier", multiplier: 1.25, durationSeconds: 5, refresh: "replaceDuration" };
     for (const variant of [skill.ground, skill.air].filter(Boolean)) {
       delete variant.attackRects; delete variant.spawn; delete variant.yawDegrees; delete variant.pitchDegrees;
@@ -185,11 +186,19 @@
         execution.hitType = HitType(execution);
       }
       Keys(execution, skill.type === "direct" ? ["damage", "depthRadius", "force", "hitType", "hitstopSeconds"] : skill.type === "projectile"
-        ? ["damage", "speed", "radius", "range", "force", "hitType", "hitstopSeconds"] : ["target", "stat", "multiplier", "durationSeconds", "refresh"], label);
+        ? ["damage", "speed", "radius", "range", "force", "hitType", "hitstopSeconds"] : skill.type === "area"
+        ? ["damageRatio", "radius", "hitCount", "tapSpeedStep", "maxTapSpeed", "force", "hitType", "hitstopSeconds"]
+        : ["target", "stat", "multiplier", "durationSeconds", "refresh"], label);
       if (skill.type === "buff") {
         assert(execution.target === "self" && execution.refresh === "replaceDuration"
           && ["damageMultiplier", "movementMultiplier"].includes(execution.stat), label + ": 지원하지 않는 버프 정책");
         number(execution.multiplier, 0.1, 10, label + " 버프 배율"); number(execution.durationSeconds, 0.05, 3600, label + " 버프 지속시간");
+      } else if (skill.type === "area") {
+        number(execution.damageRatio, 0.01, 100, label + " 공격력 배율");
+        number(execution.radius, 0.1, 500, label + " 범위 반경");
+        integer(execution.hitCount, 1, 64, label + " 타격 횟수");
+        number(execution.tapSpeedStep, 0.001, 0.2, label + " 연타당 속도 증가");
+        number(execution.maxTapSpeed, 1, 1.2, label + " 최대 재생 속도");
       } else {
         integer(execution.damage, 1, 1000000, label + " 피해량");
         if (skill.type === "direct") number(execution.depthRadius, 0.1, 500, label + " 지면 Y 판정 반경");
@@ -207,6 +216,17 @@
         if (motion.renderSize) {
           number(motion.renderSize.width, 0.01, 10000, label + " 표시 너비"); number(motion.renderSize.height, 0.01, 10000, label + " 표시 높이");
         } else number(motion.scaleToMovement ?? 1, 0.01, 20, label + " 월드 배율");
+        for (const frame of motion.frames) if (own(frame, "muzzles")) {
+          assert(Array.isArray(frame.muzzles) && frame.muzzles.length <= 2, label + ": 총구는 최대 2개입니다.");
+          for (const muzzle of frame.muzzles) {
+            Keys(muzzle, ["x", "y", "directionX", "directionY"], label + " 총구");
+            number(muzzle.x, 0, frame.sourceRect.width, label + " 총구 X");
+            number(muzzle.y, 0, frame.sourceRect.height, label + " 총구 Y");
+            number(muzzle.directionX, -1, 1, label + " 총구 방향 X");
+            number(muzzle.directionY, -1, 1, label + " 총구 방향 Y");
+            assert(Math.hypot(muzzle.directionX, muzzle.directionY) >= .001, label + ": 총구 방향은 0일 수 없습니다.");
+          }
+        }
         CheckImage(motion, images, paths);
         integer(variant.eventFrame, 0, motion.frameCount - 1, label + " 시작 프레임");
         integer(variant.endFrame, variant.eventFrame, motion.frameCount - 1, label + " 종료 프레임");

@@ -99,7 +99,9 @@ namespace ActionRPG
     {
         PlayerSkills::Catalog::Require(inPayload.size() <= 1024*1024, "Oversized skill state.");
         const auto value = Json::parse(inPayload);
-        PlayerSkills::Catalog::Keys(value, {"characterId","progression","skillTrees","playerSkills","result"});
+        // The same authoritative response also carries the existing Town resource gauges.
+        PlayerSkills::Catalog::Keys(value, {"characterId","progression","skillTrees","playerSkills","result"},
+            {"hp","maxHp","mp","maxMp"});
         const auto newCharacter = PlayerSkills::Catalog::Integer(value.at("characterId"),1,1000000);
         PlayerSkills::Catalog::Require(newCharacter == inCharacterId, "Skill state belongs to another character.");
         const auto newCatalog = PlayerSkills::Catalog::Parse(value.at("playerSkills"));
@@ -111,7 +113,10 @@ namespace ActionRPG
         PlayerSkills::Catalog::Require(result.size() <= 128,"Invalid skill result.");
         const bool changed = characterId != newCharacter || !ready;
         characterId = newCharacter; trees = std::move(newTrees); progression = std::move(newProgression);
-        ready = true; learnPending = false; learnSeconds = 0; CancelDrag();
+        ready = true; learnPending = false; learnSeconds = 0;
+        // A refresh of the same learned skill must not interrupt an in-progress slot assignment.
+        if (changed || (!dragCandidate.empty() && (!IsOwned(dragCandidate)
+            || progression.GetSkillLevel(dragCandidate)==0))) CancelDrag();
         if (changed) { slots.fill({}); LoadSlots(); treeScrollX = treeScrollY = detailScroll = 0; }
         for (const auto& [id,node] : trees.nodes)
         {
@@ -144,7 +149,7 @@ namespace ActionRPG
     void SkillUi::ApplyTownCooldowns(const std::unordered_map<std::string,float>& inCooldowns) { cooldowns = inCooldowns; }
     void SkillUi::ResetCombatState() { combatReady = false; cooldowns.clear(); CancelDrag(); }
     void SkillUi::Invalidate() { ready = false; learnPending = false; ResetCombatState(); status = L"스킬 상태를 다시 요청해야 합니다"; }
-    void SkillUi::CancelDrag() { dragging.clear(); dragCandidate.clear(); }
+    void SkillUi::CancelDrag() { dragging.clear(); dragCandidate.clear(); hotbarDropAllowed=false; }
     bool SkillUi::IsOwned(const std::string& id) const
     { return trees.nodes.contains(id) && catalog.skills.contains(id) && catalog.characterIds.at(catalog.skills.at(id).at("characterId").get<std::string>()) == characterId; }
     float SkillUi::Cooldown(const std::string& id) const
@@ -242,7 +247,19 @@ namespace ActionRPG
         text += L"스킬 레벨: "+std::to_wstring(current)+L" / "+(node.at("maxSkillLevel").is_null() ? L"상한 없음" : std::to_wstring(node.at("maxSkillLevel").get<std::uint32_t>()))+L"\n";
         std::wostringstream cooldown; cooldown << skill.at("cooldownSeconds").get<float>()/combatTempoScale;
         text += L"쿨타임: "+cooldown.str()+L"초\n";
-        if (skill.at("execution").contains("damage"))
+        if (skill.at("type") == "area")
+        {
+            const auto& execution = skill.at("execution");
+            std::wostringstream detail;
+            detail << L"매 타격: 공격력 " << execution.at("damageRatio").get<float>() * 100 << L"% × "
+                << execution.at("hitCount").get<std::uint32_t>() << L"회\n범위: 반경 "
+                << execution.at("radius").get<float>() << L"\n기본 사용시간: "
+                << skill.at(skill.at("ground").is_null() ? "air" : "ground").at("durationSeconds").get<float>() / combatTempoScale
+                << L"초\n연타 1회당 속도 +" << execution.at("tapSpeedStep").get<float>() * 100
+                << L"% (최대 +" << (execution.at("maxTapSpeed").get<float>() - 1) * 100 << L"%)\n";
+            text += detail.str();
+        }
+        else if (skill.at("execution").contains("damage"))
             text += L"공격력: "+std::to_wstring(trees.Damage(catalog,id,current ? current : 1))+(current ? L"" : L" (습득 시)")+L"\n다음 단계 공격력: "+std::to_wstring(trees.Damage(catalog,id,next))+L"\n";
         else text += L"버프: "+Wide(skill.at("execution").at("stat").get<std::string>())+L" × "+std::to_wstring(skill.at("execution").at("multiplier").get<float>())+L"\n";
         text += L"다음 단계 요구 레벨: "+std::to_wstring(trees.RequiredLevel(id,next))+L"\n필요 SP: "+std::to_wstring(node.at("spCost").get<std::uint32_t>())+L" (보유 "+std::to_wstring(progression.skillPoints)+L")\n";
@@ -318,7 +335,7 @@ namespace ActionRPG
         if (slots!=previous) SaveSlots();
     }
 
-    SkillUiAction SkillUi::Update(float dt,const InputState& inInput,float width,float height,bool editing,bool barVisible)
+    SkillUiAction SkillUi::Update(float dt,const InputState& inInput,float width,float height,bool editing,bool barVisible,bool inHotbarInteractive)
     {
         const float scale = HudLayout::Scale(width);
         const auto input = HudLayout::ScaleInput(inInput, 1.0f/scale);
@@ -334,7 +351,7 @@ namespace ActionRPG
         }
         if (!editing || input.cancelDrag) CancelDrag();
         if (input.cancelDrag) return action;
-        if (!barVisible || !ready) return action;
+        if (!barVisible || !ready) { CancelDrag(); return action; }
         const auto layout=CalculateLayout(width,height);
         const auto& node=settings.at(layout.compact ? "compactNode":"node");
         float maxX=0,maxY=0;
@@ -347,7 +364,7 @@ namespace ActionRPG
         maxX=std::max(0.0f,maxX-(layout.tree.right-layout.tree.left));
         maxY=std::max(0.0f,maxY-(layout.tree.bottom-layout.tree.top));
         treeScrollX=std::clamp(treeScrollX,0.0f,maxX); treeScrollY=std::clamp(treeScrollY,0.0f,maxY);
-        if (input.rightMousePressed && (!editing || !Contains(layout.panel,input.rightClickX,input.rightClickY))) for (std::size_t i=0;i<slots.size();++i)
+        if (inHotbarInteractive && input.rightMousePressed && (!editing || !Contains(layout.panel,input.rightClickX,input.rightClickY))) for (std::size_t i=0;i<slots.size();++i)
             if (Contains(layout.slots[i],input.rightClickX,input.rightClickY)) Assign(i,"");
         if (!editing) return action;
         if (input.leftMousePressed)
@@ -358,17 +375,27 @@ namespace ActionRPG
             if ((!layout.stacked || !detailTabSelected) && Contains(layout.tree,input.clickX,input.clickY))
                 for (const auto& id:OrderedSkills()) if (Contains(NodeRectangle(layout,id),input.clickX,input.clickY))
                 { selected=id; detailScroll=0; if (progression.GetSkillLevel(id)>0) dragCandidate=id; break; }
-            if (!Contains(layout.panel,input.clickX,input.clickY))
+            if ((!layout.stacked || detailTabSelected) && !selected.empty() && progression.GetSkillLevel(selected)>0)
+            {
+                const auto& window=settings.at(layout.compact ? "compactWindow":"normalWindow");
+                const float iconSize=Number(window,"detailIconSize");
+                auto clip=layout.detail;clip.bottom=layout.learnButton.top-Number(window,"contentGap");
+                const auto icon=Offset(layout.detail,0,-detailScroll,iconSize,iconSize);
+                if (Contains(clip,input.clickX,input.clickY) && Contains(icon,input.clickX,input.clickY))
+                    dragCandidate=selected;
+            }
+            if (inHotbarInteractive && !Contains(layout.panel,input.clickX,input.clickY))
                 for (std::size_t i=0;i<slots.size();++i) if (Contains(layout.slots[i],input.clickX,input.clickY)) dragCandidate=slots[i];
             dragStartX=input.clickX; dragStartY=input.clickY;
             if ((!layout.stacked || detailTabSelected) && !selected.empty() && Contains(layout.learnButton,input.clickX,input.clickY)
                 && learningAllowed && connected && !learnPending && trees.CanLearn(catalog,progression,characterId,selected,progression.GetSkillLevel(selected))=="Succeeded")
             { action.learnSkill=selected; action.expectedSkillLevel=progression.GetSkillLevel(selected); learnPending=true; learnSeconds=0; }
         }
+        hotbarDropAllowed=inHotbarInteractive && !Contains(layout.panel,input.mouseX,input.mouseY);
         if (!dragCandidate.empty() && (input.leftMouseDown || input.leftMouseReleased) && std::hypot(input.mouseX-dragStartX,input.mouseY-dragStartY)>=Number(settings.at("layout"),"dragThreshold")) dragging=dragCandidate;
         if (input.leftMouseReleased)
         {
-            if (!dragging.empty() && !Contains(layout.panel,input.mouseX,input.mouseY)) for (std::size_t i=0;i<slots.size();++i) if (Contains(layout.slots[i],input.mouseX,input.mouseY)) { Assign(i,dragging); break; }
+            if (hotbarDropAllowed && !dragging.empty()) for (std::size_t i=0;i<slots.size();++i) if (Contains(layout.slots[i],input.mouseX,input.mouseY)) { Assign(i,dragging); break; }
             CancelDrag(); // Out-of-window/out-of-slot release never changes the original mapping.
         }
         const float wheel=static_cast<float>(input.mouseWheelDelta)/WHEEL_DELTA;
@@ -400,6 +427,24 @@ namespace ActionRPG
             if (catalog.skills.contains(id)) draw.DrawUiText(Wide(catalog.skills.at(id).at("name").get<std::string>()),rect,Color("text"),Number(settings.at("fonts"),"small"),true,true);
         }
     }
+    // Draw after all windows so the captured icon and its valid drop target stay visible.
+    void SkillUi::RenderDragOverlay(D2DRenderer& draw,float width,float height) const
+    {
+        if (!ready || dragging.empty()) return;
+        const float scale=HudLayout::Scale(width);
+        const D2DRenderer::UiScaleScope uiScale(draw,scale);
+        const auto layout=CalculateLayout(width/scale,height/scale);
+        if (hotbarDropAllowed)
+            for (const auto& slot:layout.slots)
+                if (Contains(slot,mouseX,mouseY))
+                {draw.DrawRectangle(slot.left,slot.top,slot.right,slot.bottom,Color("selected"),3.0f);break;}
+        const auto& bar=settings.at(layout.compact ? "compactBar":"normalBar");
+        const float halfSize=Number(bar,"iconSize")*0.5f;
+        const D2D1_RECT_F icon{mouseX-halfSize,mouseY-halfSize,mouseX+halfSize,mouseY+halfSize};
+        draw.FillRectangle(icon.left-2,icon.top-2,icon.right+2,icon.bottom+2,D2D1::ColorF(0.025f,0.03f,0.04f,0.85f));
+        DrawIcon(draw,dragging,icon,false);
+    }
+
     void SkillUi::Render(D2DRenderer& draw,float width,float height,bool editing,bool inShowBar) const
     {
         const float scale = HudLayout::Scale(width);
@@ -512,6 +557,6 @@ namespace ActionRPG
                 break;
             }
         }
-        if (editing && !dragging.empty()) DrawIcon(draw,dragging,D2D1::RectF(mouseX-Number(bar,"iconSize")/2,mouseY-Number(bar,"iconSize")/2,mouseX+Number(bar,"iconSize")/2,mouseY+Number(bar,"iconSize")/2),false);
+
     }
 }

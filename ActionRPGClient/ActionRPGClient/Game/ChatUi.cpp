@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace
 {
@@ -152,11 +153,11 @@ namespace ActionRPG
         { visible=false;CancelInput();action.consumeInput=wasEditing;action.consumePointer=true;return action; }
         if (editing && input.leftMousePressed && !hovered) CancelInput();
         if (!editing && input.WasPressed(InputKey::ConfirmSelection))
-        { editing=true;draft.clear();Append(input.textInput); }
+        { editing=true;noticeSeconds=0;draft.clear();Append(input.textInput); }
         composition=editing ? input.composition:L"";
         if (input.leftMousePressed && hovered)
         {
-            action.consumeInput=true; const auto body=Body(); const auto thumb=ScrollThumb();
+            const auto body=Body(); const auto thumb=ScrollThumb();
             if (input.clickY>=top+height-4) { drag=Drag::Height; }
             else if (input.clickY<=top+4) { drag=Drag::Move; }
             else if (input.clickY<top+TAB_HEIGHT && input.clickX<left+174)
@@ -169,6 +170,7 @@ namespace ActionRPG
             else if (input.clickY>=top+height-INPUT_HEIGHT)
             {
                 if (input.clickX<left+62) CycleChannel();
+                if (!editing) noticeSeconds=0;
                 editing=true;
             }
             else if (input.clickX>=left+width-13)
@@ -194,7 +196,6 @@ namespace ActionRPG
         }
         if (drag!=Drag::None)
         {
-            action.consumeInput=true;
             if (!input.leftMouseDown || input.leftMouseReleased) drag=Drag::None;
             else if (drag==Drag::Move) {left=dragLeft+input.mouseX-dragX;top=dragTop+input.mouseY-dragY;}
             else if (drag==Drag::Height) {top=dragTop;height=dragHeight+(input.mouseY-dragY);}
@@ -207,7 +208,7 @@ namespace ActionRPG
             Constrain(viewportWidth,viewportHeight,hudTop);
         }
         if (hovered && input.mouseWheelDelta)
-        { scroll=std::clamp(scroll+input.mouseWheelDelta/120.0f*48.0f,0.0f,MaxScroll());action.consumeInput=true; }
+        { scroll=std::clamp(scroll+input.mouseWheelDelta/120.0f*48.0f,0.0f,MaxScroll()); }
         if (editing)
         {
             for (const auto& event:input.textEdits)
@@ -215,23 +216,26 @@ namespace ActionRPG
                 if (!editing) break;
                 if (event.kind==TextEditEvent::Kind::Insert) {noticeSeconds=0;Append(event.text);}
                 else if(event.kind==TextEditEvent::Kind::Backspace) {noticeSeconds=0;PopCodePoint(draft);}
-                else if(event.kind==TextEditEvent::Kind::Cancel) CancelInput();
                 else if(event.kind==TextEditEvent::Kind::CycleChannel) CycleChannel();
                 else if(event.kind==TextEditEvent::Kind::Submit)
                 {
                     const auto actual=dungeon ? ChatChannel::Party:selectedChannel;
+                    auto submittedText=std::move(draft);
+                    // One Enter ends this editing session, including local validation failures.
+                    CancelInput();
                     if (!connected) {Notice(L"채팅 서버에 연결되어 있지 않습니다.");continue;}
                     if(actual==ChatChannel::Party && !hasParty) {Notice(L"파티가 없어 전송할 수 없습니다.");continue;}
-                    if(draft.empty()) {CancelInput();continue;}
-                    const int bytes=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,draft.data(),static_cast<int>(draft.size()),nullptr,0,nullptr,nullptr);
+                    if(submittedText.empty()) continue;
+                    const int bytes=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,submittedText.data(),static_cast<int>(submittedText.size()),nullptr,0,nullptr,nullptr);
                     if(bytes<=0 || static_cast<std::size_t>(bytes)>maxBytes) {Notice(L"유효하지 않거나 너무 긴 채팅입니다.");continue;}
-                    if(std::all_of(draft.begin(),draft.end(),[](wchar_t value){return value==L' ' || value==L'\t';})) {CancelInput();continue;}
-                    action.submission=ChatSubmission{actual,draft};CancelInput();
+                    if(std::all_of(submittedText.begin(),submittedText.end(),[](wchar_t value){return value==L' ' || value==L'\t';})) continue;
+                    action.submission=ChatSubmission{actual,std::move(submittedText)};
                 }
             }
         }
         action.consumePointer=hovered || drag!=Drag::None;
-        action.consumeInput=action.consumeInput || wasEditing || editing || input.WasPressed(InputKey::ConfirmSelection);
+        // Hover/scroll/drag affect pointer interaction only, never keyboard ownership.
+        action.consumeInput=wasEditing || editing || input.WasPressed(InputKey::ConfirmSelection);
         RebuildRows(inRenderer);
         anchorId=0;
         if(scroll>0)
