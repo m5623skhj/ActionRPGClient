@@ -274,6 +274,8 @@ namespace ActionRPG
             if (!pa || !pb) continue;
             projectile.position = {std::lerp(pa->position.x, pb->position.x, boundedRatio), std::lerp(pa->position.y, pb->position.y, boundedRatio)};
             projectile.height = std::max(0.0f, std::lerp(pa->height, pb->height, boundedRatio));
+            // Keep cosmetic trail growth aligned with the same interpolated flight position.
+            projectile.ageSeconds = std::max(0.0f, std::lerp(pa->ageSeconds, pb->ageSeconds, boundedRatio));
         }
         lastPresentation = result;
         return result;

@@ -1,11 +1,14 @@
 #include "Game/QuestUi.h"
+#include "Core/IniDocument.h"
 #include "Game/Camera.h"
 #include "Game/HudLayout.h"
 #include "Graphics/D2DRenderer.h"
 #include "Network/CharacterInventoryJson.h"
 #include "Resources/AssetCatalog.h"
 
+#include <wincodec.h>
 #include <algorithm>
+#include <stdexcept>
 #include <cmath>
 #include <utility>
 
@@ -32,7 +35,7 @@ namespace ActionRPG
             if (result.empty()) return {};
             if (result == "Succeeded") return L"서버 처리 완료 · 상태 갱신 중";
             if (result == "RequirementsNotMet") return L"조건을 충족하지 못했습니다. 제출 아이템과 수락 조건을 확인하세요.";
-            if (result == "NotInRange") return L"마을 안내소 가까이에서 다시 시도하세요.";
+            if (result == "NotInRange") return L"퀘스트 게시판 가까이에서 다시 시도하세요.";
             if (result == "NotComplete") return L"현재 단계의 목표를 먼저 완료하세요.";
             if (result == "InvalidChoice") return L"선택 보상에서 정확히 한 묶음을 선택하세요.";
             if (result == "InventoryFull") return L"가방 공간이 부족합니다. 제출·보상은 적용되지 않았으며 보상 대기 상태를 유지합니다.";
@@ -63,11 +66,98 @@ namespace ActionRPG
         { return std::max(48.0f, renderer.MeasureUiText(text, std::max(40.0f, width - 72), 13).height + 16); }
     }
 
-    QuestUi::QuestUi(const AssetCatalog& inAssets, D2DRenderer& inRenderer) : assets(inAssets), renderer(inRenderer) {}
+    QuestUi::QuestUi(const AssetCatalog& inAssets, D2DRenderer& inRenderer) : assets(inAssets), renderer(inRenderer)
+    { LoadNpcVisuals(); }
+
+    // Cache the alpha mask and visible bounds once. Rendering and hit testing share
+    // the same cropped source and foot anchor; transparent PNG padding is never a target.
+    void QuestUi::LoadNpcVisuals()
+    {
+        const IniDocument definitions(assets.GetDataPath("Npcs"));
+        Microsoft::WRL::ComPtr<IWICImagingFactory2> factory;
+        const auto check = [](HRESULT result)
+        { if (FAILED(result)) throw std::runtime_error("Unable to load NPC alpha mask."); };
+        check(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)));
+        for (const auto& id : definitions.GetSectionNames())
+        {
+            NpcVisual visual;
+            const auto path = assets.GetImagePath(definitions.GetValue(id, "image_asset"));
+            visual.bitmap = renderer.LoadBitmap(path);
+            std::size_t parsed{};
+            const auto& height = definitions.GetValue(id, "render_height");
+            visual.height = std::stof(height, &parsed);
+            if (parsed != height.size() || !std::isfinite(visual.height) || visual.height < 32 || visual.height > 512)
+                throw std::runtime_error("Invalid NPC render height.");
+            const auto& interaction = definitions.GetValue(id, "interaction");
+            if (interaction != "quests" && interaction != "none") throw std::runtime_error("Invalid NPC interaction.");
+            visual.quests = interaction == "quests";
+            Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
+            Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
+            Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
+            check(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &decoder));
+            check(decoder->GetFrame(0, &frame));
+            check(factory->CreateFormatConverter(&converter));
+            check(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
+                nullptr, 0, WICBitmapPaletteTypeCustom));
+            UINT width{}, heightPixels{};
+            check(converter->GetSize(&width, &heightPixels));
+            if (!width || !heightPixels || width > 4096 || heightPixels > 4096)
+                throw std::runtime_error("Invalid NPC image size.");
+            std::vector<BYTE> pixels(static_cast<std::size_t>(width)*heightPixels*4);
+            check(converter->CopyPixels(nullptr, width*4, static_cast<UINT>(pixels.size()), pixels.data()));
+            visual.pixelWidth = width;
+            visual.alpha.resize(static_cast<std::size_t>(width)*heightPixels);
+            auto& bounds = visual.opaquePixels;
+            bounds = {width,heightPixels,0,0};
+            for (UINT y=0; y<heightPixels; ++y) for (UINT x=0; x<width; ++x)
+            {
+                const auto index = static_cast<std::size_t>(y)*width+x;
+                visual.alpha[index] = pixels[index*4+3];
+                if (visual.alpha[index] == 0) continue;
+                bounds.left = std::min(bounds.left,x); bounds.right = std::max(bounds.right,x+1);
+                bounds.top = std::min(bounds.top,y); bounds.bottom = std::max(bounds.bottom,y+1);
+            }
+            if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) throw std::runtime_error("Empty NPC image.");
+            const auto dips = visual.bitmap->GetSize();
+            visual.source = {bounds.left*dips.width/width,bounds.top*dips.height/heightPixels,
+                bounds.right*dips.width/width,bounds.bottom*dips.height/heightPixels};
+            npcVisuals.emplace(id,std::move(visual));
+        }
+    }
+
+    D2D1_RECT_F QuestUi::NpcBounds(const QuestNpcView& inNpc, const NpcVisual& inVisual, const Camera& inCamera) const
+    {
+        const auto p = inCamera.WorldToScreen({inNpc.x,inNpc.y});
+        const float width = inVisual.height*(inVisual.opaquePixels.right-inVisual.opaquePixels.left)
+            /(inVisual.opaquePixels.bottom-inVisual.opaquePixels.top);
+        return {p.x-width*0.5f,p.y-inVisual.height,p.x+width*0.5f,p.y};
+    }
+
+    const QuestNpcView* QuestUi::PickNpc(const Camera& inCamera, float inX, float inY) const
+    {
+        const QuestNpcView* selected{};
+        for (const auto& npc : state.Get().npcs)
+        {
+            if (npc.mapId != mapId) continue;
+            const auto found = npcVisuals.find(npc.id);
+            if (found == npcVisuals.end()) continue;
+            const auto& visual = found->second;
+            const auto rect = NpcBounds(npc,visual,inCamera);
+            if (!Contains(rect,inX,inY)) continue;
+            const auto& pixels = visual.opaquePixels;
+            const auto x = pixels.left + std::min(pixels.right-pixels.left-1,
+                static_cast<UINT>((inX-rect.left)/(rect.right-rect.left)*(pixels.right-pixels.left)));
+            const auto y = pixels.top + std::min(pixels.bottom-pixels.top-1,
+                static_cast<UINT>((inY-rect.top)/(rect.bottom-rect.top)*(pixels.bottom-pixels.top)));
+            if (visual.alpha[static_cast<std::size_t>(y)*visual.pixelWidth+x] >= 32
+                && (!selected || npc.y >= selected->y)) selected = &npc;
+        }
+        return selected;
+    }
     void QuestUi::SetCharacterContext(std::uint64_t inCharacterId)
     {
         if (state.GetCharacterId() == inCharacterId) return;
-        state.Reset(inCharacterId); icons.clear(); npcId.clear(); selectedId.clear(); selectedCycle.clear(); choiceId.clear();
+        state.Reset(inCharacterId); icons.clear(); npcId.clear(); hoveredNpcId.clear(); selectedId.clear(); selectedCycle.clear(); choiceId.clear();
         queryId.clear(); pendingAction.clear(); pendingJson.clear(); outgoingJson.clear(); notice.clear();
         querySeconds = refreshCooldown = pendingSeconds = actionCooldown = detailScroll = listScroll = 0;
         wantRefresh = true; confirmAbandon = refreshProgression = false; observedRevision = 0; category = 0;
@@ -86,7 +176,7 @@ namespace ActionRPG
         if (mapId != inMapId) { mapId = std::move(inMapId); npcId.clear(); confirmAbandon = false; state.Invalidate(); RequestRefresh(); }
     }
     void QuestUi::OpenAll() { npcId.clear(); confirmAbandon = false; state.Invalidate(); RequestRefresh(); }
-    void QuestUi::Close() { confirmAbandon = false; }
+    void QuestUi::Close() { confirmAbandon = false; hoveredNpcId.clear(); }
     void QuestUi::RequestRefresh() { wantRefresh = true; }
     void QuestUi::ObserveRevision(std::uint64_t inRevision)
     {
@@ -154,16 +244,23 @@ namespace ActionRPG
             if (goal.at("type") == "TalkNpc" && goal.at("target").at("npcId") == npcId) return true;
         return false;
     }
+    bool QuestUi::IsListed(const QuestEntryView& inQuest) const
+    {
+        // Keep accepted quests visible even when reporting/claiming is temporarily blocked.
+        return inQuest.state != "Completed" && (Live(inQuest) || inQuest.canAccept)
+            && inQuest.definition.at("category") == CATEGORIES[category] && NpcRelevant(inQuest);
+    }
     std::vector<const QuestEntryView*> QuestUi::Filtered() const
     {
         std::vector<const QuestEntryView*> result;
         for (const auto& q : state.Get().quests)
-            if (q.definition.at("category") == CATEGORIES[category] && NpcRelevant(q)) result.push_back(&q);
+            if (IsListed(q)) result.push_back(&q);
         return result;
     }
     const QuestEntryView* QuestUi::Selected() const
     {
-        for (const auto& q : state.Get().quests) if (q.id == selectedId && q.cycleKey == selectedCycle) return &q;
+        for (const auto& q : state.Get().quests)
+            if (q.id == selectedId && q.cycleKey == selectedCycle && IsListed(q)) return &q;
         return nullptr;
     }
     std::vector<const QuestEntryView*> QuestUi::Tracked() const
@@ -307,7 +404,7 @@ namespace ActionRPG
         if (q.state == "Completed") text += L"\n이미 완료한 퀘스트입니다.";
         else for (const auto& objective : q.objectives) text += L"\n" + ObjectiveText(q, objective);
         if (q.objectives.empty()) text += L"\n" + (Live(q) ? Status(q.state) : L"수락 후 목표가 표시됩니다.");
-        if (q.state == "ReadyToReport") text += L"\n안내소에 보고한 뒤 보상을 수령하세요.";
+        if (q.state == "ReadyToReport") text += L"\n퀘스트 게시판에 보고한 뒤 보상을 수령하세요.";
         if (!q.turnInItems.empty())
         {
             text += L"\n\n수령 시 제출 (장착 아이템 제외):";
@@ -333,6 +430,8 @@ namespace ActionRPG
         bool visible, bool worldInteractive, bool trackerVisible, Vector2 inPlayer, const Camera& camera)
     {
         QuestUiAction result;
+        hoveredNpcId.clear();
+        const float worldHudTop = hudTop;
         playerPosition = inPlayer;
         querySeconds += delta; refreshCooldown = std::max(0.0f,refreshCooldown-delta); actionCooldown = std::max(0.0f,actionCooldown-delta);
         if (!pendingJson.empty())
@@ -350,6 +449,11 @@ namespace ActionRPG
         const float scale = HudLayout::Scale(width);
         const auto input = HudLayout::ScaleInput(rawInput,1.0f/scale);
         width /= scale; height /= scale; hudTop /= scale;
+        const auto trackerBounds = TrackerBounds(width,height,hudTop);
+        const bool hasTracker = trackerVisible && !Tracked().empty();
+        if (!visible && worldInteractive && connected && rawInput.mouseY < worldHudTop
+            && !(hasTracker && Contains(trackerBounds,input.mouseX,input.mouseY)))
+            if (const auto npc = PickNpc(camera,rawInput.mouseX,rawInput.mouseY)) hoveredNpcId = npc->id;
         if (visible)
         {
             const auto l = CalculateLayout(width,height,hudTop);
@@ -420,19 +524,21 @@ namespace ActionRPG
         }
         else if ((worldInteractive || trackerVisible) && input.leftMousePressed)
         {
-            for(const auto& npc:state.Get().npcs) if(worldInteractive && npc.mapId==mapId)
-            {
-                const auto p=camera.WorldToScreen({npc.x,npc.y});
-                if(Contains({p.x-70,p.y-108,p.x+70,p.y+12},rawInput.clickX,rawInput.clickY))
+            if (worldInteractive && connected && rawInput.clickY < worldHudTop
+                && !(hasTracker && Contains(trackerBounds,input.clickX,input.clickY)))
+                if (const auto npc = PickNpc(camera,rawInput.clickX,rawInput.clickY))
                 {
-                    npcId=npc.id;selectedId.clear();selectedCycle.clear();choiceId.clear();detailScroll=listScroll=0;
-                    result.openWindow=result.consumePointer=true;
-                    if(!NpcInRange(npc.id)) notice=Reason("NotInRange");
-                    else BeginAction("Talk");
-                    break;
+                    result.consumePointer = true;
+                    if (npcVisuals.at(npc->id).quests)
+                    {
+                        npcId=npc->id;selectedId.clear();selectedCycle.clear();choiceId.clear();detailScroll=listScroll=0;
+                        result.openWindow=true;
+                        hoveredNpcId.clear();
+                        if(!NpcInRange(npc->id)) notice=Reason("NotInRange");
+                        else BeginAction("Talk");
+                    }
                 }
-            }
-            if (!result.openWindow && trackerVisible)
+            if (!result.consumePointer && hasTracker)
             {
                 const auto rect=TrackerBounds(width,height,hudTop);
                 if(Contains(rect,input.clickX,input.clickY))
@@ -470,13 +576,13 @@ namespace ActionRPG
         std::wstring title=L"퀘스트";
         if(!npcId.empty()) for(const auto& npc:state.Get().npcs) if(npc.id==npcId) title+=L" · "+Wide(npc.name);
         draw.DrawUiText(title,{l.panel.left+16,l.panel.top+9,l.panel.right-190,l.panel.top+36},gold,20);
-        draw.DrawUiText(L"ESC · 메뉴로",{l.panel.right-174,l.panel.top+10,l.panel.right-16,l.panel.top+34},muted,13,false,true);
+        draw.DrawUiText(L"ESC · 닫기",{l.panel.right-174,l.panel.top+10,l.panel.right-16,l.panel.top+34},muted,13,false,true);
         for(int i=0;i<3;++i)
         {
             button(l.tabs[i],CATEGORY_NAMES[i],!confirmAbandon);
             if(category==i) draw.DrawRectangle(l.tabs[i].left+1,l.tabs[i].top+1,l.tabs[i].right-1,l.tabs[i].bottom-1,gold,2);
         }
-        if(!npcId.empty()) button(l.npcTalk,L"대화",CanAct() && NpcInRange(npcId) && !confirmAbandon);
+        if(!npcId.empty()) button(l.npcTalk,npcId=="TownGuide"?L"게시판 확인":L"대화",CanAct() && NpcInRange(npcId) && !confirmAbandon);
         draw.FillRectangle(l.list.left,l.list.top,l.list.right,l.list.bottom,D2D1::ColorF(0x111923));
         draw.PushAxisAlignedClip(l.list);
         const auto entries=Filtered();
@@ -589,18 +695,29 @@ namespace ActionRPG
         }
         draw.PopAxisAlignedClip();
     }
-    void QuestUi::RenderNpcs(D2DRenderer& draw,const Camera& camera) const
+    void QuestUi::RenderNpcs(D2DRenderer& draw,const Camera& camera, float inPlayerDepth, bool inForeground) const
     {
-        for(const auto& npc:state.Get().npcs) if(npc.mapId==mapId)
+        for (const auto& npc : state.Get().npcs)
         {
-            const auto p=camera.WorldToScreen({npc.x,npc.y});
-            const auto color=D2D1::ColorF(npc.canReport||npc.canClaim?0x7EE0EE:npc.canAccept?0xF1D26F:0xC7D2DE);
-            draw.FillEllipse(p.x,p.y,20,9,D2D1::ColorF(0.04f,0.05f,0.07f,0.65f));
-            draw.FillRectangle(p.x-18,p.y-104,p.x+18,p.y-66,D2D1::ColorF(0.03f,0.05f,0.08f,0.9f));
-            draw.DrawRectangle(p.x-18,p.y-104,p.x+18,p.y-66,color);
-            draw.DrawUiText(npc.canReport||npc.canClaim?L"?":npc.canAccept?L"!":L"…",{p.x-18,p.y-104,p.x+18,p.y-66},color,26,false,true);
-            draw.FillRectangle(p.x-70,p.y-60,p.x+70,p.y-30,D2D1::ColorF(0.03f,0.05f,0.08f,0.85f));
-            draw.DrawUiText(Wide(npc.name),{p.x-68,p.y-58,p.x+68,p.y-32},color,14,false,true);
+            if (npc.mapId != mapId || (npc.y > inPlayerDepth) != inForeground) continue;
+            const auto found = npcVisuals.find(npc.id);
+            if (found == npcVisuals.end()) continue;
+            const auto& visual = found->second;
+            const auto rect = NpcBounds(npc,visual,camera);
+            const auto p = camera.WorldToScreen({npc.x,npc.y});
+            const auto color = D2D1::ColorF(npc.canReport||npc.canClaim?0x7EE0EE:npc.canAccept?0xF1D26F:0xE4E9EF);
+            draw.FillEllipse(p.x,p.y,(rect.right-rect.left)*0.28f,7,D2D1::ColorF(0.04f,0.05f,0.07f,0.5f));
+            if (hoveredNpcId == npc.id)
+                draw.DrawBitmapOutline(visual.bitmap.Get(),visual.source,rect,D2D1::ColorF(0xA8FF60),2.0f);
+            draw.DrawBitmap(visual.bitmap.Get(),visual.source,rect);
+            const auto name = Wide(npc.name);
+            const float nameWidth = std::max(92.0f,draw.MeasureUiText(name,280,14).width+16);
+            const D2D1_RECT_F label{p.x-nameWidth*0.5f,rect.top-30,p.x+nameWidth*0.5f,rect.top-6};
+            draw.FillRectangle(label.left,label.top,label.right,label.bottom,D2D1::ColorF(0.03f,0.05f,0.08f,0.8f));
+            draw.DrawUiText(name,label,color,14,false,true);
+            if (npc.canReport || npc.canClaim || npc.canAccept)
+                draw.DrawUiText(npc.canReport||npc.canClaim?L"?":L"!",
+                    {p.x-18,label.top-35,p.x+18,label.top},color,26,false,true);
         }
     }
 }

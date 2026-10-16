@@ -39,7 +39,7 @@ namespace ActionRPG
             bool inTrackerVisible, Vector2 inPlayer, const Camera& inCamera);
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, float inHudTop) const;
         void RenderTracker(D2DRenderer& inRenderer, float inWidth, float inHeight, float inHudTop) const;
-        void RenderNpcs(D2DRenderer& inRenderer, const Camera& inCamera) const;
+        void RenderNpcs(D2DRenderer& inRenderer, const Camera& inCamera, float inPlayerDepth, bool inForeground) const;
     private:
         struct Layout
         {
@@ -49,6 +49,7 @@ namespace ActionRPG
         [[nodiscard]] Layout CalculateLayout(float inWidth, float inHeight, float inHudTop) const;
         [[nodiscard]] std::vector<const QuestEntryView*> Filtered() const;
         [[nodiscard]] const QuestEntryView* Selected() const;
+        [[nodiscard]] bool IsListed(const QuestEntryView& inQuest) const;
         [[nodiscard]] bool NpcRelevant(const QuestEntryView& inQuest) const;
         [[nodiscard]] bool NpcInRange(const std::string& inId) const;
         [[nodiscard]] bool CanAct() const;
@@ -62,6 +63,21 @@ namespace ActionRPG
         void BeginAction(std::string inAction, const QuestEntryView* inQuest = nullptr,
             std::vector<std::string> inTracked = {});
         void LoadIcons();
+        struct NpcVisual
+        {
+            Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
+            D2D1_RECT_F source{};
+            D2D1_RECT_U opaquePixels{};
+            std::vector<std::uint8_t> alpha;
+            std::uint32_t pixelWidth{};
+            float height{};
+            bool quests{};
+        };
+        void LoadNpcVisuals();
+        [[nodiscard]] D2D1_RECT_F NpcBounds(const QuestNpcView& inNpc, const NpcVisual& inVisual, const Camera& inCamera) const;
+        [[nodiscard]] const QuestNpcView* PickNpc(const Camera& inCamera, float inX, float inY) const;
+        std::unordered_map<std::string, NpcVisual> npcVisuals;
+        std::string hoveredNpcId;
         const AssetCatalog& assets;
         D2DRenderer& renderer;
         QuestState state;

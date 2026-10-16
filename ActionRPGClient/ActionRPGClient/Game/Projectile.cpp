@@ -6,6 +6,7 @@
 #include <d2d1_1helper.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace ActionRPG
 {
@@ -61,6 +62,17 @@ namespace ActionRPG
 
         const ColorValue& bodyColor = definition.bodyColor;
         const float screenY = groundScreenPosition.y - height;
+        if (definition.motionType == ProjectileMotionType::Straight)
+        {
+            const float screenVelocityY = groundVelocity.y - verticalVelocity;
+            const float age = std::max(0.0f, definition.lifetimeSeconds - remainingSeconds);
+            const auto& highlight = definition.highlightColor;
+            inRenderer.DrawLuminousProjectile(groundScreenPosition.x, screenY, groundVelocity.x, screenVelocityY,
+                definition.radiusY, std::hypot(groundVelocity.x, screenVelocityY) * age,
+                D2D1::ColorF(bodyColor.red, bodyColor.green, bodyColor.blue, bodyColor.alpha),
+                D2D1::ColorF(highlight.red, highlight.green, highlight.blue, highlight.alpha));
+            return;
+        }
         inRenderer.FillEllipse(
             groundScreenPosition.x,
             screenY,

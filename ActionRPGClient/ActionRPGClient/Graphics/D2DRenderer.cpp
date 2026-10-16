@@ -2,9 +2,12 @@
 
 #include <d2d1_1helper.h>
 #include <initguid.h>
+#include <d2d1effects.h>
 #include <d2d1effects_2.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -79,6 +82,10 @@ namespace ActionRPG
 
     void D2DRenderer::BeginFrame(const D2D1_COLOR_F& inClearColor)
     {
+        // A cosmetic frame clock keeps the flowing light smooth between network snapshots.
+        const double lightSeconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        projectileLightPhase = static_cast<float>(std::fmod(lightSeconds * 6.0, 1.0));
         d2dContext->BeginDraw();
         d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
         d2dContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
@@ -134,6 +141,85 @@ namespace ActionRPG
         d2dContext->FillEllipse(
             D2D1::Ellipse(D2D1::Point2F(inCenterX, inCenterY), inRadiusX, inRadiusY),
             solidColorBrush.Get());
+    }
+
+    void D2DRenderer::InitializeProjectileLight()
+    {
+        // Render-thread resources are shared by every bullet, rather than allocated per shot.
+        const D2D1_GRADIENT_STOP glowStops[]{
+            {0.0f, D2D1::ColorF(1.0f, 0.95f, 0.65f, 0.62f)},
+            {0.35f, D2D1::ColorF(1.0f, 0.63f, 0.12f, 0.24f)},
+            {1.0f, D2D1::ColorF(1.0f, 0.32f, 0.02f, 0.0f)}};
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection> glowCollection;
+        ThrowIfFailed(d2dContext->CreateGradientStopCollection(glowStops, 3,
+            D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &glowCollection), "Create bullet glow stops");
+        ThrowIfFailed(d2dContext->CreateRadialGradientBrush(
+            D2D1::RadialGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, 0), 1, 1),
+            glowCollection.Get(), &projectileGlowBrush), "Create bullet glow brush");
+
+        const D2D1_GRADIENT_STOP trailStops[]{
+            {0.0f, D2D1::ColorF(1.0f, 0.35f, 0.02f, 0.0f)},
+            {0.4f, D2D1::ColorF(1.0f, 0.48f, 0.06f, 0.12f)},
+            {0.8f, D2D1::ColorF(1.0f, 0.72f, 0.20f, 0.48f)},
+            {1.0f, D2D1::ColorF(1.0f, 0.94f, 0.66f, 0.9f)}};
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection> trailCollection;
+        ThrowIfFailed(d2dContext->CreateGradientStopCollection(trailStops, 4,
+            D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &trailCollection), "Create bullet trail stops");
+        ThrowIfFailed(d2dContext->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(D2D1::Point2F(-1, 0), D2D1::Point2F(0, 0)),
+            trailCollection.Get(), &projectileTrailBrush), "Create bullet trail brush");
+
+        Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+        d2dContext->GetFactory(&factory);
+        ThrowIfFailed(factory->CreatePathGeometry(&projectileTrailGeometry), "Create bullet trail geometry");
+        Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+        ThrowIfFailed(projectileTrailGeometry->Open(&sink), "Open bullet trail geometry");
+        sink->BeginFigure(D2D1::Point2F(0, -1), D2D1_FIGURE_BEGIN_FILLED);
+        sink->AddQuadraticBezier(D2D1::QuadraticBezierSegment(D2D1::Point2F(-0.45f, -0.65f), D2D1::Point2F(-1, 0)));
+        sink->AddQuadraticBezier(D2D1::QuadraticBezierSegment(D2D1::Point2F(-0.45f, 0.65f), D2D1::Point2F(0, 1)));
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        ThrowIfFailed(sink->Close(), "Close bullet trail geometry");
+    }
+
+    /** Draw a tapered gradient wake, two flowing filaments and a bright core in flight direction. */
+    void D2DRenderer::DrawLuminousProjectile(const float inX, const float inY, const float inDirectionX,
+        const float inDirectionY, const float inRadius, const float inTravelDistance,
+        const D2D1_COLOR_F& inBodyColor, const D2D1_COLOR_F& inHighlightColor)
+    {
+        if (inRadius <= 0.0f) return;
+        if (!projectileTrailGeometry) InitializeProjectileLight();
+        const float directionLength = std::hypot(inDirectionX, inDirectionY);
+        const float directionX = directionLength > 0.0001f ? inDirectionX / directionLength : 1.0f;
+        const float directionY = directionLength > 0.0001f ? inDirectionY / directionLength : 0.0f;
+        constexpr float MAX_TRAIL_LENGTH = 64.0f;
+        const float trailLength = std::min(std::clamp(inRadius * 12.0f, 24.0f, MAX_TRAIL_LENGTH),
+            std::max(0.0f, inTravelDistance));
+        D2D1_MATRIX_3X2_F previous{};
+        d2dContext->GetTransform(&previous);
+        const auto flightTransform = D2D1::Matrix3x2F(directionX, directionY, -directionY, directionX, inX, inY) * previous;
+        if (trailLength > 0.01f)
+        {
+            d2dContext->SetTransform(D2D1::Matrix3x2F::Scale(trailLength, inRadius * 0.95f) * flightTransform);
+            d2dContext->FillGeometry(projectileTrailGeometry.Get(), projectileTrailBrush.Get());
+            d2dContext->SetTransform(D2D1::Matrix3x2F::Scale(trailLength * 0.82f, inRadius * 0.28f) * flightTransform);
+            d2dContext->FillGeometry(projectileTrailGeometry.Get(), projectileTrailBrush.Get());
+            d2dContext->SetTransform(flightTransform);
+            for (int index = 0; index < 2; ++index)
+            {
+                const float phase = std::fmod(projectileLightPhase + index * 0.5f, 1.0f);
+                const float start = -trailLength * phase;
+                const float end = std::min(0.0f, start + trailLength * 0.16f);
+                const float offset = (index == 0 ? -1.0f : 1.0f) * inRadius * 0.18f;
+                DrawLine(start, offset, end, offset, D2D1::ColorF(inHighlightColor.r, inHighlightColor.g,
+                    inHighlightColor.b, inHighlightColor.a * (1.0f - phase) * 0.75f), inRadius * 0.22f);
+            }
+        }
+        d2dContext->SetTransform(D2D1::Matrix3x2F::Scale(inRadius * 3.0f, inRadius * 1.8f) * flightTransform);
+        d2dContext->FillEllipse(D2D1::Ellipse(D2D1::Point2F(0, 0), 1, 1), projectileGlowBrush.Get());
+        d2dContext->SetTransform(flightTransform);
+        FillEllipse(0, 0, inRadius * 1.65f, inRadius * 0.48f, inBodyColor);
+        FillEllipse(inRadius * 0.45f, 0, inRadius * 1.15f, inRadius * 0.22f, inHighlightColor);
+        d2dContext->SetTransform(previous);
     }
 
     void D2DRenderer::PushAxisAlignedClip(const D2D1_RECT_F& inRectangle)
@@ -268,6 +354,39 @@ namespace ActionRPG
         d2dContext->DrawImage(grayscaleEffect.Get(),nullptr,nullptr,D2D1_INTERPOLATION_MODE_LINEAR);
         d2dContext->SetTransform(previous);
         grayscaleEffect->SetInput(0,nullptr);
+    }
+
+    void D2DRenderer::DrawBitmapOutline(ID2D1Bitmap1* inBitmap, const D2D1_RECT_F& inSourceRectangle,
+        const D2D1_RECT_F& inDestinationRectangle, const D2D1_COLOR_F& inColor, const float inThickness)
+    {
+        const float sourceWidth = inSourceRectangle.right - inSourceRectangle.left;
+        const float sourceHeight = inSourceRectangle.bottom - inSourceRectangle.top;
+        if (!inBitmap || sourceWidth <= 0 || sourceHeight <= 0 || inThickness <= 0) return;
+        if (!silhouetteEffect)
+            ThrowIfFailed(d2dContext->CreateEffect(CLSID_D2D1ColorMatrix, &silhouetteEffect), "Create NPC silhouette effect");
+        // PREMULTIPLIED mode unpremultiplies input, applies this constant RGB, then
+        // premultiplies by the preserved alpha. Transparent pixels stay transparent.
+        const D2D1_MATRIX_5X4_F matrix{
+            0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,inColor.a, inColor.r,inColor.g,inColor.b,0};
+        ThrowIfFailed(silhouetteEffect->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, matrix), "Set silhouette color");
+        ThrowIfFailed(silhouetteEffect->SetValue(D2D1_COLORMATRIX_PROP_ALPHA_MODE,
+            D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED), "Set silhouette alpha mode");
+        silhouetteEffect->SetInput(0, inBitmap);
+        D2D1_MATRIX_3X2_F previous{};
+        d2dContext->GetTransform(&previous);
+        const D2D1_POINT_2F offsets[]{{-inThickness,0},{inThickness,0},{0,-inThickness},{0,inThickness}};
+        const D2D1_POINT_2F origin{};
+        for (const auto& offset : offsets)
+        {
+            d2dContext->SetTransform(D2D1::Matrix3x2F::Scale(
+                (inDestinationRectangle.right-inDestinationRectangle.left)/sourceWidth,
+                (inDestinationRectangle.bottom-inDestinationRectangle.top)/sourceHeight)
+                * D2D1::Matrix3x2F::Translation(inDestinationRectangle.left+offset.x, inDestinationRectangle.top+offset.y)
+                * previous);
+            d2dContext->DrawImage(silhouetteEffect.Get(), &origin, &inSourceRectangle, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+        }
+        d2dContext->SetTransform(previous);
+        silhouetteEffect->SetInput(0, nullptr);
     }
 
     void D2DRenderer::DrawText(const std::wstring_view inText, const float inLeft, const float inTop,

@@ -603,7 +603,7 @@ namespace ActionRPG
         const bool questVisible = systemUiPage == SystemUiPage::Quests && !partyKickedNotice
             && !hadKickedNotice && !dungeonCleared && !completionStopping && !pendingPartyInvitation
             && !isDungeonSelectionOpen;
-        const bool questPointerAllowed = hudInteractive && !chatAction.consumeInput && !chatUi.IsEditing()
+        const bool questPointerAllowed = hudInteractive && !chatAction.consumeInput && !chatAction.consumePointer && !chatUi.IsEditing()
             && !skillUi.IsDragging() && !inventoryUi.IsDragging() && !hadUiAtFrameStart;
         try
         {
@@ -766,6 +766,7 @@ namespace ActionRPG
         if (monsters != dungeonMonsters.end())
             for (const auto& monster : monsters->second)
                 if (monster->GetGroundPosition().y <= player.GetGroundPosition().y) monster->Render(inRenderer, camera);
+        if (!IsDungeonUiRestricted()) questUi.RenderNpcs(inRenderer, camera, player.GetGroundPosition().y, false);
         player.Render(inRenderer, camera);
         if (monsters != dungeonMonsters.end())
             for (const auto& monster : monsters->second)
@@ -776,7 +777,7 @@ namespace ActionRPG
                 const auto position = camera.WorldToScreen(effect.position);
                 effect.animation.Draw(inRenderer, position.x, position.y - effect.height, false);
             }
-        if (!IsDungeonUiRestricted()) questUi.RenderNpcs(inRenderer, camera);
+        if (!IsDungeonUiRestricted()) questUi.RenderNpcs(inRenderer, camera, player.GetGroundPosition().y, true);
         inRenderer.PopAxisAlignedClip();
         RenderCombatHud(inRenderer);
         if (systemUiPage == SystemUiPage::Closed && !dungeonCleared && !completionStopping
@@ -1761,7 +1762,15 @@ namespace ActionRPG
                 inRenderer.FillEllipse(position.x - projectile.radius * 0.25f, position.y - height - projectile.radius * 0.25f,
                     projectile.radius * 0.35f, projectile.radius * 0.35f, D2D1::ColorF(0.62f, 0.56f, 0.48f));
             }
-            else inRenderer.FillEllipse(position.x, position.y - height, projectile.radius, projectile.radius, D2D1::ColorF(1.0f, 0.85f, 0.25f));
+            else
+            {
+                const float speed = projectile.speed > 0 ? projectile.speed : dungeonWorld->GetCombatRules().projectileSpeed;
+                const float screenDirectionY = projectile.directionY - projectile.heightDirection;
+                const float travelDistance = speed * std::max(0.0f, projectile.ageSeconds + age)
+                    * std::hypot(projectile.direction, screenDirectionY);
+                inRenderer.DrawLuminousProjectile(position.x, position.y - height, projectile.direction, screenDirectionY,
+                    projectile.radius, travelDistance, D2D1::ColorF(1.0f, 0.72f, 0.16f), D2D1::ColorF(1.0f, 0.98f, 0.84f));
+            }
         }
     }
 

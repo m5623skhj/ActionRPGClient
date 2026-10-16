@@ -18,6 +18,7 @@
 | [Data/PlayerSkillVisuals.json](Data/PlayerSkillVisuals.json) | 클라이언트 전용 스킬 모션·이펙트 이미지, sourceRect/pivot·표시 크기 |
 | [Data/SkillUi.json](Data/SkillUi.json) | 스킬 트리/상세·슬롯 레이아웃, 최소 크기·작은 창 배치·폰트·색 |
 | [Data/monsters.json](Data/monsters.json) | 몬스터 dataId·이름·기본 시트/동작 메타데이터·표시 높이 |
+| [Data/npcs.ini](Data/npcs.ini) | 서버 NPC ID별 이미지·투명 여백을 제외한 표시 높이·퀘스트 접점 설정 |
 | [Images/Monsters/animations.json](Images/Monsters/animations.json) | 몬스터별 프레임·모션·sourceRect/pivot/fps |
 | [Data/projectiles.ini](Data/projectiles.ini) | 마을 로컬 총알·공중 총알·투척물 표시/이동 |
 | [Data/skills.ini](Data/skills.ini), [Data/effects.ini](Data/effects.ini) | 기존 SkillCommandSystem 예시 데이터. 현재 PlayerSkills 커맨드 실행과 구분 |
