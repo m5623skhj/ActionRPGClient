@@ -356,6 +356,14 @@ namespace ActionRPG
         grayscaleEffect->SetInput(0,nullptr);
     }
 
+    D2DRenderer::UiTranslationScope::UiTranslationScope(D2DRenderer& inRenderer, float inX, float inY)
+        : context(inRenderer.d2dContext)
+    {
+        context->GetTransform(&previous);
+        context->SetTransform(D2D1::Matrix3x2F::Translation(inX,inY)*previous);
+    }
+    D2DRenderer::UiTranslationScope::~UiTranslationScope() { context->SetTransform(previous); }
+
     void D2DRenderer::DrawBitmapOutline(ID2D1Bitmap1* inBitmap, const D2D1_RECT_F& inSourceRectangle,
         const D2D1_RECT_F& inDestinationRectangle, const D2D1_COLOR_F& inColor, const float inThickness)
     {

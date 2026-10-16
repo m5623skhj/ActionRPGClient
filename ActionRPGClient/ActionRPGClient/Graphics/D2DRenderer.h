@@ -31,6 +31,18 @@ namespace ActionRPG
             D2D1_MATRIX_3X2_F previous{};
         };
 
+        class UiTranslationScope final
+        {
+        public:
+            UiTranslationScope(D2DRenderer& inRenderer, float inX, float inY);
+            ~UiTranslationScope();
+            UiTranslationScope(const UiTranslationScope&) = delete;
+            UiTranslationScope& operator=(const UiTranslationScope&) = delete;
+        private:
+            ID2D1DeviceContext* context{};
+            D2D1_MATRIX_3X2_F previous{};
+        };
+
         explicit D2DRenderer(GraphicsDevice& inGraphicsDevice);
 
         D2DRenderer(const D2DRenderer&) = delete;

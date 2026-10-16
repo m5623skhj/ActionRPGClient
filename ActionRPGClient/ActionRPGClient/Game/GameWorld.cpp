@@ -478,14 +478,15 @@ namespace ActionRPG
     void GameWorld::Update(const float inDeltaSeconds, const InputState& inRawInput)
     {
         InputState inInput=inRawInput;
-        if (chatUi.IsEditing())
+        const bool wasUiTextEditing=IsUiTextEditing();
+        if (chatUi.IsEditing() || wasUiTextEditing)
         {
             inInput.moveLeft=inInput.moveRight=inInput.moveUp=inInput.moveDown=false;
             inInput.pressedKeys.clear();
         }
         InputState interfaceInput=inRawInput;
         GameWindow::ConsumeUiPointer(interfaceInput);
-        const bool hadUiAtFrameStart=IsUiOverlayVisible();
+        const bool wasChatEditing=chatUi.IsEditing();
         uiMouseX = inInput.mouseX;
         uiMouseY = inInput.mouseY;
         uiClickConsumed = false;
@@ -501,13 +502,32 @@ namespace ActionRPG
             partyInvitationAnswerPending = false;
             if (!townClient.IsConnected()) partyKickedNotice = false;
         }
-        if (IsDungeonUiRestricted() && IsPartyUiPage(systemUiPage)) SetSystemUiPage(SystemUiPage::Menu);
-        const bool chatAllowed = !dungeonCleared && !completionStopping && !isDungeonSelectionOpen
-            && systemUiPage==SystemUiPage::Closed && !pendingPartyInvitation && !partyKickedNotice
-            && !skillUi.IsDragging() && !inventoryUi.IsDragging();
+        SyncUiWindows();
+        inventoryUi.SetHotbarBounds(skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),HudLayout::Scale(camera.GetViewportWidth()));
+        UpdateUiWindowOffsets();
+        const bool chatAllowed = !IsUiTextEditing() && !skillUi.IsDragging() && !inventoryUi.IsDragging();
+        InputState chatInput=interfaceInput;
+        const auto maskPointer=[](InputState& input)
+        {
+            input.mouseX=input.mouseY=input.clickX=input.clickY=input.rightClickX=input.rightClickY=-10000;
+            input.leftMousePressed=input.leftMouseDown=input.leftMouseReleased=input.rightMousePressed=false;
+            input.mouseWheelDelta=0;
+        };
+        if (!chatUi.IsDragging() && (TopUiWindowAt(chatInput.mouseX,chatInput.mouseY)!=SystemUiPage::Closed
+            || questUi.IsTrackerDragging() || draggedUiPage!=SystemUiPage::Closed))
+        {
+            if (chatInput.leftMousePressed) chatUi.CancelInput();
+            maskPointer(chatInput);
+        }
+        // Enter belongs to the focused dialog, unless chat is already editing.
+        const bool dialogUsesEnter=IsUiTextEditing() || systemUiPage==SystemUiPage::GameOptions
+            || systemUiPage==SystemUiPage::DungeonSelection || systemUiPage==SystemUiPage::DungeonCompletion
+            || systemUiPage==SystemUiPage::KickedNotice;
+        if (!chatUi.IsEditing() && dialogUsesEnter)
+            std::erase(chatInput.pressedKeys,InputKey::ConfirmSelection);
         const auto chatBar=skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight());
         const auto chatHud=HudLayout::Calculate(chatBar,HudLayout::Scale(camera.GetViewportWidth()));
-        const auto chatAction=chatUi.Update(inDeltaSeconds,interfaceInput,renderer,camera.GetViewportWidth(),
+        const auto chatAction=chatUi.Update(inDeltaSeconds,chatInput,renderer,camera.GetViewportWidth(),
             camera.GetViewportHeight(),chatHud.hp.top,chatAllowed,IsDungeonUiRestricted(),
             partySnapshot.partyId!=0,townClient.IsConnected());
         const auto chatInputPosition=chatUi.GetInputPosition();
@@ -535,57 +555,59 @@ namespace ActionRPG
         }
         if (chatAction.consumeInput)
         {
-            inInput.moveLeft=inInput.moveRight=inInput.moveUp=inInput.moveDown=false;
-            inInput.pressedKeys.clear();inInput.textInput.clear();inInput.textEdits.clear();
+            if (wasChatEditing || chatUi.IsEditing())
+            {
+                inInput.moveLeft=inInput.moveRight=inInput.moveUp=inInput.moveDown=false;
+                inInput.pressedKeys.clear();
+            }
+            inInput.textInput.clear();inInput.textEdits.clear();
             interfaceInput.pressedKeys.clear();interfaceInput.textInput.clear();interfaceInput.textEdits.clear();
         }
         if (chatAction.consumePointer)
         {
             inInput.leftMousePressed=false;inInput.mouseWheelDelta=0;
-            interfaceInput.leftMousePressed=false;interfaceInput.mouseWheelDelta=0;
+            maskPointer(interfaceInput);
             uiClickConsumed=true;
         }
         if (!townClient.IsConnected()) chatUi.ClearBubbles();
-        const bool hadKickedNotice = partyKickedNotice;
-        UpdatePartyNotifications(inInput);
-        if (!hadKickedNotice && !partyKickedNotice)
+        UpdateUiWindows(interfaceInput);
+        const auto focusedInput=UiWindowInput(systemUiPage,interfaceInput);
+        switch (systemUiPage)
         {
-            if (dungeonCleared) UpdateDungeonCompletion(inDeltaSeconds, inInput);
-            else
-            {
-                UpdateSystemInterface(inInput);
-                UpdatePartyInterface(inInput);
-                UpdateDungeonSelection(inInput);
-            }
+        case SystemUiPage::Menu: case SystemUiPage::GameOptions: case SystemUiPage::ExitConfirmation:
+            UpdateSystemInterface(focusedInput);break;
+        case SystemUiPage::Party: case SystemUiPage::PartyDirectory: case SystemUiPage::PartyDetails:
+        case SystemUiPage::PartyCreate: case SystemUiPage::Invitation:
+            UpdatePartyInterface(focusedInput);break;
+        case SystemUiPage::PartyNotice: case SystemUiPage::KickedNotice:
+            UpdatePartyNotifications(focusedInput);break;
+        case SystemUiPage::DungeonSelection: UpdateDungeonSelection(focusedInput);break;
+        default: break;
         }
-
-        if (hadKickedNotice || partyKickedNotice) { interfaceInput = {}; interfaceInput.cancelDrag = true; }
+        UpdateDungeonCompletion(inDeltaSeconds,systemUiPage==SystemUiPage::DungeonCompletion ? focusedInput:InputState{});
+        SyncUiWindows();
+        UpdateUiWindowOffsets();
+        if (wasUiTextEditing)
+            std::erase_if(interfaceInput.pressedKeys,[](auto key){return key>=InputKey::Item1&&key<=InputKey::Item6;});
         const float uiTempoScale = dungeonWorld && IsDungeonUiRestricted() ? dungeonWorld->GetCombatRules().tempoScale : 1.0f;
         skillUi.SetCombatTempoScale(uiTempoScale);
         inventoryUi.SetCombatTempoScale(uiTempoScale);
         skillUi.SetConnected(townClient.IsConnected());
         skillUi.SetLearningAllowed(!IsDungeonUiRestricted());
-        const bool skillBarVisible=!partyKickedNotice && !hadKickedNotice && !dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
-            && (systemUiPage==SystemUiPage::Closed || systemUiPage==SystemUiPage::Skills);
+        const bool skillBarVisible=!dungeonCleared && !completionStopping;
         const auto hudSkillBar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
         const auto hudMenu = HudLayout::Calculate(hudSkillBar, HudLayout::Scale(camera.GetViewportWidth())).menu;
-        const bool hudInteractive = systemUiPage == SystemUiPage::Closed && !partyKickedNotice && !hadKickedNotice
-            && !dungeonCleared && !completionStopping && !pendingPartyInvitation && !isDungeonSelectionOpen;
-        if (hudInteractive && interfaceInput.leftMousePressed && ContainsPoint(hudMenu, interfaceInput.clickX, interfaceInput.clickY))
-        { SetSystemUiPage(SystemUiPage::Menu); uiClickConsumed = true; }
-        if (uiClickConsumed) interfaceInput.leftMousePressed=false;
-        const auto skillUiAction=skillUi.Update(inDeltaSeconds,interfaceInput,camera.GetViewportWidth(),camera.GetViewportHeight(),systemUiPage==SystemUiPage::Skills,skillBarVisible);
+        const bool hudInteractive=pointerUiPage==SystemUiPage::Closed && !uiChromeConsumed && skillBarVisible;
+        if (hudInteractive && interfaceInput.leftMousePressed && ContainsPoint(hudMenu,interfaceInput.clickX,interfaceInput.clickY))
+        {SetSystemUiPage(SystemUiPage::Menu);uiChromeConsumed=true;uiClickConsumed=true;}
+        const auto skillUiAction=skillUi.Update(inDeltaSeconds,UiWindowInput(SystemUiPage::Skills,interfaceInput,true),
+            camera.GetViewportWidth(),camera.GetViewportHeight(),IsUiPageOpen(SystemUiPage::Skills),skillBarVisible);
         if (skillUiAction.requestState) townClient.RequestSkillState();
         if (!IsDungeonUiRestricted() && !skillUiAction.learnSkill.empty()) townClient.LearnSkill(skillUiAction.learnSkill,skillUiAction.expectedSkillLevel);
         inventoryUi.SetConnected(townClient.IsConnected());
-        InputState inventoryInput = interfaceInput;
-        if (uiClickConsumed) inventoryInput = {};
-        const bool inventoryVisible = systemUiPage == SystemUiPage::Inventory && !partyKickedNotice
-            && !hadKickedNotice && !dungeonCleared && !completionStopping && !pendingPartyInvitation
-            && !isDungeonSelectionOpen;
-        const auto inventoryAction = inventoryUi.Update(inDeltaSeconds, inventoryInput,
-            camera.GetViewportWidth(), camera.GetViewportHeight(), inventoryVisible,
-            hudInteractive || inventoryVisible, hudSkillBar);
+        const bool inventoryVisible=IsUiPageOpen(SystemUiPage::Inventory);
+        const auto inventoryAction=inventoryUi.Update(inDeltaSeconds,UiWindowInput(SystemUiPage::Inventory,interfaceInput,true),
+            camera.GetViewportWidth(),camera.GetViewportHeight(),inventoryVisible,skillBarVisible,hudSkillBar);
         if (inventoryAction.requestState) townClient.RequestInventoryState(inventoryAction.requestId);
         if (inventoryAction.requestUseStatus) townClient.RequestUseStatus(inventoryAction.useStatusRequestId);
         if (inventoryAction.operation != InventoryOperation::None)
@@ -598,18 +620,17 @@ namespace ActionRPG
         }
         questUi.SetConnected(townClient.IsConnected());
         questUi.SetMapContext(IsDungeonUiRestricted() || !lastTownMap ? std::string{} : lastTownMap->mapId);
-        InputState questInput = interfaceInput;
-        if (uiClickConsumed) questInput = {};
-        const bool questVisible = systemUiPage == SystemUiPage::Quests && !partyKickedNotice
-            && !hadKickedNotice && !dungeonCleared && !completionStopping && !pendingPartyInvitation
-            && !isDungeonSelectionOpen;
-        const bool questPointerAllowed = hudInteractive && !chatAction.consumeInput && !chatAction.consumePointer && !chatUi.IsEditing()
-            && !skillUi.IsDragging() && !inventoryUi.IsDragging() && !hadUiAtFrameStart;
+        const auto questInput=UiWindowInput(SystemUiPage::Quests,interfaceInput,true);
+        const bool questVisible=IsUiPageOpen(SystemUiPage::Quests);
+        const bool questPointerAllowed=(pointerUiPage==SystemUiPage::Closed
+            || (pointerUiPage==SystemUiPage::Quests && TopUiWindowAt(interfaceInput.mouseX,interfaceInput.mouseY)==SystemUiPage::Closed))
+            && !uiChromeConsumed
+            && !chatAction.consumePointer && !chatUi.IsEditing() && !skillUi.IsDragging() && !inventoryUi.IsDragging();
         try
         {
             const auto questAction = questUi.Update(inDeltaSeconds, questInput,
                 camera.GetViewportWidth(), camera.GetViewportHeight(), chatHud.hp.top, questVisible,
-                questPointerAllowed && !IsDungeonUiRestricted(), questPointerAllowed,
+                questPointerAllowed && !IsDungeonUiRestricted(), questPointerAllowed || questUi.IsTrackerDragging(),
                 player.GetGroundPosition(), camera);
             if (!questAction.stateRequestId.empty()) townClient.RequestQuestState(questAction.stateRequestId);
             if (!questAction.operationJson.empty()) townClient.SendQuestAction(questAction.operationJson);
@@ -623,14 +644,14 @@ namespace ActionRPG
         }
         catch (const std::exception&) { questUi.InvalidResponse(); }
         InputState gameplayInput = inInput;
-        const bool gameplayBlocked = chatUi.IsEditing() || chatAction.consumeInput || dungeonCleared || completionStopping || isDungeonSelectionOpen || systemUiPage != SystemUiPage::Closed
-            || pendingPartyInvitation.has_value() || partyKickedNotice || hadKickedNotice || player.IsHitReacting() || hadUiAtFrameStart || interfaceInput.cancelDrag
-            || (dungeonEntryState != DungeonEntryState::Idle && dungeonEntryState != DungeonEntryState::Entered);
+        const bool gameplayBlocked=chatUi.IsEditing() || wasChatEditing || wasUiTextEditing || IsUiTextEditing()
+            || dungeonCleared || completionStopping || player.IsHitReacting()
+            || (dungeonEntryState!=DungeonEntryState::Idle && dungeonEntryState!=DungeonEntryState::Entered);
         if (gameplayBlocked)
         {
             gameplayInput = InputState{};
         }
-        std::erase_if(gameplayInput.pressedKeys, [](InputKey key) { return key >= InputKey::Item1 && key <= InputKey::Item6; });
+        std::erase_if(gameplayInput.pressedKeys,[](InputKey key){return key>=InputKey::Item1;});
         if (inventoryAction.operation == InventoryOperation::Use)
         { gameplayInput.pressedKeys.clear(); commandQueue.Clear(); }
         if (gameplayBlocked) { commandQueue.Clear(); }
@@ -780,19 +801,14 @@ namespace ActionRPG
         if (!IsDungeonUiRestricted()) questUi.RenderNpcs(inRenderer, camera, player.GetGroundPosition().y, true);
         inRenderer.PopAxisAlignedClip();
         RenderCombatHud(inRenderer);
-        if (systemUiPage == SystemUiPage::Closed && !dungeonCleared && !completionStopping
-            && !isDungeonSelectionOpen && !pendingPartyInvitation && !partyKickedNotice)
+        if (!dungeonCleared && !completionStopping)
         {
-            const auto bar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
-            const auto hud = HudLayout::Calculate(bar, HudLayout::Scale(camera.GetViewportWidth()));
-            questUi.RenderTracker(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), hud.hp.top);
-        }
-        if (!dungeonCleared && !completionStopping && !isDungeonSelectionOpen && !pendingPartyInvitation
-            && systemUiPage==SystemUiPage::Closed)
-        {
+            const auto bar=skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight());
+            const auto hud=HudLayout::Calculate(bar,HudLayout::Scale(camera.GetViewportWidth()));
+            questUi.RenderTracker(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),hud.hp.top);
             skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),false);
-            inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),
-                skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),false);
+            inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),bar,
+                IsUiPageOpen(SystemUiPage::Inventory));
         }
         std::vector<ChatBubbleAnchor> chatAnchors;
         if (const auto anchor=ChatBubblePosition(localPlayerId)) chatAnchors.push_back({localPlayerId,*anchor});
@@ -802,11 +818,7 @@ namespace ActionRPG
             if (const auto anchor=ChatBubblePosition(id)) chatAnchors.push_back({id,*anchor});
         chatUi.RenderBubbles(inRenderer,chatAnchors,camera.GetViewportWidth(),camera.GetViewportHeight());
         chatUi.Render(inRenderer,camera.GetViewportWidth());
-        RenderDungeonSelection(inRenderer);
-        RenderSystemInterface(inRenderer);
-        RenderPartyInterface(inRenderer);
-        RenderDungeonCompletion(inRenderer);
-        RenderPartyNotifications(inRenderer);
+        RenderUiWindows(inRenderer);
     }
 
     std::optional<Vector2> GameWorld::ChatBubblePosition(const std::uint64_t inPlayerId) const
@@ -836,6 +848,8 @@ namespace ActionRPG
 
     void GameWorld::Resize(const float inViewportWidth, const float inViewportHeight)
     {
+        draggedUiPage=SystemUiPage::Closed;
+        questUi.CancelTrackerDrag();
         chatUi.CancelInput();
         GameWindow::SetChatInputMode(false);
         commandQueue.Clear();
@@ -964,7 +978,9 @@ namespace ActionRPG
                     wantedPartyDirectoryRevision = 0;
                     pendingPartyInvitation.reset();
                     partyInvitationAnswerPending = false;
-                    SetSystemUiPage(SystemUiPage::Closed);
+                    uiWindows.clear();systemUiPage=SystemUiPage::Closed;
+                    draggedUiPage=SystemUiPage::Closed;skillUi.CancelDrag();questUi.Close();
+                    completionWindowHidden=invitationHidden=false;hiddenPartyRequestId=0;
                     partyStatusText.clear();
                     movementSequence = 0;
                     ApplyMap(inEvent.map, Vector2{ inEvent.map.spawnX, inEvent.map.spawnY });
@@ -1055,7 +1071,7 @@ namespace ActionRPG
                         }
                         // Do not reconcile across a direction/stop change, including turning away
                         // and back to the same direction. Continuous same-state heartbeats are safe.
-                        const bool movementBlocked=IsUiOverlayVisible() || player.IsHitReacting()
+                        const bool movementBlocked=chatUi.IsEditing() || IsUiTextEditing() || dungeonCleared || completionStopping || player.IsHitReacting()
                             || player.IsAttacking() || player.IsLocallyCasting();
                         const auto currentDirectionX=static_cast<std::int8_t>(movementBlocked ? 0:
                             static_cast<int>(inInput.moveRight)-static_cast<int>(inInput.moveLeft));
@@ -1107,7 +1123,6 @@ namespace ActionRPG
                     }
 
                     isDungeonSelectionOpen = false;
-                    SetSystemUiPage(SystemUiPage::Closed);
                     dungeonRoomId = inEvent.roomId;
                     combatSeed = inEvent.combatSeed;
                     if (!dungeonClient.Start(
@@ -1141,7 +1156,6 @@ namespace ActionRPG
                 else if constexpr (std::is_same_v<EventType, TownProtocol::DungeonSelectionOpen>)
                 {
                     if (dungeonEntryState == DungeonEntryState::Idle && !inEvent.dungeons.empty()
-                        && systemUiPage == SystemUiPage::Closed
                         && (partySnapshot.partyId == 0 || IsPartyLeader()))
                     {
                         activeDungeonZoneId = std::move(inEvent.zoneId);
@@ -1154,6 +1168,7 @@ namespace ActionRPG
                 {
                     if (IsDungeonUiRestricted()) return;
                     pendingPartyInvitation = std::move(inEvent);
+                    invitationHidden=false;
                     partyInvitationAnswerPending = false;
                     partyStatusText = L"Party invitation received.";
                 }
@@ -1170,6 +1185,7 @@ namespace ActionRPG
                     }
                     if (partySnapshot.partyId != 0)
                     {
+                        partyCreationPending=false;
                         ownPartyJoinRequest.reset();
                         partyJoinSendPending = false;
                     }
@@ -1184,13 +1200,13 @@ namespace ActionRPG
                         partyStatusText = L"You are not in a party.";
                     }
                     if (previousPartyId != 0 && partySnapshot.partyId == 0
-                        && systemUiPage == SystemUiPage::Party)
+                        && IsUiPageOpen(SystemUiPage::Party))
                     {
                         SetSystemUiPage(SystemUiPage::PartyDirectory);
                     }
                     else if (previousPartyId == 0 && partySnapshot.partyId != 0
-                        && (systemUiPage == SystemUiPage::PartyDirectory
-                            || systemUiPage == SystemUiPage::PartyCreate || systemUiPage == SystemUiPage::PartyDetails))
+                        && (IsUiPageOpen(SystemUiPage::PartyDirectory)
+                            || IsUiPageOpen(SystemUiPage::PartyCreate) || IsUiPageOpen(SystemUiPage::PartyDetails)))
                     {
                         partyCreationPending = false;
                         SetSystemUiPage(SystemUiPage::Party);
@@ -1226,7 +1242,7 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDetailResponse>)
                 {
-                    if (systemUiPage != SystemUiPage::PartyDetails || inEvent.partyId != selectedDirectoryPartyId
+                    if (!IsUiPageOpen(SystemUiPage::PartyDetails) || inEvent.partyId != selectedDirectoryPartyId
                         || IsDungeonUiRestricted()) return;
                     partyDetailRequestPending = false;
                     partyDetails = std::move(inEvent);
@@ -1287,7 +1303,7 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDirectoryPage>)
                 {
-                    if (systemUiPage == SystemUiPage::PartyDirectory || systemUiPage == SystemUiPage::PartyDetails)
+                    if (IsUiPageOpen(SystemUiPage::PartyDirectory) || IsUiPageOpen(SystemUiPage::PartyDetails))
                     {
                         partyDirectoryPage = std::move(inEvent);
                         directoryPageRequestPending = false;
@@ -1297,12 +1313,12 @@ namespace ActionRPG
                 }
                 else if constexpr (std::is_same_v<EventType, TownProtocol::PartyDirectoryChanged>)
                 {
-                    if ((systemUiPage == SystemUiPage::PartyDirectory || systemUiPage == SystemUiPage::PartyDetails)
+                    if ((IsUiPageOpen(SystemUiPage::PartyDirectory) || IsUiPageOpen(SystemUiPage::PartyDetails))
                         && inEvent.revision > partyDirectoryPage.revision)
                     {
                         wantedPartyDirectoryRevision = std::max(wantedPartyDirectoryRevision, inEvent.revision);
                         RequestPartyDirectoryPage(std::max(1U, partyDirectoryPage.page));
-                        if (systemUiPage == SystemUiPage::PartyDetails) RequestSelectedPartyDetail();
+                        if (IsUiPageOpen(SystemUiPage::PartyDetails)) RequestSelectedPartyDetail();
                     }
                 }
             }, event);
@@ -1551,7 +1567,6 @@ namespace ActionRPG
             selectedCompletionIndex = 0;
             completionStatus.clear();
             isDungeonSelectionOpen = false;
-            SetSystemUiPage(SystemUiPage::Closed);
         }
         // Prefer the captured server clock. Older JSON falls back to the exact tick duration,
         // never the rounded millisecond interval from the subscription response.
@@ -1571,7 +1586,9 @@ namespace ActionRPG
                 for (auto& monster : room.second) monster->ClearAttackEffect();
         }
         combatBuffer.Push(snapshot);
-        lastCombatTick = snapshot.serverTick; hasCombatTick = true; dungeonCleared = snapshot.cleared;
+        lastCombatTick = snapshot.serverTick; hasCombatTick = true;
+        if (snapshot.cleared && !dungeonCleared) completionWindowHidden=false;
+        dungeonCleared = snapshot.cleared;
         combatSnapshotAge = 0.0f; combatSnapshot = std::move(snapshot);
     }
 
@@ -2045,8 +2062,6 @@ namespace ActionRPG
         const auto& panel = layout.panel;
         const bool canChoose = !completionPending && !completionStopping
             && townClient.IsConnected() && (partySnapshot.partyId == 0 || IsPartyLeader());
-        inRenderer.FillRectangle(0.0f, 0.0f, camera.GetViewportWidth(), camera.GetViewportHeight(),
-            D2D1::ColorF(0.01f, 0.015f, 0.025f, 0.78f));
         inRenderer.FillRectangle(panel.left, panel.top, panel.right, panel.bottom, D2D1::ColorF(0.10f, 0.08f, 0.055f, 0.97f));
         inRenderer.DrawRectangle(panel.left, panel.top, panel.right, panel.bottom, D2D1::ColorF(0.82f, 0.62f, 0.24f), 3.0f);
         inRenderer.DrawText(L"던전 클리어", panel.left + 28.0f, panel.top + 24.0f, panel.right - 28.0f, panel.top + 62.0f,
@@ -2056,7 +2071,7 @@ namespace ActionRPG
         for (std::size_t index = 0; index < layout.buttons.size(); ++index)
         {
             const auto& button = layout.buttons[index];
-            const bool selected = canChoose && (selectedCompletionIndex == index || ContainsPoint(button, uiMouseX, uiMouseY));
+            const bool selected = canChoose && (selectedCompletionIndex == index || (pointerUiPage==SystemUiPage::DungeonCompletion && ContainsPoint(button, uiMouseX-UiWindowOffset(SystemUiPage::DungeonCompletion).x, uiMouseY-UiWindowOffset(SystemUiPage::DungeonCompletion).y)));
             inRenderer.FillRectangle(button.left, button.top, button.right, button.bottom,
                 selected ? D2D1::ColorF(0.32f, 0.23f, 0.10f) : D2D1::ColorF(0.16f, 0.14f, 0.11f));
             inRenderer.DrawRectangle(button.left, button.top, button.right, button.bottom,
@@ -2066,115 +2081,348 @@ namespace ActionRPG
                 canChoose ? D2D1::ColorF(D2D1::ColorF::White) : D2D1::ColorF(0.55f, 0.55f, 0.55f));
         }
         const auto text = !completionStatus.empty() ? completionStatus
-            : partySnapshot.partyId != 0 && !IsPartyLeader() ? L"파티장의 선택을 기다리는 중..." : L"방향키로 선택 / Enter로 확인";
+            : partySnapshot.partyId != 0 && !IsPartyLeader() ? L"파티장의 선택을 기다리는 중..." : L"버튼 클릭 또는 Enter로 확인";
         inRenderer.DrawText(text, panel.left + 28.0f, panel.top + 200.0f, panel.right - 28.0f, panel.bottom - 20.0f,
             D2D1::ColorF(0.85f, 0.82f, 0.72f));
     }
 
     void GameWorld::UpdateDungeonSelection(const InputState& inInput)
     {
-        if (dungeonEntryState != DungeonEntryState::Idle || localPlayerId == 0
-            || systemUiPage != SystemUiPage::Closed || pendingPartyInvitation.has_value()
-            || !isDungeonSelectionOpen || dungeonOptions.empty())
+        if (uiClickConsumed || dungeonEntryState!=DungeonEntryState::Idle || localPlayerId==0
+            || !isDungeonSelectionOpen || dungeonOptions.empty()) return;
+        selectedDungeonIndex=std::min(selectedDungeonIndex,dungeonOptions.size()-1);
+        const float width=camera.GetViewportWidth();
+        const float left=std::max(32.0f,width*0.10f),right=std::max(left+480,width-left);
+        const float listTop=132,listRight=left+(right-left)*0.46f;
+        const std::size_t first=selectedDungeonIndex<4 ? 0:selectedDungeonIndex-3;
+        bool confirm=inInput.WasPressed(InputKey::ConfirmSelection);
+        if (inInput.mouseWheelDelta!=0)
         {
-            return;
+            if (inInput.mouseWheelDelta>0 && selectedDungeonIndex>0) --selectedDungeonIndex;
+            else if (inInput.mouseWheelDelta<0 && selectedDungeonIndex+1<dungeonOptions.size()) ++selectedDungeonIndex;
         }
-
-        if (inInput.WasPressed(InputKey::ActionC))
+        if (inInput.leftMousePressed)
         {
-            isDungeonSelectionOpen = false;
-            activeDungeonZoneId.clear();
-            dungeonOptions.clear();
-            return;
+            for (std::size_t index=first;index<std::min(first+4,dungeonOptions.size());++index)
+            {
+                const float top=listTop+static_cast<float>(index-first)*72;
+                if (ContainsPoint({left+24,top,listRight,top+62},inInput.clickX,inInput.clickY))
+                {selectedDungeonIndex=index;uiClickConsumed=true;break;}
+            }
+            if (ContainsPoint({listRight+48,listTop+198,right-42,listTop+234},inInput.clickX,inInput.clickY))
+            {confirm=true;uiClickConsumed=true;}
         }
-        if (inInput.WasPressed(InputKey::MoveUp))
+        if (confirm)
         {
-            selectedDungeonIndex = selectedDungeonIndex == 0
-                ? dungeonOptions.size() - 1
-                : selectedDungeonIndex - 1;
-        }
-        if (inInput.WasPressed(InputKey::MoveDown))
-        {
-            selectedDungeonIndex = (selectedDungeonIndex + 1) % dungeonOptions.size();
-        }
-        if (inInput.WasPressed(InputKey::ConfirmSelection))
-        {
-            const std::uint32_t dungeonId = dungeonOptions[selectedDungeonIndex].dungeonId;
-            isDungeonSelectionOpen = false;
+            const auto dungeonId=dungeonOptions[selectedDungeonIndex].dungeonId;
+            isDungeonSelectionOpen=false;
             RequestDungeon(dungeonId);
         }
     }
 
-    void GameWorld::SetSystemUiPage(const SystemUiPage inPage)
+    GameWorld::SystemUiPage GameWorld::UiWindowGroup(SystemUiPage inPage) const
+    { return IsPartyUiPage(inPage) ? SystemUiPage::Party : inPage; }
+
+    bool GameWorld::IsUiPageOpen(SystemUiPage inPage) const
     {
-        if (IsDungeonUiRestricted() && IsPartyUiPage(inPage)) return;
-        SystemUiPage page = inPage;
-        if (page == SystemUiPage::Party || page == SystemUiPage::PartyDirectory)
+        if (inPage == SystemUiPage::Menu) return systemUiPage == inPage;
+        return std::find(uiWindows.begin(),uiWindows.end(),inPage) != uiWindows.end();
+    }
+    bool GameWorld::IsUiTextEditing() const
+    { return (systemUiPage==SystemUiPage::PartyCreate || systemUiPage==SystemUiPage::Party) && editingPartyTitle; }
+
+    Vector2 GameWorld::UiWindowOffset(SystemUiPage inPage) const
+    { return uiWindowOffsets[static_cast<std::size_t>(UiWindowGroup(inPage))]; }
+
+    D2D1_RECT_F GameWorld::UiWindowBounds(SystemUiPage inPage) const
+    {
+        const float width=camera.GetViewportWidth(),height=camera.GetViewportHeight();
+        const auto bar=skillUi.GetHotbarBounds(width,height);
+        const auto hud=HudLayout::Calculate(bar,HudLayout::Scale(width));
+        if (inPage==SystemUiPage::Skills) return skillUi.GetWindowBounds(width,height);
+        if (inPage==SystemUiPage::Inventory) return inventoryUi.GetWindowBounds(width,height);
+        if (inPage==SystemUiPage::Quests) return questUi.GetWindowBounds(width,height,hud.hp.top);
+        D2D1_RECT_F rect{};
+        switch (inPage)
         {
-            page = partySnapshot.partyId != 0 ? SystemUiPage::Party
-                : SystemUiPage::PartyDirectory;
-        }
-        else if (page == SystemUiPage::PartyCreate && partySnapshot.partyId != 0)
+        case SystemUiPage::Party: case SystemUiPage::PartyDirectory: rect=CalculatePartyLayout(width,height).panel;break;
+        case SystemUiPage::PartyDetails: rect=CalculatePartyDetailsLayout(width,height).panel;break;
+        case SystemUiPage::PartyCreate: rect=GetPartyCreateDialog(width,height);break;
+        case SystemUiPage::GameOptions: rect=GetGameOptionsPanel(width,height);break;
+        case SystemUiPage::ExitConfirmation: rect=GetExitDialog(width,height);break;
+        case SystemUiPage::Invitation: rect=GetInvitationDialog(width);break;
+        case SystemUiPage::PartyNotice: rect=CalculatePartyNoticeLayout(width,bar.top-12).panel;break;
+        case SystemUiPage::KickedNotice: rect=CalculateKickedNoticeLayout(width,height).panel;break;
+        case SystemUiPage::DungeonCompletion: rect=CalculateDungeonCompletionLayout(width,height).panel;break;
+        case SystemUiPage::DungeonSelection:
         {
-            page = SystemUiPage::Party;
+            const float left=std::max(32.0f,width*0.10f);
+            rect={left,56,std::max(left+480,width-left),std::max(486.0f,height-56)};break;
         }
-        if (systemUiPage == page)
+        default: return rect;
+        }
+        const auto offset=UiWindowOffset(inPage);
+        return {rect.left+offset.x,rect.top+offset.y,rect.right+offset.x,rect.bottom+offset.y};
+    }
+    void GameWorld::FocusUiWindow(SystemUiPage inPage)
+    {
+        if (systemUiPage != inPage) editingPartyTitle=false;
+        std::erase(uiWindows,inPage);uiWindows.push_back(inPage);systemUiPage=inPage;
+    }
+    void GameWorld::CloseUiWindow(SystemUiPage inPage)
+    {
+        if (inPage==SystemUiPage::Menu)
+        { systemUiPage=uiWindows.empty()?SystemUiPage::Closed:uiWindows.back();return; }
+        if (inPage==SystemUiPage::Inventory) inventoryUi.Close();
+        if (inPage==SystemUiPage::Skills) skillUi.CancelDrag();
+        if (inPage==SystemUiPage::Quests) questUi.Close();
+        if (IsPartyUiPage(inPage))
         {
-            return;
+            if (IsUiPageOpen(SystemUiPage::PartyDirectory) || IsUiPageOpen(SystemUiPage::PartyDetails))
+            { townClient.UnsubscribePartyDirectory();directoryPageRequestPending=false; }
+            selectedDirectoryPartyId=0;partyDetails.reset();partyDetailRequestPending=partyDetailRefreshNeeded=false;
+            editingPartyTitle=false;
         }
-        const bool wasDirectory = systemUiPage == SystemUiPage::PartyDirectory || systemUiPage == SystemUiPage::PartyDetails;
-        const bool isDirectory = page == SystemUiPage::PartyDirectory || page == SystemUiPage::PartyDetails;
-        if (wasDirectory && !isDirectory)
+        if (inPage==SystemUiPage::Invitation && pendingPartyInvitation)
         {
-            townClient.UnsubscribePartyDirectory();
-            directoryPageRequestPending = false;
+            if (!partyInvitationAnswerPending)
+            { townClient.AnswerPartyInvitation(pendingPartyInvitation->invitationId,false);partyInvitationAnswerPending=true; }
+            invitationHidden=true;
         }
-        if (page == SystemUiPage::PartyDirectory && !wasDirectory)
+        if (inPage==SystemUiPage::PartyNotice && !partyJoinRequests.empty())
         {
-            partyDirectoryPage = {};
-            wantedPartyDirectoryRevision = 0;
-            partyDirectoryPage.page = 1;
-            partyDirectoryPage.totalPages = 1;
-            RequestPartyDirectoryPage(1);
+            hiddenPartyRequestId=partyJoinRequests.front().requestId;
+            if (answeringPartyJoinRequestId==0)
+            { answeringPartyJoinRequestId=hiddenPartyRequestId;townClient.AnswerPartyJoin(hiddenPartyRequestId,false); }
         }
-        if (systemUiPage == SystemUiPage::PartyDetails && page != SystemUiPage::PartyDetails)
+        if (inPage==SystemUiPage::KickedNotice) partyKickedNotice=false;
+        if (inPage==SystemUiPage::DungeonCompletion) completionWindowHidden=true;
+        if (inPage==SystemUiPage::DungeonSelection)
+        { isDungeonSelectionOpen=false;activeDungeonZoneId.clear();dungeonOptions.clear(); }
+        const auto group=UiWindowGroup(inPage);
+        std::erase_if(uiWindows,[&](auto page){return UiWindowGroup(page)==group;});
+        if (draggedUiPage==inPage) draggedUiPage=SystemUiPage::Closed;
+        if (systemUiPage!=SystemUiPage::Menu)
+            systemUiPage=uiWindows.empty()?SystemUiPage::Closed:uiWindows.back();
+    }
+    void GameWorld::SetSystemUiPage(SystemUiPage page)
+    {
+        if (page==SystemUiPage::Closed) {CloseUiWindow(systemUiPage);return;}
+        if (page==SystemUiPage::Menu) {systemUiPage=page;editingPartyTitle=false;return;}
+        if (IsDungeonUiRestricted() && IsPartyUiPage(page)) return;
+        if (page==SystemUiPage::Party || page==SystemUiPage::PartyDirectory)
+            page=partySnapshot.partyId!=0?SystemUiPage::Party:SystemUiPage::PartyDirectory;
+        if (page==SystemUiPage::PartyCreate && partySnapshot.partyId!=0) page=SystemUiPage::Party;
+        if (IsUiPageOpen(page)) {FocusUiWindow(page);return;}
+        if (IsPartyUiPage(page))
         {
-            selectedDirectoryPartyId = 0;
-            partyDetails.reset();
-            partyDetailRequestPending = false;
-            partyDetailRefreshNeeded = false;
+            const bool wasDirectory=IsUiPageOpen(SystemUiPage::PartyDirectory)||IsUiPageOpen(SystemUiPage::PartyDetails);
+            const bool isDirectory=page==SystemUiPage::PartyDirectory||page==SystemUiPage::PartyDetails;
+            if (wasDirectory && !isDirectory) {townClient.UnsubscribePartyDirectory();directoryPageRequestPending=false;}
+            if (IsUiPageOpen(SystemUiPage::PartyDetails) && page!=SystemUiPage::PartyDetails)
+            {selectedDirectoryPartyId=0;partyDetails.reset();partyDetailRequestPending=partyDetailRefreshNeeded=false;}
+            std::erase_if(uiWindows,[](auto value){return IsPartyUiPage(value);});
+            if (page==SystemUiPage::PartyDirectory && !wasDirectory)
+            {partyDirectoryPage={};wantedPartyDirectoryRevision=0;partyDirectoryPage.page=partyDirectoryPage.totalPages=1;RequestPartyDirectoryPage(1);}
+            if (page==SystemUiPage::Party)
+            {partyTitleDraft=Utf8ToWide(partySnapshot.title);editingPartyTitle=false;}
+            if (page==SystemUiPage::PartyCreate)
+            {editingPartyTitle=false;if(!partyCreationPending){newPartyTitleDraft.clear();newPartyIsPublic=false;partyStatusText.clear();}}
         }
-        if (page == SystemUiPage::Party)
+        if (page==SystemUiPage::GameOptions)
         {
-            partyTitleDraft = Utf8ToWide(partySnapshot.title);
-            editingPartyTitle = false;
+            const auto settings=GameWindow::GetScreenSettings();
+            if (!screenApplyRequested)
+            {selectedOptionsRow=0;screenWidthDraft=settings.width;fullscreenDraft=settings.fullscreen;screenSettingsNotice.clear();}
         }
-        if (page == SystemUiPage::PartyCreate)
-        {
-            newPartyTitleDraft.clear();
-            newPartyIsPublic = false;
-            partyCreationPending = false;
-            partyStatusText.clear();
-        }
-        if (systemUiPage == SystemUiPage::GameOptions || page == SystemUiPage::GameOptions)
-        {
-            GameWindow::ResetInput();
-            inventoryUi.Close();
-        }
-        if (page == SystemUiPage::GameOptions)
-        {
-            const auto settings = GameWindow::GetScreenSettings();
-            selectedOptionsRow = 0;
-            screenWidthDraft = settings.width;
-            fullscreenDraft = settings.fullscreen;
-            screenApplyRequested = false;
-            screenSettingsNotice.clear();
-        }
-        if (systemUiPage == SystemUiPage::Inventory) inventoryUi.Close();
-        if (systemUiPage == SystemUiPage::Quests) questUi.Close();
-        systemUiPage = page;
-        commandQueue.Clear(); skillUi.CancelDrag();
         if (page==SystemUiPage::Skills) townClient.RequestSkillState();
+        FocusUiWindow(page);
+    }
+    void GameWorld::SyncUiWindows()
+    {
+        const auto sync=[this](SystemUiPage page,bool show)
+        {
+            if (show && !IsUiPageOpen(page))
+            {
+                const bool menuOpen=systemUiPage==SystemUiPage::Menu;
+                FocusUiWindow(page);
+                if (menuOpen) systemUiPage=SystemUiPage::Menu;
+            }
+            else if (!show) std::erase(uiWindows,page);
+        };
+        if (!pendingPartyInvitation) invitationHidden=false;
+        sync(SystemUiPage::Invitation,pendingPartyInvitation.has_value()&&!invitationHidden);
+        sync(SystemUiPage::PartyNotice,IsPartyJoinNoticeVisible()
+            && partyJoinRequests.front().requestId!=hiddenPartyRequestId);
+        sync(SystemUiPage::KickedNotice,partyKickedNotice);
+        sync(SystemUiPage::DungeonSelection,isDungeonSelectionOpen&&!dungeonOptions.empty());
+        sync(SystemUiPage::DungeonCompletion,dungeonCleared&&!completionStopping&&!completionWindowHidden);
+        if (IsDungeonUiRestricted())
+        {
+            const auto party=std::find_if(uiWindows.begin(),uiWindows.end(),[](auto page){return IsPartyUiPage(page);});
+            if (party!=uiWindows.end()) CloseUiWindow(*party);
+        }
+        if (!IsUiPageOpen(draggedUiPage)) draggedUiPage=SystemUiPage::Closed;
+        if (systemUiPage!=SystemUiPage::Menu && !IsUiPageOpen(systemUiPage))
+            systemUiPage=uiWindows.empty()?SystemUiPage::Closed:uiWindows.back();
+    }
+    GameWorld::SystemUiPage GameWorld::TopUiWindowAt(float inX,float inY) const
+    {
+        if (systemUiPage==SystemUiPage::Menu) return SystemUiPage::Menu;
+        for (auto it=uiWindows.rbegin();it!=uiWindows.rend();++it)
+            if (ContainsPoint(UiWindowBounds(*it),inX,inY)) return *it;
+        return SystemUiPage::Closed;
+    }
+    void GameWorld::UpdateUiWindowOffsets()
+    {
+        const float scale=HudLayout::Scale(camera.GetViewportWidth());
+        const auto apply=[&]()
+        {
+            auto offset=UiWindowOffset(SystemUiPage::Skills);skillUi.SetWindowOffset(offset.x/scale,offset.y/scale);
+            offset=UiWindowOffset(SystemUiPage::Inventory);inventoryUi.SetWindowOffset(offset.x/scale,offset.y/scale);
+            offset=UiWindowOffset(SystemUiPage::Quests);questUi.SetWindowOffset(offset.x/scale,offset.y/scale);
+        };
+        apply();
+        for (auto page:uiWindows)
+        {
+            const auto rect=UiWindowBounds(page);
+            auto& offset=uiWindowOffsets[static_cast<std::size_t>(UiWindowGroup(page))];
+            offset.x+=std::clamp(rect.left,0.0f,std::max(0.0f,camera.GetViewportWidth()-(rect.right-rect.left)))-rect.left;
+            offset.y+=std::clamp(rect.top,0.0f,std::max(0.0f,camera.GetViewportHeight()-(rect.bottom-rect.top)))-rect.top;
+        }
+        apply();
+    }
+    // Route pointer input to one visible window or its captured drag. State/timeouts still update in every model.
+    InputState GameWorld::UiWindowInput(SystemUiPage page,const InputState& raw,bool inHud) const
+    {
+        InputState input=raw;
+        const bool ownsDrag=(page==SystemUiPage::Inventory&&inventoryUi.IsDragging())
+            ||(page==SystemUiPage::Skills&&skillUi.IsDragging())||(page==SystemUiPage::Quests&&questUi.IsTrackerDragging());
+        if (uiChromeConsumed || (!ownsDrag && pointerUiPage!=page && !(inHud&&pointerUiPage==SystemUiPage::Closed)))
+        {
+            input.mouseX=input.mouseY=input.clickX=input.clickY=input.rightClickX=input.rightClickY=-10000;
+            input.leftMousePressed=input.leftMouseDown=input.leftMouseReleased=input.rightMousePressed=false;input.mouseWheelDelta=0;
+        }
+        if (systemUiPage!=page || uiChromeConsumed)
+        {
+            std::erase_if(input.pressedKeys,[&](auto key){return !(inHud&&page==SystemUiPage::Inventory
+                && key>=InputKey::Item1&&key<=InputKey::Item6&&!IsUiTextEditing());});
+            input.textInput.clear();input.textEdits.clear();input.composition.clear();
+        }
+        // Movement keys always belong to the character; windows use pointer controls.
+        std::erase_if(input.pressedKeys,[](auto key){return key>=InputKey::MoveLeft&&key<=InputKey::MoveDown;});
+        input.moveLeft=input.moveRight=input.moveUp=input.moveDown=false;
+        if (page!=SystemUiPage::Skills&&page!=SystemUiPage::Inventory&&page!=SystemUiPage::Quests)
+        {
+            const auto offset=UiWindowOffset(page);
+            input.mouseX-=offset.x;input.clickX-=offset.x;input.rightClickX-=offset.x;
+            input.mouseY-=offset.y;input.clickY-=offset.y;input.rightClickY-=offset.y;
+        }
+        return input;
+    }
+    void GameWorld::UpdateUiWindows(const InputState& input)
+    {
+        uiChromeConsumed=false;
+        if (!chatUi.IsEditing()&&!IsUiTextEditing())
+        {
+            const std::pair<InputKey,SystemUiPage> keys[]{
+                {InputKey::ToggleInventory,SystemUiPage::Inventory},{InputKey::ToggleSkills,SystemUiPage::Skills},
+                {InputKey::ToggleQuests,SystemUiPage::Quests},{InputKey::ToggleParty,SystemUiPage::Party},
+                {InputKey::ToggleOptions,SystemUiPage::GameOptions}};
+            for (const auto& [key,page]:keys) if(input.WasPressed(key))
+            {
+                const auto found=std::find_if(uiWindows.begin(),uiWindows.end(),[&](auto open){return UiWindowGroup(open)==UiWindowGroup(page);});
+                if(found!=uiWindows.end()) CloseUiWindow(*found);
+                else {if(page==SystemUiPage::Quests)questUi.OpenAll();SetSystemUiPage(page);}
+            }
+        }
+        if(input.WasPressed(InputKey::ToggleSystemMenu))
+        {
+            if(systemUiPage==SystemUiPage::Menu)CloseUiWindow(SystemUiPage::Menu);
+            else if(skillUi.IsDragging()||inventoryUi.IsDragging()){skillUi.CancelDrag();inventoryUi.Close();}
+            else if(!uiWindows.empty())CloseUiWindow(uiWindows.back());
+            else SetSystemUiPage(SystemUiPage::Menu);
+            draggedUiPage=SystemUiPage::Closed;uiChromeConsumed=true;
+        }
+        if(input.cancelDrag)draggedUiPage=SystemUiPage::Closed;
+        if(draggedUiPage!=SystemUiPage::Closed)
+        {
+            if(input.leftMouseDown)
+            {
+                auto& offset=uiWindowOffsets[static_cast<std::size_t>(UiWindowGroup(draggedUiPage))];
+                offset={uiDragOffset.x+input.mouseX-uiDragMouse.x,uiDragOffset.y+input.mouseY-uiDragMouse.y};
+            }
+            else draggedUiPage=SystemUiPage::Closed;
+            uiChromeConsumed=true;
+        }
+        UpdateUiWindowOffsets();
+        pointerUiPage=TopUiWindowAt(input.mouseX,input.mouseY);
+        const auto bar=skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight());
+        const auto hud=HudLayout::Calculate(bar,HudLayout::Scale(camera.GetViewportWidth()));
+        if (pointerUiPage==SystemUiPage::Closed && !dungeonCleared && !completionStopping
+            && questUi.IsTrackerAt(input.mouseX,input.mouseY,camera.GetViewportWidth(),camera.GetViewportHeight(),hud.hp.top))
+            pointerUiPage=SystemUiPage::Quests;
+        if(skillUi.IsDragging())pointerUiPage=SystemUiPage::Skills;
+        else if(inventoryUi.IsDragging())pointerUiPage=SystemUiPage::Inventory;
+        else if(questUi.IsTrackerDragging())pointerUiPage=SystemUiPage::Quests;
+        if(input.leftMousePressed&&!uiChromeConsumed&&!questUi.IsTrackerDragging()&&!skillUi.IsDragging()&&!inventoryUi.IsDragging()&&!chatUi.IsDragging())
+        {
+            const auto page=TopUiWindowAt(input.clickX,input.clickY);
+            if (page==SystemUiPage::Closed) editingPartyTitle=false;
+            if(page!=SystemUiPage::Closed&&page!=SystemUiPage::Menu)
+            {
+                FocusUiWindow(page);pointerUiPage=page;
+                const auto rect=UiWindowBounds(page);
+                if(ContainsPoint({rect.right-30,rect.top+4,rect.right-5,rect.top+29},input.clickX,input.clickY))
+                {CloseUiWindow(page);uiChromeConsumed=true;}
+                else if(input.clickY<rect.top+32)
+                {
+                    editingPartyTitle=false;
+                    draggedUiPage=page;uiDragMouse={input.mouseX,input.mouseY};uiDragOffset=UiWindowOffset(page);
+                    uiChromeConsumed=true;
+                }
+            }
+        }
+        const D2D1_RECT_F restore{camera.GetViewportWidth()*0.5f-130,24,camera.GetViewportWidth()*0.5f+130,58};
+        if(systemUiPage!=SystemUiPage::Menu&&dungeonCleared&&completionWindowHidden&&input.leftMousePressed&&ContainsPoint(restore,input.clickX,input.clickY))
+        {completionWindowHidden=false;SyncUiWindows();uiChromeConsumed=true;}
+        UpdateUiWindowOffsets();
+        if(uiChromeConsumed)uiClickConsumed=true;
+    }
+    void GameWorld::RenderUiWindowChrome(D2DRenderer& draw,SystemUiPage page) const
+    {
+        const auto rect=UiWindowBounds(page);
+        const D2D1_RECT_F close{rect.right-30,rect.top+4,rect.right-5,rect.top+29};
+        draw.DrawRectangle(rect.left,rect.top,rect.right,rect.bottom,
+            D2D1::ColorF(systemUiPage==page?0xBDA46C:0x535F70));
+        draw.FillRectangle(close.left,close.top,close.right,close.bottom,D2D1::ColorF(0x29313D));
+        draw.DrawUiText(L"X",close,D2D1::ColorF(0xF0EAE0),15,false,true);
+    }
+    void GameWorld::RenderUiWindows(D2DRenderer& draw) const
+    {
+        const float width=camera.GetViewportWidth(),height=camera.GetViewportHeight();
+        const auto bar=skillUi.GetHotbarBounds(width,height);
+        const auto hud=HudLayout::Calculate(bar,HudLayout::Scale(width));
+        for(auto page:uiWindows)
+        {
+            if(page==SystemUiPage::Skills)skillUi.Render(draw,width,height,true,false);
+            else if(page==SystemUiPage::Inventory)inventoryUi.Render(draw,width,height,IsDungeonUiRestricted());
+            else if(page==SystemUiPage::Quests)questUi.Render(draw,width,height,hud.hp.top);
+            else
+            {
+                const auto offset=UiWindowOffset(page);
+                const D2DRenderer::UiTranslationScope scope(draw,offset.x,offset.y);
+                if(IsPartyUiPage(page)||page==SystemUiPage::Invitation)RenderPartyInterface(draw,page);
+                else if(page==SystemUiPage::PartyNotice||page==SystemUiPage::KickedNotice)RenderPartyNotifications(draw,page);
+                else if(page==SystemUiPage::DungeonSelection)RenderDungeonSelection(draw);
+                else if(page==SystemUiPage::DungeonCompletion)RenderDungeonCompletion(draw);
+                else RenderSystemInterface(draw,page);
+            }
+            RenderUiWindowChrome(draw,page);
+        }
+        if(dungeonCleared&&completionWindowHidden)
+            draw.DrawUiText(L"클리어 결과 보기",{width*0.5f-130,24,width*0.5f+130,58},D2D1::ColorF(0xEACB7C),16,false,true);
+        if(systemUiPage==SystemUiPage::Menu)RenderSystemInterface(draw,SystemUiPage::Menu);
     }
 
     void GameWorld::RequestSelectedPartyDetail()
@@ -2218,7 +2466,7 @@ namespace ActionRPG
 
     void GameWorld::UpdatePartyNotifications(const InputState& inInput)
     {
-        if (partyKickedNotice)
+        if (systemUiPage==SystemUiPage::KickedNotice && partyKickedNotice)
         {
             const auto layout = CalculateKickedNoticeLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
             if (inInput.WasPressed(InputKey::ConfirmSelection) || inInput.WasPressed(InputKey::ToggleSystemMenu)
@@ -2228,18 +2476,7 @@ namespace ActionRPG
             skillUi.CancelDrag();
             return;
         }
-        if (IsPartyJoinNoticeVisible() && inInput.WasPressed(InputKey::ToggleSystemMenu))
-        {
-            uiClickConsumed = true;
-            skillUi.CancelDrag();
-            if (answeringPartyJoinRequestId == 0)
-            {
-                answeringPartyJoinRequestId = partyJoinRequests.front().requestId;
-                townClient.AnswerPartyJoin(answeringPartyJoinRequestId, false);
-            }
-            return;
-        }
-        if (!IsPartyJoinNoticeVisible() || !inInput.leftMousePressed || uiClickConsumed) return;
+        if (systemUiPage!=SystemUiPage::PartyNotice || !IsPartyJoinNoticeVisible() || !inInput.leftMousePressed || uiClickConsumed) return;
         const auto layout = CalculatePartyNoticeLayout(camera.GetViewportWidth(),
             skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight()).top - 12.0f);
         if (!ContainsPoint(layout.panel, inInput.clickX, inInput.clickY)) return;
@@ -2253,7 +2490,7 @@ namespace ActionRPG
         // Keep this ID until its authoritative Accepted/Rejected/Invalidated update arrives.
     }
 
-    void GameWorld::RenderPartyNotifications(D2DRenderer& inRenderer) const
+    void GameWorld::RenderPartyNotifications(D2DRenderer& inRenderer,const SystemUiPage inPage) const
     {
         const auto drawPanel = [&inRenderer](const D2D1_RECT_F& inPanel)
         {
@@ -2268,18 +2505,16 @@ namespace ActionRPG
                 inEnabled ? D2D1::ColorF(0.17f, 0.31f, 0.46f) : D2D1::ColorF(0.18f, 0.18f, 0.18f));
             inRenderer.DrawUiText(inText, inButton, D2D1::ColorF(0.93f, 0.95f, 1.0f), 16.0f, false, true);
         };
-        if (partyKickedNotice)
+        if (inPage==SystemUiPage::KickedNotice && partyKickedNotice)
         {
             const auto layout = CalculateKickedNoticeLayout(camera.GetViewportWidth(), camera.GetViewportHeight());
-            inRenderer.FillRectangle(0, 0, camera.GetViewportWidth(), camera.GetViewportHeight(),
-                D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.55f));
             drawPanel(layout.panel);
             inRenderer.DrawUiText(L"파티에서 강퇴되었습니다.",
                 {layout.panel.left + 16.0f, layout.panel.top + 24.0f, layout.panel.right - 16.0f, layout.panel.top + 84.0f},
                 D2D1::ColorF(0.96f, 0.94f, 0.89f), 18.0f, true, true);
             drawButton(layout.accept, L"확인", true);
         }
-        else if (IsPartyJoinNoticeVisible())
+        else if (inPage==SystemUiPage::PartyNotice && IsPartyJoinNoticeVisible())
         {
             const auto layout = CalculatePartyNoticeLayout(camera.GetViewportWidth(),
                 skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight()).top - 12.0f);
@@ -2430,7 +2665,7 @@ namespace ActionRPG
                         fullscreenDraft = index == 3;
                 }
                 else if (index == 4) apply = true;
-                else { SetSystemUiPage(SystemUiPage::Menu); return; }
+                else { CloseUiWindow(SystemUiPage::GameOptions); return; }
                 break;
             }
             for (std::size_t index = 0; index < 6; ++index)
@@ -2456,11 +2691,10 @@ namespace ActionRPG
         const float width = camera.GetViewportWidth(), height = camera.GetViewportHeight();
         const auto panel = GetGameOptionsPanel(width, height);
         const auto text = D2D1::ColorF(0xE9E4D8), brass = D2D1::ColorF(0xA98948), muted = D2D1::ColorF(0x707885);
-        inRenderer.FillRectangle(0, 0, width, height, D2D1::ColorF(0.04f, 0.05f, 0.07f, 0.86f));
         inRenderer.FillRectangle(panel.left, panel.top, panel.right, panel.bottom, D2D1::ColorF(0x141922));
         inRenderer.DrawRectangle(panel.left, panel.top, panel.right, panel.bottom, brass, 2);
         inRenderer.DrawUiText(L"게임 옵션", D2D1::RectF(panel.left + 20, panel.top + 12, panel.right - 20, panel.top + 38), text, 20);
-        inRenderer.DrawUiText(L"↑↓ 항목 · ←→ 값 · 볼륨 5% 단위 · Enter 화면 적용", D2D1::RectF(panel.left + 20, panel.top + 40, panel.right - 20, panel.top + 56), text, 11);
+        inRenderer.DrawUiText(L"버튼으로 설정 · 볼륨 5% 단위 · Enter 화면 적용", D2D1::RectF(panel.left + 20, panel.top + 40, panel.right - 20, panel.top + 56), text, 11);
         constexpr std::array<std::wstring_view, 5> ROW_LABELS{L"해상도", L"화면 모드", L"마스터 볼륨", L"효과음", L"배경음악"};
         for (std::size_t row = 0; row < ROW_LABELS.size(); ++row)
         {
@@ -2470,7 +2704,7 @@ namespace ActionRPG
             inRenderer.DrawUiText(ROW_LABELS[row], label, text, 14, false, true);
         }
         const bool fits = GameWindow::CanUseWindowed(screenWidthDraft, screenWidthDraft == 1280 ? 720U : 1080U);
-        constexpr std::array<std::wstring_view, 6> LABELS{L"1280 × 720", L"1920 × 1080", L"창모드", L"전체화면", L"화면 적용", L"돌아가기 · ESC"};
+        constexpr std::array<std::wstring_view, 6> LABELS{L"1280 × 720", L"1920 × 1080", L"창모드", L"전체화면", L"화면 적용", L"닫기 · ESC"};
         for (std::size_t index = 0; index < LABELS.size(); ++index)
         {
             const auto rect = GetGameOptionsButton(panel, index);
@@ -2506,45 +2740,6 @@ namespace ActionRPG
     void GameWorld::UpdateSystemInterface(const InputState& inInput)
     {
         if (uiClickConsumed) return;
-        if (pendingPartyInvitation.has_value())
-        {
-            if (inInput.WasPressed(InputKey::ToggleSystemMenu))
-            {
-                uiClickConsumed = true;
-                if (!partyInvitationAnswerPending)
-                {
-                    townClient.AnswerPartyInvitation(pendingPartyInvitation->invitationId, false);
-                    partyInvitationAnswerPending = true;
-                }
-            }
-            return;
-        }
-        if (inInput.WasPressed(InputKey::ToggleSystemMenu))
-        {
-            // One Escape dismisses the current UI; only an empty UI opens the menu.
-            if (isDungeonSelectionOpen)
-            {
-                isDungeonSelectionOpen = false;
-                activeDungeonZoneId.clear();
-                dungeonOptions.clear();
-            }
-            else if (systemUiPage != SystemUiPage::Closed)
-            {
-                SetSystemUiPage(SystemUiPage::Closed);
-            }
-            else if (skillUi.IsDragging() || inventoryUi.IsDragging())
-            {
-                skillUi.CancelDrag();
-                inventoryUi.Close();
-            }
-            else
-            {
-                SetSystemUiPage(SystemUiPage::Menu);
-            }
-            uiClickConsumed = true;
-            return;
-        }
-
         if (systemUiPage == SystemUiPage::GameOptions)
         {
             UpdateGameOptions(inInput);
@@ -2562,7 +2757,7 @@ namespace ActionRPG
                 middle + 10.0f, dialog.bottom - 62.0f, dialog.right - 28.0f, dialog.bottom - 20.0f);
             if (ContainsPoint(cancelButton, inInput.clickX, inInput.clickY))
             {
-                SetSystemUiPage(SystemUiPage::Menu);
+                CloseUiWindow(SystemUiPage::ExitConfirmation);
                 uiClickConsumed = true;
             }
             else if (ContainsPoint(exitButton, inInput.clickX, inInput.clickY))
@@ -2636,8 +2831,8 @@ namespace ActionRPG
 
     void GameWorld::UpdatePartyInterface(const InputState& inInput)
     {
-        if (IsDungeonUiRestricted() || !townClient.IsConnected() || partyKickedNotice) return;
-        if (pendingPartyInvitation.has_value())
+        if (IsDungeonUiRestricted() || !townClient.IsConnected() ) return;
+        if (systemUiPage==SystemUiPage::Invitation && pendingPartyInvitation.has_value())
         {
             if (partyInvitationAnswerPending || !inInput.leftMousePressed || uiClickConsumed)
             {
@@ -2742,7 +2937,11 @@ namespace ActionRPG
 
         if (systemUiPage == SystemUiPage::PartyCreate)
         {
-            AppendPartyTitleInput(newPartyTitleDraft, inInput.textInput);
+            const auto titleDialog=GetPartyCreateDialog(camera.GetViewportWidth(),camera.GetViewportHeight());
+            if (inInput.leftMousePressed)
+                editingPartyTitle=ContainsPoint({titleDialog.left+24,titleDialog.top+88,titleDialog.right-24,titleDialog.top+128},
+                    inInput.clickX,inInput.clickY);
+            if (editingPartyTitle && !partyCreationPending) AppendPartyTitleInput(newPartyTitleDraft, inInput.textInput);
             if (inInput.WasPressed(InputKey::ConfirmSelection))
             {
                 SubmitPartyCreation();
@@ -2803,6 +3002,7 @@ namespace ActionRPG
 
         const PartyLayout layout = CalculatePartyLayout(
             camera.GetViewportWidth(), camera.GetViewportHeight());
+        if (!ContainsPoint(layout.titleField,inInput.clickX,inInput.clickY)) editingPartyTitle=false;
         if (IsPartyLeader() && ContainsPoint(layout.titleField,
             inInput.clickX, inInput.clickY))
         {
@@ -2980,6 +3180,7 @@ namespace ActionRPG
         dungeonWorld.reset(); dungeonMonsters.clear(); dungeonMapId.clear();
         combatBuffer.Clear(); presentationSnapshot.reset(); combatHitEffects.clear(); appliedMapEpoch = pendingMapEpoch = 0;
         combatPlayers.clear(); combatSnapshot.reset(); hasCombatTick = dungeonCleared = false;
+        completionWindowHidden=false;
         shotSounds.clear();
         targetMonsterId = lastHudHitSequence = 0; targetHp = {}; dungeonHp = {}; dungeonMp = {};
         lastCombatTick = 0; combatActionSequence = lastCombatActionResult = combatInputsThisSecond = 0;
@@ -3049,8 +3250,6 @@ namespace ActionRPG
         const float panelTop = 56.0f;
         const float panelBottom = std::max(panelTop + 430.0f, viewportHeight - 56.0f);
 
-        inRenderer.FillRectangle(0.0f, 0.0f, viewportWidth, viewportHeight,
-            D2D1::ColorF(0.01f, 0.015f, 0.025f, 0.78f));
         inRenderer.FillRectangle(panelLeft, panelTop, panelRight, panelBottom,
             D2D1::ColorF(0.10f, 0.08f, 0.055f, 0.97f));
         inRenderer.DrawRectangle(panelLeft, panelTop, panelRight, panelBottom,
@@ -3105,65 +3304,36 @@ namespace ActionRPG
             panelRight - 42.0f, listTop + 88.0f, D2D1::ColorF(0.72f, 0.83f, 0.96f));
         inRenderer.DrawText(selectedDescription, detailLeft + 22.0f, listTop + 108.0f,
             panelRight - 42.0f, listTop + 142.0f, D2D1::ColorF(0.90f, 0.91f, 0.88f));
+        inRenderer.FillRectangle(detailLeft+22,listTop+198,panelRight-42,listTop+234,D2D1::ColorF(0x514023));
         inRenderer.DrawText(L"ENTER  Enter dungeon", detailLeft + 22.0f, listTop + 204.0f,
             panelRight - 42.0f, listTop + 232.0f, D2D1::ColorF(0.98f, 0.82f, 0.42f));
-        inRenderer.DrawText(L"C      Return to town", detailLeft + 22.0f, listTop + 238.0f,
+        inRenderer.DrawText(L"X / ESC  Close", detailLeft + 22.0f, listTop + 238.0f,
             panelRight - 42.0f, listTop + 266.0f, D2D1::ColorF(0.78f, 0.82f, 0.86f));
-        inRenderer.DrawText(L"UP / DOWN: Select", panelLeft + 28.0f, panelBottom - 42.0f,
+        inRenderer.DrawText(L"Click / Wheel: Select   |   Drag title: Move", panelLeft + 28.0f, panelBottom - 42.0f,
             panelRight - 28.0f, panelBottom - 14.0f, D2D1::ColorF(0.72f, 0.72f, 0.68f));
     }
 
-    void GameWorld::RenderSystemInterface(D2DRenderer& inRenderer) const
+    void GameWorld::RenderSystemInterface(D2DRenderer& inRenderer,const SystemUiPage inPage) const
     {
-        if (systemUiPage == SystemUiPage::GameOptions)
+        if (inPage == SystemUiPage::GameOptions)
         {
             RenderGameOptions(inRenderer);
             return;
         }
-        if (systemUiPage==SystemUiPage::Skills)
-        {
-            skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),true);
-            inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),
-                skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),false);
-            return;
-        }
-        if (systemUiPage==SystemUiPage::Inventory)
-        {
-            inventoryUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),IsDungeonUiRestricted());
-            skillUi.Render(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),false);
-            inventoryUi.RenderQuickSlots(inRenderer,camera.GetViewportWidth(),camera.GetViewportHeight(),
-                skillUi.GetHotbarBounds(camera.GetViewportWidth(),camera.GetViewportHeight()),true);
-            return;
-        }
-        if (systemUiPage == SystemUiPage::Quests)
-        {
-            if (!dungeonCleared && !completionStopping && !partyKickedNotice && !pendingPartyInvitation)
-            {
-                const auto bar = skillUi.GetHotbarBounds(camera.GetViewportWidth(), camera.GetViewportHeight());
-                const auto hud = HudLayout::Calculate(bar, HudLayout::Scale(camera.GetViewportWidth()));
-                questUi.Render(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), hud.hp.top);
-                skillUi.Render(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), false);
-                inventoryUi.RenderQuickSlots(inRenderer, camera.GetViewportWidth(), camera.GetViewportHeight(), bar, false);
-            }
-            return;
-        }
-        if (systemUiPage == SystemUiPage::Closed && !pendingPartyInvitation.has_value())
-        {
-            return;
-        }
-
         const float viewportWidth = camera.GetViewportWidth();
         const float viewportHeight = camera.GetViewportHeight();
-        inRenderer.FillRectangle(0.0f, 0.0f, viewportWidth, viewportHeight,
+        if (inPage==SystemUiPage::Menu) inRenderer.FillRectangle(0.0f, 0.0f, viewportWidth, viewportHeight,
             D2D1::ColorF(0.22f, 0.23f, 0.25f, 0.76f));
 
-        if (systemUiPage == SystemUiPage::Menu)
+        if (inPage == SystemUiPage::Menu)
         {
             inRenderer.DrawText(L"SYSTEM MENU", 52.0f, 34.0f,
                 viewportWidth - 52.0f, 70.0f, D2D1::ColorF(0.96f, 0.92f, 0.82f));
             inRenderer.DrawText(L"ESC  Close", viewportWidth - 190.0f, 38.0f,
                 viewportWidth - 42.0f, 68.0f, D2D1::ColorF(0.72f, 0.74f, 0.78f));
 
+            inRenderer.DrawUiText(L"I 인벤토리   K 스킬   J 퀘스트   P 파티   O 옵션",
+                {52,76,viewportWidth-52,98},D2D1::ColorF(0xB8C5D6),14);
             const SystemMenuLayout layout = CalculateSystemMenuLayout(
                 viewportWidth, viewportHeight, systemMenuEntries.size());
             inRenderer.PushAxisAlignedClip(D2D1::RectF(
@@ -3235,7 +3405,7 @@ namespace ActionRPG
                     handleTop + handleHeight, D2D1::ColorF(0.86f, 0.68f, 0.28f));
             }
         }
-        else if (systemUiPage == SystemUiPage::ExitConfirmation)
+        else if (inPage == SystemUiPage::ExitConfirmation)
         {
             const D2D1_RECT_F dialog = GetExitDialog(viewportWidth, viewportHeight);
             const float middle = (dialog.left + dialog.right) * 0.5f;
@@ -3260,14 +3430,14 @@ namespace ActionRPG
         }
     }
 
-    void GameWorld::RenderPartyInterface(D2DRenderer& inRenderer) const
+    void GameWorld::RenderPartyInterface(D2DRenderer& inRenderer,const SystemUiPage inPage) const
     {
         if (IsDungeonUiRestricted()) return;
-        if (systemUiPage == SystemUiPage::PartyDetails)
+        if (inPage == SystemUiPage::PartyDetails)
         {
             RenderPartyDetails(inRenderer);
         }
-        else if (systemUiPage == SystemUiPage::Party)
+        else if (inPage == SystemUiPage::Party)
         {
             const PartyLayout layout = CalculatePartyLayout(
                 camera.GetViewportWidth(), camera.GetViewportHeight());
@@ -3280,7 +3450,7 @@ namespace ActionRPG
             inRenderer.DrawText(L"내 파티", layout.panel.left + 22.0f, layout.panel.top + 14.0f,
                 layout.panel.right - 160.0f, layout.panel.top + 44.0f,
                 D2D1::ColorF(0.90f, 0.94f, 1.0f));
-            inRenderer.DrawText(L"ESC  메뉴로", layout.panel.right - 150.0f,
+            inRenderer.DrawText(L"ESC  닫기", layout.panel.right - 150.0f,
                 layout.panel.top + 16.0f, layout.panel.right - 20.0f,
                 layout.panel.top + 44.0f, D2D1::ColorF(0.68f, 0.74f, 0.82f));
             inRenderer.DrawText(L"파티 제목", layout.panel.left + 22.0f,
@@ -3348,7 +3518,7 @@ namespace ActionRPG
                 layout.panel.bottom - 42.0f, layout.panel.right - 22.0f,
                 layout.panel.bottom - 12.0f, D2D1::ColorF(0.96f, 0.78f, 0.34f));
         }
-        else if (systemUiPage == SystemUiPage::PartyDirectory)
+        else if (inPage == SystemUiPage::PartyDirectory)
         {
             const PartyLayout layout = CalculatePartyLayout(
                 camera.GetViewportWidth(), camera.GetViewportHeight());
@@ -3361,7 +3531,7 @@ namespace ActionRPG
             inRenderer.DrawText(L"공개 파티 목록", layout.panel.left + 22.0f,
                 layout.panel.top + 14.0f, layout.panel.right - 160.0f,
                 layout.panel.top + 44.0f, D2D1::ColorF(0.90f, 0.94f, 1.0f));
-            inRenderer.DrawText(L"ESC  메뉴로", layout.panel.right - 150.0f,
+            inRenderer.DrawText(L"ESC  닫기", layout.panel.right - 150.0f,
                 layout.panel.top + 16.0f, layout.panel.right - 20.0f,
                 layout.panel.top + 44.0f, D2D1::ColorF(0.68f, 0.74f, 0.82f));
             inRenderer.DrawText(L"공개 파티 " + std::to_wstring(partyDirectoryPage.totalCount)
@@ -3424,7 +3594,7 @@ namespace ActionRPG
                 center - 70.0f, buttonTop + 6.0f, center + 70.0f, buttonTop + 32.0f,
                 D2D1::ColorF(0.94f, 0.94f, 0.92f));
         }
-        else if (systemUiPage == SystemUiPage::PartyCreate)
+        else if (inPage == SystemUiPage::PartyCreate)
         {
             const D2D1_RECT_F dialog = GetPartyCreateDialog(
                 camera.GetViewportWidth(), camera.GetViewportHeight());
@@ -3447,6 +3617,8 @@ namespace ActionRPG
             inRenderer.FillRectangle(dialog.left + 24.0f, dialog.top + 88.0f,
                 dialog.right - 24.0f, dialog.top + 128.0f,
                 D2D1::ColorF(0.12f, 0.16f, 0.23f));
+            if (inPage==systemUiPage && editingPartyTitle)
+                inRenderer.DrawRectangle(dialog.left+24,dialog.top+88,dialog.right-24,dialog.top+128,D2D1::ColorF(0x9CCFE7),2);
             inRenderer.DrawText(newPartyTitleDraft.empty() ? L"제목을 입력하세요"
                 : newPartyTitleDraft, dialog.left + 36.0f, dialog.top + 96.0f,
                 dialog.right - 36.0f, dialog.top + 124.0f,
@@ -3486,7 +3658,7 @@ namespace ActionRPG
                 dialog.top + 202.0f, D2D1::ColorF(0.96f, 0.78f, 0.34f));
         }
 
-        if (pendingPartyInvitation.has_value())
+        if (inPage==SystemUiPage::Invitation && pendingPartyInvitation.has_value())
         {
             const D2D1_RECT_F dialog = GetInvitationDialog(camera.GetViewportWidth());
             const float middle = (dialog.left + dialog.right) * 0.5f;

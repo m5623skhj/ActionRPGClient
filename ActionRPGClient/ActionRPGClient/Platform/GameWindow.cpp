@@ -766,6 +766,11 @@ namespace ActionRPG
         case '4': pendingPressedKeys.push_back(InputKey::Item4); break;
         case '5': pendingPressedKeys.push_back(InputKey::Item5); break;
         case '6': pendingPressedKeys.push_back(InputKey::Item6); break;
+        case 'I': pendingPressedKeys.push_back(InputKey::ToggleInventory); break;
+        case 'K': pendingPressedKeys.push_back(InputKey::ToggleSkills); break;
+        case 'J': pendingPressedKeys.push_back(InputKey::ToggleQuests); break;
+        case 'P': pendingPressedKeys.push_back(InputKey::ToggleParty); break;
+        case 'O': pendingPressedKeys.push_back(InputKey::ToggleOptions); break;
         case VK_RETURN:
             pendingPressedKeys.push_back(InputKey::ConfirmSelection);
             break;

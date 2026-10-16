@@ -143,9 +143,13 @@ namespace ActionRPG
         const float scale=HudLayout::Scale(inWidth);
         const auto input=HudLayout::ScaleInput(inInput,1/scale);
         Constrain(inWidth/scale,inHeight/scale,inHudTop/scale); RebuildRows(inRenderer);
-        hovered=inAllowed && Contains(D2D1::RectF(left,top,left+width,top+height),input.mouseX,input.mouseY);
+        if (!visible && inAllowed && input.WasPressed(InputKey::ConfirmSelection)) visible=true;
+        hovered=visible && inAllowed && Contains(D2D1::RectF(left,top,left+width,top+height),input.mouseX,input.mouseY);
         const bool wasEditing=editing;
         if (!inAllowed || input.cancelDrag) { CancelInput();action.consumeInput=wasEditing;return action; }
+        if (!visible) return action;
+        if (hovered && input.leftMousePressed && input.clickX>=left+width-26 && input.clickY<top+24)
+        { visible=false;CancelInput();action.consumeInput=wasEditing;action.consumePointer=true;return action; }
         if (editing && input.leftMousePressed && !hovered) CancelInput();
         if (!editing && input.WasPressed(InputKey::ConfirmSelection))
         { editing=true;draft.clear();Append(input.textInput); }
@@ -240,6 +244,7 @@ namespace ActionRPG
     }
     void ChatUi::Render(D2DRenderer& inRenderer,float inWidth) const
     {
+        if (!visible) return;
         const D2DRenderer::UiScaleScope uiScale(inRenderer,HudLayout::Scale(inWidth));
         if(hovered || editing || drag!=Drag::None)
         {
@@ -250,6 +255,8 @@ namespace ActionRPG
             inRenderer.FillRectangle(left+width-10,Body().top,left+width-3,Body().bottom,D2D1::ColorF(0.13f,0.15f,0.18f,0.7f));
             inRenderer.FillRectangle(thumb.left,thumb.top,thumb.right,thumb.bottom,D2D1::ColorF(0.7f,0.75f,0.82f,0.8f));
         }
+        if (hovered || editing)
+            DrawChatText(inRenderer,L"X",D2D1::RectF(left+width-25,top+3,left+width-4,top+23),HELP_COLOR,FONT_SIZE);
         const wchar_t* tabs[]={L"전체",L"일반",L"파티"};
         for(int i=0;i<3;++i)
         {

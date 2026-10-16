@@ -22,11 +22,17 @@ namespace ActionRPG
     class QuestUi final
     {
     public:
+        void SetWindowOffset(float inX, float inY) { windowOffset = {inX,inY}; }
+        [[nodiscard]] D2D1_RECT_F GetWindowBounds(float inWidth, float inHeight, float inHudTop) const;
+
         QuestUi(const AssetCatalog& inAssets, D2DRenderer& inRenderer);
         void SetCharacterContext(std::uint64_t inCharacterId);
         void SetConnected(bool inConnected);
         void SetMapContext(std::string inMapId);
         void OpenAll();
+        [[nodiscard]] bool IsTrackerDragging() const { return trackerDragging; }
+        void CancelTrackerDrag() { trackerDragging=false; }
+        [[nodiscard]] bool IsTrackerAt(float inX,float inY,float inWidth,float inHeight,float inHudTop) const;
         void Close();
         void RequestRefresh();
         void ObserveRevision(std::uint64_t inRevision);
@@ -41,6 +47,7 @@ namespace ActionRPG
         void RenderTracker(D2DRenderer& inRenderer, float inWidth, float inHeight, float inHudTop) const;
         void RenderNpcs(D2DRenderer& inRenderer, const Camera& inCamera, float inPlayerDepth, bool inForeground) const;
     private:
+        D2D1_POINT_2F windowOffset{};
         struct Layout
         {
             D2D1_RECT_F panel, list, detail, primary, abandon, track, retry, npcTalk;
@@ -87,6 +94,8 @@ namespace ActionRPG
         std::wstring notice;
         std::uint64_t observedRevision{};
         Vector2 playerPosition{};
+        Vector2 trackerOffset{}, trackerDragOffset{}, trackerDragMouse{};
+        bool trackerHovered{}, trackerDragging{}, trackerHidden{};
         float querySeconds{}, refreshCooldown{}, pendingSeconds{}, actionCooldown{}, detailScroll{}, listScroll{};
         int category{};
         bool connected{}, wantRefresh{true}, refreshProgression{}, confirmAbandon{};

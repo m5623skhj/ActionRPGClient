@@ -59,6 +59,9 @@ namespace ActionRPG
     class InventoryUi final
     {
     public:
+        void SetWindowOffset(float inX, float inY) { windowOffset = {inX,inY}; }
+        [[nodiscard]] D2D1_RECT_F GetWindowBounds(float inWidth, float inHeight) const;
+
         InventoryUi(const AssetCatalog& inAssets, D2DRenderer& inRenderer);
         void SetCharacterContext(std::uint64_t inCharacterId, std::uint32_t inDefinitionId, std::uint32_t inLevel);
         void HandleState(std::string_view inPayload);
@@ -86,6 +89,7 @@ namespace ActionRPG
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inDungeon) const;
 
     private:
+        D2D1_POINT_2F windowOffset{};
         enum class CooldownState { None, Pending, Active };
         struct CooldownView
         {

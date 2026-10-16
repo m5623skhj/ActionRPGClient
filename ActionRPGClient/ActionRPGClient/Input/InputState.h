@@ -19,7 +19,8 @@ namespace ActionRPG
         SkillQ, SkillW, SkillE, SkillR, SkillT, SkillY,
         Item1, Item2, Item3, Item4, Item5, Item6,
         ConfirmSelection,
-        ToggleSystemMenu
+        ToggleSystemMenu,
+        ToggleInventory, ToggleSkills, ToggleQuests, ToggleParty, ToggleOptions
     };
 
     struct TextEditEvent

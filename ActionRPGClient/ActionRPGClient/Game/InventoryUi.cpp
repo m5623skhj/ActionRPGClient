@@ -614,7 +614,8 @@ namespace ActionRPG
         const float width = std::min(BAG_WIDTH + 2 * CELL + GAP + 46.0f, inWidth - 24.0f);
         const float availableHeight = std::max(140.0f, std::min(inHeight - 24.0f, skillBarBounds.top - 20.0f));
         const float height = std::min(5 * CELL + 4 * GAP + 120.0f, availableHeight);
-        const float left = (inWidth - width) * 0.5f, top = 12.0f + (availableHeight - height) * 0.5f;
+        const float left = (inWidth - width) * 0.5f + windowOffset.x;
+        const float top = 12.0f + (availableHeight - height) * 0.5f + windowOffset.y;
         result.panel = D2D1::RectF(left, top, left + width, top + height);
         const float x = left + 12, gridTop = top + 76, bottom = top + height - 30;
         result.viewport = D2D1::RectF(x, gridTop, left + width - 18, bottom);
@@ -641,6 +642,11 @@ namespace ActionRPG
         return result;
     }
 
+    D2D1_RECT_F InventoryUi::GetWindowBounds(float inWidth, float inHeight) const
+    {
+        const float scale = HudLayout::Scale(inWidth);
+        return HudLayout::ScaleRectangle(CalculateLayout(inWidth/scale,inHeight/scale).panel,scale);
+    }
     D2D1_RECT_F InventoryUi::TooltipBounds(const float inWidth, const float inHeight) const
     {
         constexpr float MARGIN = 12.0f;
@@ -852,7 +858,8 @@ namespace ActionRPG
                 if (Contains(layout.viewport, inInput.clickX, inInput.clickY) && Contains(layout.equipment[index], inInput.clickX, inInput.clickY) && state.equipment[index])
                     candidate = &*state.equipment[index];
             for (std::size_t index = 0; index < slots.size(); ++index)
-                if (Contains(rects[index], inInput.clickX, inInput.clickY)) candidate = FindItem(slots[index]);
+                if (!Contains(layout.panel,inInput.clickX,inInput.clickY)
+                    && Contains(rects[index], inInput.clickX, inInput.clickY)) candidate = FindItem(slots[index]);
             if (candidate)
             {
                 if (candidate->useRequiredLevel != 0 && !candidate->equipmentSlot) dragCandidate = candidate->instanceId;
@@ -865,7 +872,8 @@ namespace ActionRPG
             dragging = dragCandidate;
         if (inInput.leftMouseReleased)
         {
-            if (!dragging.empty() && ready && FindItem(dragging))
+            if (!dragging.empty() && ready && FindItem(dragging)
+                && (!inInventory || !Contains(CalculateLayout(inWidth,inHeight).panel,inInput.mouseX,inInput.mouseY)))
                 for (std::size_t index = 0; index < slots.size(); ++index)
                     if (Contains(rects[index], inInput.mouseX, inInput.mouseY))
                     {
@@ -876,14 +884,15 @@ namespace ActionRPG
                     }
             dragCandidate.clear(); dragging.clear();
         }
-        if (inInput.rightMousePressed)
+        if (inInput.rightMousePressed && (!inInventory
+            || !Contains(CalculateLayout(inWidth,inHeight).panel,inInput.rightClickX,inInput.rightClickY)))
             for (std::size_t index = 0; index < slots.size(); ++index)
                 if (Contains(rects[index], inInput.rightClickX, inInput.rightClickY))
                 {
                     if (inInput.shiftHeld) { slots[index].clear(); return {}; }
                     return useSlot(index);
                 }
-        if (!inInventory && ready && connected)
+        if (ready && connected)
             for (std::size_t index = 0; index < slots.size(); ++index)
                 if (inInput.WasPressed(static_cast<InputKey>(static_cast<int>(InputKey::Item1) + index)))
                     return useSlot(index);
@@ -1025,8 +1034,8 @@ namespace ActionRPG
         inRenderer.DrawUiText(inDungeon ? L"인벤토리 · 전투 진행 중" : L"인벤토리",
             D2D1::RectF(layout.panel.left + 12.0f, layout.panel.top + 8.0f, layout.panel.right - 120.0f, layout.panel.top + 38.0f),
             D2D1::ColorF(0.96f, 0.91f, 0.80f), 16.0f);
-        inRenderer.DrawUiText(L"ESC 메뉴로", D2D1::RectF(layout.panel.right - 116.0f, layout.panel.top + 10.0f,
-            layout.panel.right - 12.0f, layout.panel.top + 36.0f), D2D1::ColorF(0.80f, 0.82f, 0.87f), 13.0f, false, true);
+        inRenderer.DrawUiText(L"I · ESC 닫기", D2D1::RectF(layout.panel.right - 116.0f, layout.panel.top + 10.0f,
+            layout.panel.right - 36.0f, layout.panel.top + 36.0f), D2D1::ColorF(0.80f, 0.82f, 0.87f), 13.0f, false, true);
         for (std::size_t index = 0; index < layout.tabs.size(); ++index)
         {
             Button(inRenderer, layout.tabs[index], CATEGORY_NAMES[index], true);

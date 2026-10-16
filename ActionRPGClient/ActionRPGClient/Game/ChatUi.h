@@ -37,6 +37,7 @@ namespace ActionRPG
             ChatChannel inChannel, std::wstring inName, std::wstring inText, bool inSelf, bool inShowBubble);
         void Notice(std::wstring inText);
         void CancelInput();
+        [[nodiscard]] bool IsDragging() const { return drag!=Drag::None; }
         void ClearBubbles() { bubbles.clear(); }
         [[nodiscard]] bool IsEditing() const { return editing; }
         [[nodiscard]] Vector2 GetInputPosition() const;
@@ -70,6 +71,6 @@ namespace ActionRPG
         Filter filter{Filter::All};
         ChatChannel selectedChannel{ChatChannel::General};
         Drag drag{Drag::None};
-        bool editing{}, hovered{}, initialized{}, dirty = true, dungeon{}, hasParty{}, connected{};
+        bool visible{true}, editing{}, hovered{}, initialized{}, dirty = true, dungeon{}, hasParty{}, connected{};
     };
 }

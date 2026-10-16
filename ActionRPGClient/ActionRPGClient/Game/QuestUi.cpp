@@ -161,11 +161,13 @@ namespace ActionRPG
         queryId.clear(); pendingAction.clear(); pendingJson.clear(); outgoingJson.clear(); notice.clear();
         querySeconds = refreshCooldown = pendingSeconds = actionCooldown = detailScroll = listScroll = 0;
         wantRefresh = true; confirmAbandon = refreshProgression = false; observedRevision = 0; category = 0;
+        trackerDragging=trackerHovered=trackerHidden=false;
     }
     void QuestUi::SetConnected(bool inConnected)
     {
         if (connected && !inConnected)
         {
+            trackerDragging=trackerHovered=false;
             state.Invalidate(); queryId.clear(); outgoingJson.clear(); wantRefresh = true;
             notice = pendingJson.empty() ? L"연결을 확인해 주세요." : L"연결이 끊겨 요청 결과를 확인하지 못했습니다.";
         }
@@ -173,10 +175,10 @@ namespace ActionRPG
     }
     void QuestUi::SetMapContext(std::string inMapId)
     {
-        if (mapId != inMapId) { mapId = std::move(inMapId); npcId.clear(); confirmAbandon = false; state.Invalidate(); RequestRefresh(); }
+        if (mapId != inMapId) { trackerDragging=trackerHovered=false; mapId = std::move(inMapId); npcId.clear(); confirmAbandon = false; state.Invalidate(); RequestRefresh(); }
     }
-    void QuestUi::OpenAll() { npcId.clear(); confirmAbandon = false; state.Invalidate(); RequestRefresh(); }
-    void QuestUi::Close() { confirmAbandon = false; hoveredNpcId.clear(); }
+    void QuestUi::OpenAll() { trackerHidden = false; npcId.clear(); confirmAbandon = false; state.Invalidate(); RequestRefresh(); }
+    void QuestUi::Close() { trackerDragging=false; confirmAbandon = false; hoveredNpcId.clear(); }
     void QuestUi::RequestRefresh() { wantRefresh = true; }
     void QuestUi::ObserveRevision(std::uint64_t inRevision)
     {
@@ -278,7 +280,8 @@ namespace ActionRPG
     QuestUi::Layout QuestUi::CalculateLayout(float width, float height, float hudTop) const
     {
         const float panelWidth = std::min(880.0f, width - 32), panelHeight = std::min(500.0f, hudTop - 36);
-        const float left = (width-panelWidth)/2, top = std::max(16.0f, std::min(60.0f, (height-panelHeight)/2));
+        const float left = (width-panelWidth)/2 + windowOffset.x;
+        const float top = std::max(16.0f, std::min(60.0f, (height-panelHeight)/2)) + windowOffset.y;
         Layout l;
         l.panel = {left,top,left+panelWidth,top+panelHeight};
         for (int i = 0; i < 3; ++i) l.tabs[i] = {left+16+i*144.0f,top+42,left+152+i*144.0f,top+72};
@@ -290,15 +293,31 @@ namespace ActionRPG
         l.retry = l.primary; l.npcTalk = {l.panel.right-126,top+42,l.panel.right-16,top+72};
         return l;
     }
-    D2D1_RECT_F QuestUi::TrackerBounds(float width, float, float hudTop) const
-    { return {width-320,128,width-16,std::min(396.0f,hudTop-172)}; }
+    D2D1_RECT_F QuestUi::GetWindowBounds(float inWidth, float inHeight, float inHudTop) const
+    {
+        const float scale = HudLayout::Scale(inWidth);
+        return HudLayout::ScaleRectangle(CalculateLayout(inWidth/scale,inHeight/scale,inHudTop/scale).panel,scale);
+    }
+    D2D1_RECT_F QuestUi::TrackerBounds(float width, float height, float hudTop) const
+    {
+        const float panelHeight = std::max(100.0f,std::min(396.0f,hudTop-172)-128);
+        const float left = std::clamp(width-320+trackerOffset.x,8.0f,std::max(8.0f,width-312));
+        const float top = std::clamp(128+trackerOffset.y,8.0f,std::max(8.0f,height-panelHeight-8));
+        return {left,top,left+304,top+panelHeight};
+    }
+    bool QuestUi::IsTrackerAt(float inX,float inY,float inWidth,float inHeight,float inHudTop) const
+    {
+        if (trackerHidden || Tracked().empty()) return false;
+        const float scale=HudLayout::Scale(inWidth);
+        return Contains(TrackerBounds(inWidth/scale,inHeight/scale,inHudTop/scale),inX/scale,inY/scale);
+    }
     void QuestUi::BeginAction(std::string inAction, const QuestEntryView* q, std::vector<std::string> inTracked)
     {
         if (!CanAct()) return;
         Json body{{"requestId",CharacterInventoryJson::NewRequestId()}, {"expectedRevision",std::to_string(state.Get().revision)}, {"action",inAction}};
         if (inAction == "Talk")
         { if (!NpcInRange(npcId)) { notice = Reason("NotInRange"); return; } body["npcId"] = npcId; }
-        else if (inAction == "Track") body["trackedQuestIds"] = std::move(inTracked);
+        else if (inAction == "Track") { trackerHidden=false;body["trackedQuestIds"] = std::move(inTracked); }
         else
         {
             if (!q) return;
@@ -450,16 +469,44 @@ namespace ActionRPG
         const auto input = HudLayout::ScaleInput(rawInput,1.0f/scale);
         width /= scale; height /= scale; hudTop /= scale;
         const auto trackerBounds = TrackerBounds(width,height,hudTop);
-        const bool hasTracker = trackerVisible && !Tracked().empty();
-        if (!visible && worldInteractive && connected && rawInput.mouseY < worldHudTop
+        const bool hasTracker = trackerVisible && !trackerHidden && !Tracked().empty();
+        trackerHovered = hasTracker && Contains(trackerBounds,input.mouseX,input.mouseY);
+        if (rawInput.cancelDrag || !hasTracker) trackerDragging = false;
+        if (trackerDragging)
+        {
+            if (input.leftMouseDown)
+            {
+                trackerOffset = {trackerDragOffset.x+input.mouseX-trackerDragMouse.x,
+                    trackerDragOffset.y+input.mouseY-trackerDragMouse.y};
+                result.consumePointer = true;
+            }
+            else trackerDragging = false;
+        }
+        if (trackerHovered && input.leftMousePressed && input.clickY < trackerBounds.top+28)
+        {
+            result.consumePointer = true;
+            if (Contains({trackerBounds.right-24,trackerBounds.top+2,trackerBounds.right-2,trackerBounds.top+25},input.clickX,input.clickY))
+            { trackerHidden = true; trackerDragging = false; }
+            else if (input.clickY < trackerBounds.top+28)
+            {
+                trackerDragging = true; trackerDragMouse = {input.mouseX,input.mouseY};
+                trackerOffset={};
+                const auto origin=TrackerBounds(width,height,hudTop);
+                trackerOffset={trackerBounds.left-origin.left,trackerBounds.top-origin.top};
+                trackerDragOffset=trackerOffset;
+            }
+        }
+        if (worldInteractive && connected && rawInput.mouseY < worldHudTop
             && !(hasTracker && Contains(trackerBounds,input.mouseX,input.mouseY)))
             if (const auto npc = PickNpc(camera,rawInput.mouseX,rawInput.mouseY)) hoveredNpcId = npc->id;
+        const auto panel=CalculateLayout(width,height,hudTop).panel;
+        const bool pointerInPanel=visible && Contains(panel,input.mouseX,input.mouseY);
         if (visible)
         {
             const auto l = CalculateLayout(width,height,hudTop);
             if (input.mouseWheelDelta && Contains(l.list,input.mouseX,input.mouseY)) listScroll -= input.mouseWheelDelta/120.0f*52;
             if (input.mouseWheelDelta && Contains(l.detail,input.mouseX,input.mouseY)) detailScroll -= input.mouseWheelDelta/120.0f*42;
-            if (input.leftMousePressed)
+            if (input.leftMousePressed && Contains(l.panel,input.clickX,input.clickY))
             {
                 result.consumePointer = true;
                 for (int i=0;i<3;++i) if (Contains(l.tabs[i],input.clickX,input.clickY) && !confirmAbandon)
@@ -522,9 +569,9 @@ namespace ActionRPG
                 }
             }
         }
-        else if ((worldInteractive || trackerVisible) && input.leftMousePressed)
+        if ((worldInteractive || hasTracker) && input.leftMousePressed && !trackerDragging && !pointerInPanel)
         {
-            if (worldInteractive && connected && rawInput.clickY < worldHudTop
+            if (!result.consumePointer && worldInteractive && connected && rawInput.clickY < worldHudTop
                 && !(hasTracker && Contains(trackerBounds,input.clickX,input.clickY)))
                 if (const auto npc = PickNpc(camera,rawInput.clickX,rawInput.clickY))
                 {
@@ -576,7 +623,7 @@ namespace ActionRPG
         std::wstring title=L"퀘스트";
         if(!npcId.empty()) for(const auto& npc:state.Get().npcs) if(npc.id==npcId) title+=L" · "+Wide(npc.name);
         draw.DrawUiText(title,{l.panel.left+16,l.panel.top+9,l.panel.right-190,l.panel.top+36},gold,20);
-        draw.DrawUiText(L"ESC · 닫기",{l.panel.right-174,l.panel.top+10,l.panel.right-16,l.panel.top+34},muted,13,false,true);
+        draw.DrawUiText(L"ESC · 닫기",{l.panel.right-174,l.panel.top+10,l.panel.right-36,l.panel.top+34},muted,13,false,true);
         for(int i=0;i<3;++i)
         {
             button(l.tabs[i],CATEGORY_NAMES[i],!confirmAbandon);
@@ -671,12 +718,16 @@ namespace ActionRPG
     void QuestUi::RenderTracker(D2DRenderer& draw,float width,float height,float hudTop) const
     {
         const auto quests=Tracked();
-        if(quests.empty()) return;
+        if(quests.empty() || trackerHidden) return;
         const float scale=HudLayout::Scale(width);
         const D2DRenderer::UiScaleScope scope(draw,scale);
         const auto rect=TrackerBounds(width/scale,height/scale,hudTop/scale);
-        draw.FillRectangle(rect.left,rect.top,rect.right,rect.bottom,D2D1::ColorF(0.025f,0.04f,0.06f,0.84f));
-        draw.DrawUiText(state.IsReady()?L"목표 추적":L"목표 추적 · 상태 확인 중",{rect.left+10,rect.top+4,rect.right-10,rect.top+25},D2D1::ColorF(0xEACB7C),14);
+        if (trackerHovered || trackerDragging)
+        {
+            draw.FillRectangle(rect.left,rect.top,rect.right,rect.bottom,D2D1::ColorF(0.025f,0.04f,0.06f,0.58f));
+            draw.DrawUiText(L"X",{rect.right-24,rect.top+2,rect.right-2,rect.top+25},D2D1::ColorF(0xEAEFF5),14,false,true);
+        }
+        draw.DrawUiText(state.IsReady()?L"목표 추적":L"목표 추적 · 상태 확인 중",{rect.left+10,rect.top+4,rect.right-28,rect.top+25},D2D1::ColorF(0xEACB7C),14);
         draw.PushAxisAlignedClip(rect);
         float y=rect.top+28;
         for(const auto q:quests)

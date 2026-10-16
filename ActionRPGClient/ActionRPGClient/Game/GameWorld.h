@@ -22,6 +22,7 @@
 #include <d2d1_1.h>
 #include <wrl/client.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <chrono>
@@ -106,7 +107,9 @@ namespace ActionRPG
             Skills,
             Inventory,
             Quests,
-            GameOptions
+            GameOptions,
+            Invitation, PartyNotice, KickedNotice, DungeonSelection, DungeonCompletion,
+            Count
         };
 
         enum class SystemMenuAction
@@ -170,11 +173,25 @@ namespace ActionRPG
         [[nodiscard]] static bool IsPartyUiPage(SystemUiPage inPage) noexcept
         { return inPage==SystemUiPage::Party || inPage==SystemUiPage::PartyDirectory || inPage==SystemUiPage::PartyCreate || inPage==SystemUiPage::PartyDetails; }
         void SetSystemUiPage(SystemUiPage inPage);
+        [[nodiscard]] bool IsUiPageOpen(SystemUiPage inPage) const;
+        [[nodiscard]] SystemUiPage UiWindowGroup(SystemUiPage inPage) const;
+        [[nodiscard]] D2D1_RECT_F UiWindowBounds(SystemUiPage inPage) const;
+        [[nodiscard]] Vector2 UiWindowOffset(SystemUiPage inPage) const;
+        [[nodiscard]] SystemUiPage TopUiWindowAt(float inX, float inY) const;
+        [[nodiscard]] InputState UiWindowInput(SystemUiPage inPage, const InputState& inInput, bool inHud = false) const;
+        [[nodiscard]] bool IsUiTextEditing() const;
+        void FocusUiWindow(SystemUiPage inPage);
+        void CloseUiWindow(SystemUiPage inPage);
+        void SyncUiWindows();
+        void UpdateUiWindows(const InputState& inInput);
+        void UpdateUiWindowOffsets();
+        void RenderUiWindows(D2DRenderer& inRenderer) const;
+        void RenderUiWindowChrome(D2DRenderer& inRenderer, SystemUiPage inPage) const;
         void RequestPartyDirectoryPage(std::uint32_t inPage);
         void RequestSelectedPartyDetail();
         void ResetPartyRequestUi();
         void UpdatePartyNotifications(const InputState& inInput);
-        void RenderPartyNotifications(D2DRenderer& inRenderer) const;
+        void RenderPartyNotifications(D2DRenderer& inRenderer, SystemUiPage inPage) const;
         void RenderPartyDetails(D2DRenderer& inRenderer) const;
         [[nodiscard]] bool CanRequestPartyJoin() const noexcept;
         [[nodiscard]] bool IsPartyJoinNoticeVisible() const noexcept;
@@ -190,8 +207,8 @@ namespace ActionRPG
         void SendMovementInput(const InputState& inInput, float inDeltaSeconds);
         void RenderTransitionZones(D2DRenderer& inRenderer) const;
         void RenderDungeonSelection(D2DRenderer& inRenderer) const;
-        void RenderSystemInterface(D2DRenderer& inRenderer) const;
-        void RenderPartyInterface(D2DRenderer& inRenderer) const;
+        void RenderSystemInterface(D2DRenderer& inRenderer, SystemUiPage inPage) const;
+        void RenderPartyInterface(D2DRenderer& inRenderer, SystemUiPage inPage) const;
         [[nodiscard]] bool IsPartyLeader() const noexcept;
 
         SessionMenuAction pendingSessionAction{ SessionMenuAction::None };
@@ -294,6 +311,12 @@ namespace ActionRPG
         std::uint32_t lastDungeonStateSequence{};
         std::vector<SystemMenuEntry> systemMenuEntries;
         SystemUiPage systemUiPage = SystemUiPage::Closed;
+        std::vector<SystemUiPage> uiWindows;
+        std::array<Vector2,static_cast<std::size_t>(SystemUiPage::Count)> uiWindowOffsets{};
+        SystemUiPage pointerUiPage{SystemUiPage::Closed}, draggedUiPage{SystemUiPage::Closed};
+        Vector2 uiDragMouse{}, uiDragOffset{};
+        bool uiChromeConsumed{}, completionWindowHidden{}, invitationHidden{};
+        std::uint64_t hiddenPartyRequestId{};
         float systemMenuScrollOffset{};
         std::size_t selectedOptionsRow{};
         std::uint32_t screenWidthDraft = 1280;

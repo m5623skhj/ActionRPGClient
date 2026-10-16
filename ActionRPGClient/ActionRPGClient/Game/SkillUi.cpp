@@ -202,6 +202,8 @@ namespace ActionRPG
         const float margin = Number(window,"margin"), available = std::max(0.0f,result.bar.top-Number(window,"barGap")-margin);
         const float panelWidth = std::min(Number(window,"width"),std::max(0.0f,width-2*margin)), panelHeight = std::min(Number(window,"height"),available);
         result.panel = D2D1::RectF((width-panelWidth)/2,margin+(available-panelHeight)/2,(width+panelWidth)/2,margin+(available+panelHeight)/2);
+        result.panel.left += windowOffset.x; result.panel.right += windowOffset.x;
+        result.panel.top += windowOffset.y; result.panel.bottom += windowOffset.y;
         const float inner = Number(window,"padding"), contentGap = Number(window,"contentGap");
         const float left = result.panel.left+inner,right = result.panel.right-inner;
         const float top = result.panel.top+inner+Number(window,"headerHeight")+contentGap;
@@ -218,6 +220,11 @@ namespace ActionRPG
         }
         result.learnButton = D2D1::RectF(result.detail.left,result.detail.bottom-Number(window,"learnButtonHeight"),result.detail.right,result.detail.bottom);
         return result;
+    }
+    D2D1_RECT_F SkillUi::GetWindowBounds(float inWidth, float inHeight) const
+    {
+        const float scale = HudLayout::Scale(inWidth);
+        return HudLayout::ScaleRectangle(CalculateLayout(inWidth/scale,inHeight/scale).panel,scale);
     }
     D2D1_RECT_F SkillUi::NodeRectangle(const Layout& layout,const std::string& id) const
     {
@@ -340,7 +347,7 @@ namespace ActionRPG
         maxX=std::max(0.0f,maxX-(layout.tree.right-layout.tree.left));
         maxY=std::max(0.0f,maxY-(layout.tree.bottom-layout.tree.top));
         treeScrollX=std::clamp(treeScrollX,0.0f,maxX); treeScrollY=std::clamp(treeScrollY,0.0f,maxY);
-        if (input.rightMousePressed) for (std::size_t i=0;i<slots.size();++i)
+        if (input.rightMousePressed && (!editing || !Contains(layout.panel,input.rightClickX,input.rightClickY))) for (std::size_t i=0;i<slots.size();++i)
             if (Contains(layout.slots[i],input.rightClickX,input.rightClickY)) Assign(i,"");
         if (!editing) return action;
         if (input.leftMousePressed)
@@ -351,7 +358,8 @@ namespace ActionRPG
             if ((!layout.stacked || !detailTabSelected) && Contains(layout.tree,input.clickX,input.clickY))
                 for (const auto& id:OrderedSkills()) if (Contains(NodeRectangle(layout,id),input.clickX,input.clickY))
                 { selected=id; detailScroll=0; if (progression.GetSkillLevel(id)>0) dragCandidate=id; break; }
-            for (std::size_t i=0;i<slots.size();++i) if (Contains(layout.slots[i],input.clickX,input.clickY)) dragCandidate=slots[i];
+            if (!Contains(layout.panel,input.clickX,input.clickY))
+                for (std::size_t i=0;i<slots.size();++i) if (Contains(layout.slots[i],input.clickX,input.clickY)) dragCandidate=slots[i];
             dragStartX=input.clickX; dragStartY=input.clickY;
             if ((!layout.stacked || detailTabSelected) && !selected.empty() && Contains(layout.learnButton,input.clickX,input.clickY)
                 && learningAllowed && connected && !learnPending && trees.CanLearn(catalog,progression,characterId,selected,progression.GetSkillLevel(selected))=="Succeeded")
@@ -360,7 +368,7 @@ namespace ActionRPG
         if (!dragCandidate.empty() && (input.leftMouseDown || input.leftMouseReleased) && std::hypot(input.mouseX-dragStartX,input.mouseY-dragStartY)>=Number(settings.at("layout"),"dragThreshold")) dragging=dragCandidate;
         if (input.leftMouseReleased)
         {
-            if (!dragging.empty()) for (std::size_t i=0;i<slots.size();++i) if (Contains(layout.slots[i],input.mouseX,input.mouseY)) { Assign(i,dragging); break; }
+            if (!dragging.empty() && !Contains(layout.panel,input.mouseX,input.mouseY)) for (std::size_t i=0;i<slots.size();++i) if (Contains(layout.slots[i],input.mouseX,input.mouseY)) { Assign(i,dragging); break; }
             CancelDrag(); // Out-of-window/out-of-slot release never changes the original mapping.
         }
         const float wheel=static_cast<float>(input.mouseWheelDelta)/WHEEL_DELTA;
@@ -392,7 +400,7 @@ namespace ActionRPG
             if (catalog.skills.contains(id)) draw.DrawUiText(Wide(catalog.skills.at(id).at("name").get<std::string>()),rect,Color("text"),Number(settings.at("fonts"),"small"),true,true);
         }
     }
-    void SkillUi::Render(D2DRenderer& draw,float width,float height,bool editing) const
+    void SkillUi::Render(D2DRenderer& draw,float width,float height,bool editing,bool inShowBar) const
     {
         const float scale = HudLayout::Scale(width);
         width/=scale; height/=scale;
@@ -404,11 +412,10 @@ namespace ActionRPG
         const float bodyFont=Number(settings.at("fonts"),"body"),smallFont=Number(settings.at("fonts"),"small");
         if (editing)
         {
-            draw.FillRectangle(0,0,width,height,Color("panel"));
             draw.FillRectangle(layout.panel.left,layout.panel.top,layout.panel.right,layout.panel.bottom,Color("panel"));
             draw.DrawRectangle(layout.panel.left,layout.panel.top,layout.panel.right,layout.panel.bottom,Color("border"));
             const float padding=Number(window,"padding");
-            draw.DrawUiText(L"스킬  |  캐릭터 Lv."+std::to_wstring(progression.level)+L"  SP "+std::to_wstring(progression.skillPoints)+L"  | ESC 메뉴로",Offset(layout.panel,padding,padding,layout.panel.right-layout.panel.left-2*padding,Number(window,"headerHeight")),Color("text"),Number(settings.at("fonts"),"title"));
+            draw.DrawUiText(L"스킬  |  캐릭터 Lv."+std::to_wstring(progression.level)+L"  SP "+std::to_wstring(progression.skillPoints)+L"  | K · ESC 닫기",Offset(layout.panel,padding,padding,layout.panel.right-layout.panel.left-2*padding-30,Number(window,"headerHeight")),Color("text"),Number(settings.at("fonts"),"title"));
             if (layout.stacked)
             {
                 draw.DrawUiText(L"스킬 트리",layout.treeTab,Color(detailTabSelected ? "border":"selected"),bodyFont,false,true);
@@ -461,6 +468,7 @@ namespace ActionRPG
             }
             draw.DrawUiText((learningAllowed ? status:L"던전: 조회·단축키 등록만 가능")+L"  | 휠: 위아래, Shift+휠: 좌우",D2D1::RectF(layout.panel.left+padding,layout.panel.bottom-padding-Number(window,"footerHeight"),layout.panel.right-padding,layout.panel.bottom-padding),Color("text"),smallFont,true);
         }
+        if (!inShowBar) return;
         draw.FillRectangle(layout.bar.left,layout.bar.top,layout.bar.right,layout.bar.bottom,D2D1::ColorF(0x100D09));
         draw.DrawRectangle(layout.bar.left,layout.bar.top,layout.bar.right,layout.bar.bottom,D2D1::ColorF(0x41341F));
         static constexpr wchar_t KEYS[]=L"ASDFGHQWERTY";

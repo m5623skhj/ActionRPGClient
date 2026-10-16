@@ -24,6 +24,9 @@ namespace ActionRPG
     class SkillUi final
     {
     public:
+        void SetWindowOffset(float inX, float inY) { windowOffset = {inX,inY}; }
+        [[nodiscard]] D2D1_RECT_F GetWindowBounds(float inWidth, float inHeight) const;
+
         SkillUi(const AssetCatalog& inAssets, D2DRenderer& inRenderer);
         void ApplyState(std::string_view inPayload, std::uint32_t inCharacterId);
         void ApplyCombatState(const CombatPlayerState& inState);
@@ -46,7 +49,7 @@ namespace ActionRPG
         [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> GetMinimumClientSize() const;
         [[nodiscard]] SkillUiAction Update(float inDeltaSeconds, const InputState& inInput,
             float inWidth, float inHeight, bool inEditing, bool inBarVisible);
-        void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inEditing) const;
+        void Render(D2DRenderer& inRenderer, float inWidth, float inHeight, bool inEditing, bool inShowBar = true) const;
         [[nodiscard]] D2D1_RECT_F GetHotbarBounds(float inWidth, float inHeight) const
         {
             const float scale = HudLayout::Scale(inWidth);
@@ -54,6 +57,7 @@ namespace ActionRPG
         }
 
     private:
+        D2D1_POINT_2F windowOffset{};
         struct Layout
         {
             bool compact{}, stacked{};
