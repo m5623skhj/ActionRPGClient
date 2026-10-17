@@ -8,6 +8,8 @@
 #include <optional>
 #include <unordered_map>
 #include <nlohmann/json.hpp>
+#include <d2d1_1.h>
+#include <wrl/client.h>
 
 namespace ActionRPG
 {
@@ -20,7 +22,7 @@ namespace ActionRPG
     class LoginFlow final
     {
     public:
-        LoginFlow(const AssetCatalog& inAssets, TownClient& inTown, DungeonClient& inDungeon);
+        LoginFlow(const AssetCatalog& inAssets, D2DRenderer& inRenderer, TownClient& inTown, DungeonClient& inDungeon);
         ~LoginFlow();
         void Update(const InputState& inInput, float inWidth, float inHeight);
         void Render(D2DRenderer& inRenderer, float inWidth, float inHeight) const;
@@ -29,6 +31,17 @@ namespace ActionRPG
         [[nodiscard]] bool ConsumeExitRequested() noexcept;
     private:
         enum class State { Login, GoogleLogin, ServerSelection, Ticket, Town, CharacterSelection, CharacterCreate, Playing, Leaving };
+        struct CreationOption
+        {
+            std::uint32_t definitionId{};
+            std::wstring name, description;
+            Microsoft::WRL::ComPtr<ID2D1Bitmap1> illustration;
+        };
+        void LoadCreationOptions(const AssetCatalog& inAssets, D2DRenderer& inRenderer);
+        [[nodiscard]] const CreationOption* GetCreationOption(std::uint32_t inDefinitionId) const;
+        void RenderCharacterCreation(D2DRenderer& inRenderer, float inWidth, float inHeight) const;
+        std::vector<CreationOption> creationOptions;
+        std::wstring creationConfigurationError;
         void StartLogin();
         void EnterSelectedTown();
         void CancelPending();

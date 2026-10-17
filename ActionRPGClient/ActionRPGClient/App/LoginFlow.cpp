@@ -6,6 +6,9 @@
 #include "Network/CharacterInventoryJson.h"
 #include <unordered_set>
 #include "Resources/AssetCatalog.h"
+#include "Core/IniDocument.h"
+#include <charconv>
+#include <stdexcept>
 #include <d2d1_1helper.h>
 #include <algorithm>
 #include <utility>
@@ -26,23 +29,91 @@ namespace
                 && inInput.clickY >= inRect.top && inInput.clickY <= inRect.bottom;
         }
     };
+    // Logical viewport coordinates are shared by drawing and pointer hit tests.
+    struct CreationLayout
+    {
+        float scale, left, top;
+        explicit CreationLayout(float inWidth, float inHeight)
+            : scale(std::min(inWidth / 1280.0f, inHeight / 720.0f)),
+              left((inWidth - 960.0f * scale) * 0.5f), top((inHeight - 600.0f * scale) * 0.5f) {}
+        D2D1_RECT_F Rect(float inX, float inY, float inWidth, float inHeight) const
+        { return D2D1::RectF(left + inX * scale, top + inY * scale,
+            left + (inX + inWidth) * scale, top + (inY + inHeight) * scale); }
+        D2D1_RECT_F NameField() const { return Rect(32,132,480,42); }
+        D2D1_RECT_F Card(std::size_t inIndex) const { return Rect(32+248*static_cast<float>(inIndex),226,232,64); }
+        D2D1_RECT_F CreateButton() const { return Rect(32,480,224,48); }
+        D2D1_RECT_F ListButton() const { return Rect(280,480,232,48); }
+        D2D1_RECT_F Illustration() const { return Rect(576,48,320,480); }
+        bool Click(const ActionRPG::InputState& inInput, const D2D1_RECT_F& inRect) const
+        {
+            return inInput.leftMousePressed && inInput.clickX >= inRect.left && inInput.clickX <= inRect.right
+                && inInput.clickY >= inRect.top && inInput.clickY <= inRect.bottom;
+        }
+    };
     void Button(ActionRPG::D2DRenderer& inRenderer, const D2D1_RECT_F& inRect,
-        std::wstring_view inLabel, bool inEnabled = true, bool inSelected = false)
+        std::wstring_view inLabel, bool inEnabled = true, bool inSelected = false, float inScale = 1.0f)
     {
         const auto background = inEnabled ? D2D1::ColorF(inSelected ? 0.16f : 0.10f, 0.23f, 0.32f)
             : D2D1::ColorF(0.10f, 0.11f, 0.13f);
         inRenderer.FillRectangle(inRect.left, inRect.top, inRect.right, inRect.bottom, background);
         inRenderer.DrawUiText(inLabel, inRect, D2D1::ColorF(inEnabled ? 0.95f : 0.45f, 0.95f, 0.95f),
-            16.0f, false, true);
+            16.0f * inScale, false, true);
     }
 }
 
 namespace ActionRPG
 {
-    LoginFlow::LoginFlow(const AssetCatalog& inAssets, TownClient& inTown, DungeonClient& inDungeon)
+    LoginFlow::LoginFlow(const AssetCatalog& inAssets, D2DRenderer& inRenderer, TownClient& inTown, DungeonClient& inDungeon)
         : settings(AuthSettings::Load(inAssets)), town(inTown), dungeon(inDungeon),
           message(settings.loginConfigurationError.empty() ? L"Google 계정으로 로그인해 주세요."
-              : settings.loginConfigurationError), playerName(settings.playerName), characterId(settings.characterId) {}
+              : settings.loginConfigurationError), playerName(settings.playerName), characterId(settings.characterId)
+    {
+        LoadCreationOptions(inAssets,inRenderer);
+    }
+    // Creation metadata stays client-local. A missing portrait must not block character creation.
+    void LoginFlow::LoadCreationOptions(const AssetCatalog& inAssets, D2DRenderer& inRenderer)
+    {
+        try
+        {
+            const IniDocument definitions(inAssets.GetDataPath("Characters"));
+            for (const auto& section : definitions.GetSectionNames())
+            {
+                if (definitions.GetOptionalValue(section,"creation_enabled","false")!="true") continue;
+                const std::string_view name=section;
+                if (!name.starts_with("Character")) throw std::runtime_error("Invalid creation character section.");
+                const auto suffix=name.substr(9);
+                CreationOption option;
+                const auto parsed=std::from_chars(suffix.data(),suffix.data()+suffix.size(),option.definitionId);
+                if (parsed.ec!=std::errc{} || parsed.ptr!=suffix.data()+suffix.size()
+                    || (option.definitionId!=1 && option.definitionId!=4) || creationOptions.size()>=2
+                    || GetCreationOption(option.definitionId)) throw std::runtime_error("Unsupported creation character.");
+                option.name=AuthUtf8ToWide(definitions.GetValue(section,"display_name"));
+                option.description=AuthUtf8ToWide(definitions.GetValue(section,"description"));
+                if (option.name.empty() || option.name.size()>48 || option.description.empty() || option.description.size()>256)
+                    throw std::runtime_error("Invalid creation description.");
+                try
+                {
+                    const auto image=definitions.GetOptionalValue(section,"creation_illustration");
+                    if (!image.empty()) option.illustration=inRenderer.LoadBitmap(inAssets.GetImagePath(image));
+                }
+                catch (const std::exception&) { option.illustration.Reset(); }
+                creationOptions.push_back(std::move(option));
+            }
+            if (creationOptions.empty()) throw std::runtime_error("No creation characters configured.");
+        }
+        catch (const std::exception&)
+        {
+            creationOptions.clear();
+            creationConfigurationError=L"캐릭터 생성 설정을 확인해 주세요. 목록으로 돌아갈 수 있습니다.";
+        }
+    }
+    const LoginFlow::CreationOption* LoginFlow::GetCreationOption(const std::uint32_t inDefinitionId) const
+    {
+        const auto found=std::find_if(creationOptions.begin(),creationOptions.end(),
+            [inDefinitionId](const auto& option){return option.definitionId==inDefinitionId;});
+        return found==creationOptions.end() ? nullptr:&*found;
+    }
+
     LoginFlow::~LoginFlow()
     {
         TraceShutdown("ActionRPGClient: requesting network shutdown\n");
@@ -211,6 +282,11 @@ namespace ActionRPG
     void LoginFlow::CreateCharacter()
     {
         if (characterRequest != CharacterRequest::None) return;
+        if (!GetCreationOption(characterId))
+        {
+            message=creationConfigurationError.empty() ? L"생성할 직업을 선택해 주세요.":creationConfigurationError;
+            return;
+        }
         try
         {
             const auto name = AuthWideToUtf8(playerName);
@@ -467,8 +543,8 @@ namespace ActionRPG
             }
             if (state == State::CharacterCreate)
             {
-                const auto nameRect = layout.Rect(16, 100, 350, 36);
-                if (inInput.leftMousePressed) nameFocused = layout.Click(inInput, nameRect);
+                const CreationLayout creationLayout(inWidth,inHeight);
+                if (inInput.leftMousePressed) nameFocused = creationLayout.Click(inInput,creationLayout.NameField());
                 if (nameFocused)
                     for (const auto value : inInput.textInput)
                     {
@@ -481,10 +557,10 @@ namespace ActionRPG
                         }
                         else if (value >= 32 && value != 127 && playerName.size() < 32) playerName += value;
                     }
-                if (layout.Click(inInput, layout.Rect(16, 154, 40, 36))) characterId = characterId <= 1 ? 4 : characterId - 1;
-                if (layout.Click(inInput, layout.Rect(182, 154, 40, 36))) characterId = characterId >= 4 ? 1 : characterId + 1;
-                if (confirm || layout.Click(inInput, layout.Rect(16, 228, 164, 36))) CreateCharacter();
-                else if (escape || layout.Click(inInput, layout.Rect(194, 228, 164, 36))) RequestCharacters();
+                for (std::size_t index=0;index<creationOptions.size();++index)
+                    if (creationLayout.Click(inInput,creationLayout.Card(index))) characterId=creationOptions[index].definitionId;
+                if (confirm || creationLayout.Click(inInput,creationLayout.CreateButton())) CreateCharacter();
+                else if (escape || creationLayout.Click(inInput,creationLayout.ListButton())) RequestCharacters();
                 return;
             }
             if (charactersCurrent && !characters.empty())
@@ -505,7 +581,7 @@ namespace ActionRPG
                 state = State::CharacterCreate;
                 playerName.clear();
                 nameFocused = true;
-                characterId = std::clamp(characterId, 1u, 4u);
+                if (!GetCreationOption(characterId)) characterId=creationOptions.empty() ? 0:creationOptions.front().definitionId;
                 message = L"새 캐릭터의 이름과 종류를 선택해 주세요.";
             }
             else if (layout.Click(inInput, layout.Rect(372, 228, 164, 36))) RequestCharacters();
@@ -529,8 +605,59 @@ namespace ActionRPG
         else if (layout.Click(inInput, layout.Rect(194, 228, 164, 36))) BeginLeave(SessionMenuAction::SwitchAccount);
         else if (escape || layout.Click(inInput, layout.Rect(372, 228, 164, 36))) BeginLeave(SessionMenuAction::Logout);
     }
+    void LoginFlow::RenderCharacterCreation(D2DRenderer& inRenderer, const float inWidth, const float inHeight) const
+    {
+        const CreationLayout layout(inWidth,inHeight);
+        const auto panel=layout.Rect(0,0,960,600);
+        const auto white=D2D1::ColorF(0.94f,0.94f,0.94f);
+        const auto muted=D2D1::ColorF(0.68f,0.75f,0.82f);
+        const auto accent=D2D1::ColorF(0.43f,0.84f,1.0f);
+        const bool waiting=characterRequest!=CharacterRequest::None;
+        const auto* selected=GetCreationOption(characterId);
+        inRenderer.FillRectangle(panel.left,panel.top,panel.right,panel.bottom,D2D1::ColorF(0.06f,0.08f,0.12f));
+        inRenderer.DrawUiText(L"캐릭터 생성",layout.Rect(32,20,480,36),white,28*layout.scale);
+        inRenderer.DrawUiText(L"직업과 이름을 선택하고 모험을 시작하세요.",layout.Rect(32,64,480,24),muted,16*layout.scale);
+        inRenderer.DrawUiText(L"캐릭터 이름",layout.Rect(32,104,480,22),white,16*layout.scale);
+        Button(inRenderer,layout.NameField(),playerName+(nameFocused && !waiting ? L" |":L""),!waiting,nameFocused,layout.scale);
+        inRenderer.DrawUiText(L"직업 선택",layout.Rect(32,194,480,22),white,16*layout.scale);
+        for (std::size_t index=0;index<creationOptions.size();++index)
+        {
+            const auto& option=creationOptions[index];
+            const auto card=layout.Card(index);
+            const bool chosen=option.definitionId==characterId;
+            Button(inRenderer,card,option.name,!waiting,chosen,layout.scale);
+            inRenderer.DrawRectangle(card.left,card.top,card.right,card.bottom,
+                chosen ? accent:muted,(chosen ? 3.0f:1.0f)*layout.scale);
+        }
+        if (selected)
+        {
+            inRenderer.DrawUiText(selected->name,layout.Rect(32,318,480,30),accent,24*layout.scale);
+            inRenderer.DrawUiText(selected->description,layout.Rect(32,360,480,96),white,18*layout.scale,true);
+            const auto area=layout.Illustration();
+            if (selected->illustration)
+            {
+                const auto size=selected->illustration->GetSize();
+                const float fit=std::min((area.right-area.left)/size.width,(area.bottom-area.top)/size.height);
+                const float width=size.width*fit, height=size.height*fit;
+                const float left=area.left+(area.right-area.left-width)*0.5f;
+                inRenderer.DrawBitmap(selected->illustration.Get(),D2D1::RectF(0,0,size.width,size.height),
+                    D2D1::RectF(left,area.bottom-height,left+width,area.bottom));
+            }
+            else inRenderer.DrawUiText(L"일러스트를 불러올 수 없습니다.",layout.Rect(576,264,320,64),muted,16*layout.scale,true,true);
+        }
+        Button(inRenderer,layout.CreateButton(),L"생성 (Enter)",!waiting && selected,false,layout.scale);
+        Button(inRenderer,layout.ListButton(),L"목록으로 (Esc)",!waiting,false,layout.scale);
+        inRenderer.DrawUiText(creationConfigurationError.empty() ? message:creationConfigurationError,
+            layout.Rect(32,548,896,40),white,14*layout.scale,true);
+    }
+
     void LoginFlow::Render(D2DRenderer& inRenderer, const float inWidth, const float inHeight) const
     {
+        if (state==State::CharacterCreate)
+        {
+            RenderCharacterCreation(inRenderer,inWidth,inHeight);
+            return;
+        }
         const Layout layout(inWidth, inHeight);
         inRenderer.FillRectangle(layout.left, layout.top, layout.right, layout.top + 344,
             D2D1::ColorF(0.06f, 0.08f, 0.12f));
@@ -581,19 +708,6 @@ namespace ActionRPG
                 charactersCurrent && !waiting && selectedCharacter < characters.size());
             Button(inRenderer, layout.Rect(194, 228, 164, 36), L"새 캐릭터", !waiting);
             Button(inRenderer, layout.Rect(372, 228, 164, 36), L"새로 조회", !waiting);
-        }
-        else if (state == State::CharacterCreate)
-        {
-            const bool waiting = characterRequest != CharacterRequest::None;
-            inRenderer.DrawUiText(L"이름 (UTF-8 1~32바이트)", layout.Rect(16, 66, 568, 24), white, 16);
-            Button(inRenderer, layout.Rect(16, 100, 350, 36), playerName + (nameFocused ? L" |" : L""),
-                !waiting, nameFocused);
-            Button(inRenderer, layout.Rect(16, 154, 40, 36), L"◀", !waiting);
-            inRenderer.DrawUiText((characterId==4 ? std::wstring(L"여성 검사"):L"캐릭터 "+std::to_wstring(characterId)), layout.Rect(60, 154, 118, 36),
-                white, 16, false, true);
-            Button(inRenderer, layout.Rect(182, 154, 40, 36), L"▶", !waiting);
-            Button(inRenderer, layout.Rect(16, 228, 164, 36), L"생성 (Enter)", !waiting);
-            Button(inRenderer, layout.Rect(194, 228, 164, 36), L"목록으로 (Esc)", !waiting);
         }
         else if (state == State::Login)
         {

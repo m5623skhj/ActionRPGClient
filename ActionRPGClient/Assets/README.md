@@ -12,7 +12,7 @@
 | --- | --- |
 | [Data/assets.ini](Data/assets.ini) | 논리 ID와 데이터·미디어 상대 경로 연결 |
 | [Data/AuthClient.json](Data/AuthClient.json) | AuthSettings가 기동 시 직접 읽는 인증·타운 연결 설정. assets.ini 데이터 ID와 별개 |
-| [Data/characters.ini](Data/characters.ini) | Character/원격 마을 플레이어의 캐릭터별 점프 속도·대기/걷기 섹션 |
+| [Data/characters.ini](Data/characters.ini) | 캐릭터별 점프·대기/걷기 및 생성 가능 직업·이름·소개·일러스트 ID |
 | [Data/animations.ini](Data/animations.ini) | 기본 스프라이트 셀·프레임·재생 시간·표시 크기·anchor |
 | [Data/PlayerSkills.json](Data/PlayerSkills.json) | 서버와 공유하는 캐릭터·스킬 ID, 입력·쿨타임·행동 프레임/공격 계약 |
 | [Data/PlayerSkillVisuals.json](Data/PlayerSkillVisuals.json) | 클라이언트 전용 스킬 모션·이펙트 이미지, sourceRect/pivot·표시 크기 |
@@ -39,9 +39,11 @@ MP3는 Windows [Media Foundation Source Reader](https://learn.microsoft.com/en-u
 
 | 종류 | 현재 ID |
 | --- | --- |
-| 캐릭터 종류 | Character1/dataId 1, Character2/2, Character3/3 |
+| 캐릭터 종류 | Character1/dataId 1, Character2/2, Character3/3, Character4/4 |
 | 플레이어 스킬 | Character1.FrontKick |
 | 몬스터 | 1 Dummy, 2 rusted_armor_soldier, 3 fallen_citadel_warden |
+
+생성 화면은 `characters.ini`에서 `creation_enabled=true`인 Character1(거너)·Character4(검사)를 카드로 표시합니다. `display_name`·`description`·`creation_illustration`을 읽고, 일러스트 ID는 `assets.ini`를 통해 `Images/UI/CharacterCreation`의 PNG로 연결합니다. 이름과 소개는 코드에 하드코딩하지 않습니다. 512×768 투명 이미지를 한 번 읽어 보관하며 원래 비율을 유지해 표시합니다. 이미지 로딩 실패는 이름·소개·선택·생성을 막지 않습니다. 신규 생성에서 제외한 Character2·3의 저장 캐릭터 조회·입장은 유지합니다.
 
 캐릭터 종류 ID는 EnterTownResponse/PlayerAppear와 스킬 카탈로그에서 연결합니다. `characters.ini`의 Default/Character1~3은 현재 같은 대기·걷기 시트를 사용합니다. 종류가 3개라고 서로 다른 기본 공격 이미지가 자동 선택되는 것은 아니며 Player의 공통 CharacterAnimationSet 연결도 확인해야 합니다.
 

@@ -15,7 +15,7 @@ namespace ActionRPG
         : window(inInstance, L"Action RPG Client", INITIAL_WIDTH, INITIAL_HEIGHT)
         , graphicsDevice(window.GetHandle(), window.GetClientWidth(), window.GetClientHeight())
         , renderer(graphicsDevice)
-        , loginFlow(assetCatalog, townClient, dungeonClient)
+        , loginFlow(assetCatalog, renderer, townClient, dungeonClient)
     {
         renderer.SetUiFontFamily(L"Segoe UI");
         const auto settings = GameWindow::GetScreenSettings();
