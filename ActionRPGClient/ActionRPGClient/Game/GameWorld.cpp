@@ -853,7 +853,7 @@ namespace ActionRPG
             const auto actor=remotePlayers.find(inPlayerId);
             if(actor==remotePlayers.end())return std::nullopt;
             ground=actor->second.displayedPosition;
-            headHeight=actor->second.idleAnimation.GetTopOffset();
+            headHeight=actor->second.characterId==4 ? 170.0f:actor->second.idleAnimation.GetTopOffset();
         }
         const auto position=camera.WorldToScreen(ground);
         if(position.x<0 || position.x>camera.GetViewportWidth() || position.y-height<0
@@ -1028,7 +1028,7 @@ namespace ActionRPG
                 {
                     localPlayerId = inEvent.playerId;
                     localCharacterId = inEvent.characterId;
-                    player.ConfigureJumpSpeed(characterDefinitions, localCharacterId);
+                    player.ConfigureCharacter(localCharacterId,assetCatalog,renderer);
                     skillUi.Invalidate();
                     townHp = {}; townMp = {}; dungeonHp = {}; dungeonMp = {};
                     inventoryUi.Reset();
@@ -1433,6 +1433,8 @@ namespace ActionRPG
                     {
                         dungeonWorld = DungeonWorld::Parse(inEvent.json, dungeonRoomId, localPlayerId, monsterCatalog);
                         playerSkillPresentation.ValidateServer(dungeonWorld->GetPlayerSkills());
+                        if (const auto& initial=dungeonWorld->GetInitialPlayerHud(); initial && initial->characterId!=0
+                            && initial->characterId!=localCharacterId) throw std::runtime_error("Initial character type mismatch.");
                         dungeonMovementSequence = lastDungeonStateSequence = 0;
                         lastTownPosition = player.GetGroundPosition();
                         ApplyDungeonMap(dungeonWorld->GetEntryMapId(), dungeonWorld->GetSpawn());
@@ -1544,6 +1546,11 @@ namespace ActionRPG
         const auto self = std::find_if(snapshot.players.begin(), snapshot.players.end(), [this](const auto& inPlayer)
             { return inPlayer.playerId == localPlayerId; });
         if (self == snapshot.players.end()) throw std::runtime_error("Combat snapshot omits the local player.");
+        if ((self->characterId!=0 && self->characterId!=localCharacterId)
+            || (localCharacterId==4 && self->characterId!=4)) throw std::runtime_error("Combat character type mismatch.");
+        for (const auto& actor:snapshot.players)
+            if (actor.characterId==4 && !dungeonWorld->GetCombatRules().meleeDefinitions.contains(4))
+                throw std::runtime_error("Missing melee character contract.");
         if (self->actionSequence > combatActionSequence || self->moveSequence > dungeonMovementSequence)
             throw std::runtime_error("Combat acknowledgement exceeds the sent sequence.");
         if (snapshot.mapId != dungeonMapId && self->moveSequence <= lastDungeonStateSequence
@@ -1604,8 +1611,18 @@ namespace ActionRPG
             presentPlayers.insert(state.playerId);
             auto& actor = combatPlayers[state.playerId];
             const bool created = !actor;
-            if (created) { actor = std::make_unique<Player>(player); actor->ResetActionState(); }
-            if (created) actor->ApplyCombatState(state, rules, true);
+            if (created || actor->GetDefinitionId()!=state.characterId)
+            {
+                // Reuse this character's bitmaps when possible; each actor still owns its playback state.
+                if (state.characterId==player.GetDefinitionId())
+                {
+                    actor=std::make_unique<Player>(player);
+                    actor->ResetActionState();
+                }
+                else actor=std::make_unique<Player>(state.position,assetCatalog,renderer,state.characterId);
+                actor->SetSkillPresentation(&playerSkillPresentation);
+                actor->ApplyCombatState(state,rules,true);
+            }
         }
         std::erase_if(combatPlayers, [&presentPlayers](const auto& inEntry) { return !presentPlayers.contains(inEntry.first); });
         auto& monsters = dungeonMonsters.at(dungeonMapId);
@@ -1783,7 +1800,7 @@ namespace ActionRPG
                 || (actor.shotSequence == played.sequence && actor.shotCount <= played.count)) continue;
             played = {actor.shotSequence, actor.shotCount};
             // Collapse missed shots to one current sound rather than a delayed burst.
-            if (actor.shotCount != 0) (void)audio.PlayEffect("GunShot");
+            if (actor.characterId!=4 && actor.shotCount != 0) (void)audio.PlayEffect("GunShot");
         }
     }
 
@@ -1807,7 +1824,7 @@ namespace ActionRPG
             if ((actor.playerId == localPlayerId) != inLocalPlayer) continue;
             const auto before = std::find_if(inPrevious.players.begin(), inPrevious.players.end(),
                 [&actor](const auto& value) { return value.playerId == actor.playerId; });
-            if (before != inPrevious.players.end()) queue(*before, actor, 96.0f);
+            if (before != inPrevious.players.end()) queue(*before, actor, actor.characterId==4 ? 85.0f:96.0f);
         }
         if (inLocalPlayer) return;
         for (const auto& actor : inCurrent.monsters)
@@ -3249,7 +3266,7 @@ namespace ActionRPG
         remotePlayers.clear();
         player.SetGroundPosition(inPosition); player.ResetActionState(); player.ResetMovementSpeeds(); player.SetRunningEnabled(true);
         CombatPlayerState initial;
-        initial.playerId = localPlayerId; initial.position = inPosition;
+        initial.playerId = localPlayerId; initial.characterId = localCharacterId; initial.position = inPosition;
         initial.hitRecovery = dungeonWorld->GetSlideDefinition(localCharacterId).hitRecovery;
         initial.hp = initial.maxHp = dungeonWorld->GetCombatRules().maxHp;
         player.ApplyCombatState(initial, dungeonWorld->GetCombatRules());

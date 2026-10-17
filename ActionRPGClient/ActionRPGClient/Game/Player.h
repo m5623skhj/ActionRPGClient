@@ -16,7 +16,10 @@ namespace ActionRPG
     class Player final : public Character
     {
     public:
-        Player(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog, D2DRenderer& inRenderer);
+        Player(Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog, D2DRenderer& inRenderer,
+            std::uint32_t inDefinitionId = 1);
+        void ConfigureCharacter(std::uint32_t inDefinitionId, const AssetCatalog& inAssets, D2DRenderer& inRenderer);
+        [[nodiscard]] std::uint32_t GetDefinitionId() const { return definitionId; }
 
         void Update(float inDeltaSeconds, const InputState& inInput, const GameplayMap& inGameplayMap);
         void ApplyHit(CharacterHitType inType) override;
@@ -39,6 +42,7 @@ namespace ActionRPG
     private:
         void UpdateTownPositionCorrection(float inDeltaSeconds, const GameplayMap& inGameplayMap);
         Vector2 pendingTownCorrection{};
+        std::uint32_t definitionId{1};
         // Local town preview only. Dungeon damage and cooldowns remain server authoritative.
         std::optional<CombatPlayerState> townSkill;
         float townSkillDuration{};

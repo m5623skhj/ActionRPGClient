@@ -11,6 +11,17 @@ namespace ActionRPG
     enum class CombatReaction { None, Hit, Falling, Down, Rising, Dead };
     enum class CombatShotPhase { None, Prepare, Fire, Recover };
     enum class CombatJumpPhase { Grounded, Prepare, Airborne };
+    struct MeleeStrikePresentation
+    {
+        std::string motionId;
+        float durationSeconds{}, prepareSeconds{}, hitSeconds{}, recoverSeconds{};
+    };
+    struct MeleePresentation
+    {
+        float bodyHeight{};
+        std::vector<MeleeStrikePresentation> ground;
+        MeleeStrikePresentation air, dash;
+    };
     struct CombatRules
     {
         static constexpr double MIN_TEMPO_SCALE = 0.1;
@@ -22,6 +33,7 @@ namespace ActionRPG
         float projectileSpeed{}, muzzleHeight{}, airFireLift{}, airRecoilDistance{}, shotHitstopSeconds{};
         std::uint32_t maxHp{}, maxShots{};
         double tickIntervalSeconds{0.05};
+        std::unordered_map<std::uint32_t,MeleePresentation> meleeDefinitions;
         static CombatRules Parse(std::string_view inJson);
     };
     struct CombatActorState

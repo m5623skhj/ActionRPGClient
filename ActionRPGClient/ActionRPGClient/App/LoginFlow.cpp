@@ -481,8 +481,8 @@ namespace ActionRPG
                         }
                         else if (value >= 32 && value != 127 && playerName.size() < 32) playerName += value;
                     }
-                if (layout.Click(inInput, layout.Rect(16, 154, 40, 36))) characterId = characterId <= 1 ? 3 : characterId - 1;
-                if (layout.Click(inInput, layout.Rect(182, 154, 40, 36))) characterId = characterId >= 3 ? 1 : characterId + 1;
+                if (layout.Click(inInput, layout.Rect(16, 154, 40, 36))) characterId = characterId <= 1 ? 4 : characterId - 1;
+                if (layout.Click(inInput, layout.Rect(182, 154, 40, 36))) characterId = characterId >= 4 ? 1 : characterId + 1;
                 if (confirm || layout.Click(inInput, layout.Rect(16, 228, 164, 36))) CreateCharacter();
                 else if (escape || layout.Click(inInput, layout.Rect(194, 228, 164, 36))) RequestCharacters();
                 return;
@@ -505,7 +505,7 @@ namespace ActionRPG
                 state = State::CharacterCreate;
                 playerName.clear();
                 nameFocused = true;
-                characterId = std::clamp(characterId, 1u, 3u);
+                characterId = std::clamp(characterId, 1u, 4u);
                 message = L"새 캐릭터의 이름과 종류를 선택해 주세요.";
             }
             else if (layout.Click(inInput, layout.Rect(372, 228, 164, 36))) RequestCharacters();
@@ -571,7 +571,7 @@ namespace ActionRPG
                     const auto& character = characters[index];
                     Button(inRenderer, layout.Rect(16, 58 + row * 36.0f, 568, 32),
                         character.name + L"  · Lv." + std::to_wstring(character.level)
-                        + L"  · 캐릭터 " + std::to_wstring(character.definitionId),
+                        + (character.definitionId==4 ? std::wstring(L"  · 여성 검사"):L"  · 캐릭터 "+std::to_wstring(character.definitionId)),
                         charactersCurrent && !waiting, selectedCharacter == index);
                 }
             }
@@ -589,7 +589,7 @@ namespace ActionRPG
             Button(inRenderer, layout.Rect(16, 100, 350, 36), playerName + (nameFocused ? L" |" : L""),
                 !waiting, nameFocused);
             Button(inRenderer, layout.Rect(16, 154, 40, 36), L"◀", !waiting);
-            inRenderer.DrawUiText(L"캐릭터 " + std::to_wstring(characterId), layout.Rect(60, 154, 118, 36),
+            inRenderer.DrawUiText((characterId==4 ? std::wstring(L"여성 검사"):L"캐릭터 "+std::to_wstring(characterId)), layout.Rect(60, 154, 118, 36),
                 white, 16, false, true);
             Button(inRenderer, layout.Rect(182, 154, 40, 36), L"▶", !waiting);
             Button(inRenderer, layout.Rect(16, 228, 164, 36), L"생성 (Enter)", !waiting);

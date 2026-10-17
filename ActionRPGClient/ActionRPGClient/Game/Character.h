@@ -5,10 +5,12 @@
 #include "Game/DungeonCombat.h"
 #include "Resources/SpriteAnimation.h"
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace ActionRPG
 {
@@ -69,6 +71,9 @@ namespace ActionRPG
         std::string_view knockdown;
         std::string_view getUp;
         std::string_view slide;
+        std::string_view jumpRise{}, jumpFall{};
+        std::array<std::string_view,4> meleeCombo{};
+        float headHeight{};
     };
 
     // State, animation and projectile requests are mutated only on the game thread.
@@ -192,6 +197,10 @@ namespace ActionRPG
         [[nodiscard]] SpriteAnimation& GetAttackAnimation();
         [[nodiscard]] const SpriteAnimation& GetAttackAnimation() const;
         void UpdateAttack(float inDeltaSeconds);
+        void UpdateMeleeAttack(float inDeltaSeconds);
+        [[nodiscard]] const SpriteAnimation& GetJumpAnimation() const;
+        [[nodiscard]] const MeleePresentation* GetMeleePresentation() const;
+        [[nodiscard]] bool IsMelee() const { return !meleeComboAnimations.empty(); }
         void ApplyAirShotRecoil();
         void QueueProjectileRequest(CharacterProjectileType inType);
         void UpdateHit(float inDeltaSeconds);
@@ -249,6 +258,12 @@ namespace ActionRPG
         SpriteAnimation attackEndAnimation;
         SpriteAnimation jumpStartAnimation;
         SpriteAnimation jumpHoldAnimation;
+        std::optional<SpriteAnimation> jumpRiseAnimation, jumpFallAnimation;
+        std::vector<SpriteAnimation> meleeComboAnimations;
+        float authoredHeadHeight{};
+        bool meleeDash{};
+        bool combatLanding{};
+        float combatLandingSeconds{}, combatAirHitSeconds{};
         SpriteAnimation jumpLandAnimation;
         SpriteAnimation airAttackStartAnimation;
         SpriteAnimation airAttackFireAnimation;

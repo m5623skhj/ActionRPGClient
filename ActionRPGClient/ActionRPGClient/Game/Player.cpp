@@ -1,5 +1,6 @@
 #include "Game/Player.h"
 #include "Game/PlayerSkillPresentation.h"
+#include "Resources/AssetCatalog.h"
 
 #include "Game/Camera.h"
 #include "Game/GameplayMap.h"
@@ -20,14 +21,39 @@ namespace
         "PlayerAirShootStart", "PlayerAirShootFire", "PlayerAirShootEnd",
         "PlayerHit", "PlayerAirHitStart", "PlayerAirHitFall", "PlayerKnockdown", "PlayerGetUp", "PlayerSlide"
     };
+    constexpr ActionRPG::CharacterAnimationSet SWORDSWOMAN_ANIMATIONS{
+        "SwordswomanIdle","SwordswomanWalk","SwordswomanRun",
+        "SwordswomanAttack1","SwordswomanAttack1","SwordswomanAttack1",
+        "SwordswomanJumpStart","SwordswomanJumpHold","SwordswomanJumpLand",
+        "SwordswomanAirAttackStart","SwordswomanAirAttackFire","SwordswomanAirAttackEnd",
+        "SwordswomanHit","SwordswomanAirHitStart","SwordswomanAirHitFall","SwordswomanKnockdown","SwordswomanGetUp","SwordswomanDashAttack",
+        "SwordswomanJumpRise","SwordswomanJumpFall",
+        {"SwordswomanAttack1","SwordswomanAttack2","SwordswomanAttack3","SwordswomanAttack4"},170.0f
+    };
+    const ActionRPG::CharacterAnimationSet& AnimationsFor(std::uint32_t inDefinitionId)
+    { return inDefinitionId==4 ? SWORDSWOMAN_ANIMATIONS:PLAYER_ANIMATIONS; }
+
 }
 
 namespace ActionRPG
 {
     Player::Player(const Vector2 inInitialPosition, const AssetCatalog& inAssetCatalog,
-        D2DRenderer& inRenderer)
-        : Character(inInitialPosition, inAssetCatalog, inRenderer, PLAYER_ANIMATIONS)
+        D2DRenderer& inRenderer, const std::uint32_t inDefinitionId)
+        : Character(inInitialPosition, inAssetCatalog, inRenderer, AnimationsFor(inDefinitionId)), definitionId(inDefinitionId)
     {
+        ConfigureJumpSpeed(IniDocument(inAssetCatalog.GetDataPath("Characters")),inDefinitionId);
+    }
+
+    void Player::ConfigureCharacter(const std::uint32_t inDefinitionId, const AssetCatalog& inAssets, D2DRenderer& inRenderer)
+    {
+        if (definitionId!=inDefinitionId)
+        {
+            // Spawn-time replacement keeps this Player's presentation dependency.
+            const Player replacement(GetGroundPosition(),inAssets,inRenderer,inDefinitionId);
+            Character::operator=(replacement);
+            definitionId=inDefinitionId;
+        }
+        ResetActionState();
     }
 
     void Player::Update(const float inDeltaSeconds, const InputState& inInput, const GameplayMap& inGameplayMap)

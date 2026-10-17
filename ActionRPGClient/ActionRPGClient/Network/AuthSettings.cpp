@@ -114,7 +114,7 @@ namespace ActionRPG
             const auto configuredName = document.value("playerName", std::string{});
             if (!configuredName.empty()) settings.playerName = AuthUtf8ToWide(configuredName);
             const auto character = document.value("characterId", nlohmann::json(1));
-            if (!character.is_number_integer() || character < 1 || character > 3
+            if (!character.is_number_integer() || character < 1 || character > 4
                 || AuthWideToUtf8(settings.playerName).size() > 32)
                 throw std::runtime_error("Invalid game profile settings.");
             settings.characterId = character.get<std::uint32_t>();

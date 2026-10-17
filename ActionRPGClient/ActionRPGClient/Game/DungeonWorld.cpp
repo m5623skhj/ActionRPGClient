@@ -55,7 +55,7 @@ namespace ActionRPG
         for (const auto& source : slides)
         {
             const auto& idValue = source.at("characterId");
-            if (!idValue.is_number_integer() || idValue < 1 || idValue > 3)
+            if (!idValue.is_number_integer() || idValue < 1 || idValue > 4)
                 throw std::runtime_error("Unsupported slide character.");
             const auto id = idValue.get<std::uint32_t>();
             const auto& attack = source.at("attackPower");
@@ -68,11 +68,13 @@ namespace ActionRPG
             if (definition.durationSeconds < 0.05f || definition.durationSeconds > 2.0f
                 || definition.distancePerRunSpeedSeconds < 0.05f || definition.distancePerRunSpeedSeconds > 5.0f
                 || definition.hitStartRatio >= definition.hitEndRatio || definition.hitEndRatio > 1.0f
-                || definition.motionId != "slide" || !result.slideDefinitions.emplace(id, std::move(definition)).second)
+                || definition.motionId != (id==4 ? "dashAttack":"slide") || !result.slideDefinitions.emplace(id, std::move(definition)).second)
                 throw std::runtime_error("Invalid slide definition.");
         }
         for (std::uint32_t id = 1; id <= 3; ++id)
             if (!result.slideDefinitions.contains(id)) throw std::runtime_error("Missing slide character.");
+        if (result.slideDefinitions.contains(4) != result.combatRules.meleeDefinitions.contains(4))
+            throw std::runtime_error("Missing Character4 melee contract.");
         if (world.contains("playerSkills")) result.playerSkills = PlayerSkills::Catalog::Parse(world.at("playerSkills"));
         result.entryMapId = world.at("entryMapId").get<std::string>();
         const auto& initial = world.at("players").at(std::to_string(inPlayerId));
@@ -81,6 +83,11 @@ namespace ActionRPG
         {
             auto& hud = result.initialPlayerHud.emplace();
             hud.playerId = inPlayerId; hud.hasHudState = true;
+            if (initial.contains("characterId"))
+            {
+                hud.characterId = CharacterInventoryJson::UInt32(initial.at("characterId"), 1, 4);
+                if (!result.slideDefinitions.contains(hud.characterId)) throw std::runtime_error("Missing initial character contract.");
+            }
             hud.hp = CharacterInventoryJson::UInt32(initial.at("hp"), 0, UINT32_MAX);
             hud.maxHp = CharacterInventoryJson::UInt32(initial.at("maxHp"), 1, UINT32_MAX);
             if (initial.at("mp").is_null() != initial.at("maxMp").is_null()) throw std::runtime_error("Invalid initial MP.");

@@ -58,6 +58,11 @@ namespace ActionRPG
     {
         if (!inAnimations.slide.empty())
             slideAnimation.emplace(inRenderer, inAssetCatalog, *animationDefinitions, inAnimations.slide);
+        authoredHeadHeight=inAnimations.headHeight;
+        if (!inAnimations.jumpRise.empty()) jumpRiseAnimation.emplace(inRenderer,inAssetCatalog,*animationDefinitions,inAnimations.jumpRise);
+        if (!inAnimations.jumpFall.empty()) jumpFallAnimation.emplace(inRenderer,inAssetCatalog,*animationDefinitions,inAnimations.jumpFall);
+        for (auto section:inAnimations.meleeCombo)
+            if (!section.empty()) meleeComboAnimations.emplace_back(inRenderer,inAssetCatalog,*animationDefinitions,section);
         const IniDocument characterDefinitions(inAssetCatalog.GetDataPath("Characters"));
         ConfigureJumpSpeed(characterDefinitions, 0);
         attackEventFrame = ParseOneBasedFrame(*animationDefinitions, inAnimations.attackFire, "event_frame");
@@ -113,6 +118,21 @@ namespace ActionRPG
             else
             {
                 if (jumpPhase == JumpPhase::Landing) break;
+                if (IsMelee())
+                {
+                    if (!IsAttacking())
+                    {
+                        const bool airborne=jumpPhase!=JumpPhase::Grounded;
+                        const bool continuing=shotInputRemainingSeconds>0 && airAttack==airborne
+                            && attackShotCount<meleeComboAnimations.size();
+                        if (!airborne || airShotCount<meleeComboAnimations.size()) BeginAttack(airborne,continuing);
+                    }
+                    else if (!meleeDash && attackShotCount+pendingAttackShots+1<meleeComboAnimations.size()
+                        && (!airAttack || airShotCount+pendingAttackShots<meleeComboAnimations.size()))
+                        ++pendingAttackShots;
+                    bufferedActions.pop_front();
+                    continue;
+                }
                 if (!IsAttacking())
                 {
                     const bool wantsAirAttack = jumpPhase != JumpPhase::Grounded;
@@ -249,6 +269,7 @@ namespace ActionRPG
 
     void Character::ResetActionState()
     {
+        combatLanding=false;combatLandingSeconds=combatAirHitSeconds=0;meleeDash=false;
         ClearSlidePrediction();
         movementFacingLeft.reset();
         bufferedPresentation = false; combatAnimationChanged = true; lastCombatAnimation = nullptr; lastCombatAnimationSeconds = 0;
@@ -388,7 +409,7 @@ namespace ActionRPG
     }
 
     /**
-     * Advance preparation/landing once and integrate height with a fixed airborne sprite.
+     * Advance preparation/landing once and integrate height independently of the airborne pose.
      * @return Time spent airborne this update, excluding time consumed by preparation.
      */
     float Character::UpdateJump(const float inDeltaSeconds)
@@ -435,6 +456,16 @@ namespace ActionRPG
     void Character::BeginAttack(const bool inAirAttack, const bool inContinueCombo)
     {
         airAttack = inAirAttack;
+        if (IsMelee())
+        {
+            if (!inContinueCombo) attackShotCount=0;
+            meleeDash=!inAirAttack && runningRequested;
+            attackPhase=inAirAttack ? AttackPhase::Start:AttackPhase::Fire;
+            pendingAttackShots=0;shotInputRemainingSeconds=0;
+            if (inAirAttack) ++airShotCount;
+            GetAttackAnimation().Reset();
+            return;
+        }
         attackPhase = inContinueCombo ? AttackPhase::Fire : AttackPhase::Start;
         if (!inContinueCombo) { attackShotCount = 0; shotInputRemainingSeconds = 0; }
         attackProjectileQueued = false;
@@ -451,11 +482,16 @@ namespace ActionRPG
         attackShotCount = 0;
         shotInputRemainingSeconds = 0;
         attackProjectileQueued = false;
-        airAttack = false;
+        airAttack = false;meleeDash=false;
     }
 
     SpriteAnimation& Character::GetAttackAnimation()
     {
+        if (IsMelee() && !airAttack)
+        {
+            if (meleeDash && slideAnimation) return *slideAnimation;
+            return meleeComboAnimations[std::min<std::size_t>(attackShotCount,meleeComboAnimations.size()-1)];
+        }
         if (airAttack)
         {
             return attackPhase == AttackPhase::Start ? airAttackStartAnimation
@@ -467,6 +503,11 @@ namespace ActionRPG
 
     const SpriteAnimation& Character::GetAttackAnimation() const
     {
+        if (IsMelee() && !airAttack)
+        {
+            if (meleeDash && slideAnimation) return *slideAnimation;
+            return meleeComboAnimations[std::min<std::size_t>(attackShotCount,meleeComboAnimations.size()-1)];
+        }
         if (airAttack)
         {
             return attackPhase == AttackPhase::Start ? airAttackStartAnimation
@@ -489,6 +530,7 @@ namespace ActionRPG
      */
     void Character::UpdateAttack(const float inDeltaSeconds)
     {
+        if (IsMelee()) {UpdateMeleeAttack(inDeltaSeconds);return;}
         float remainingSeconds = inDeltaSeconds;
         while (IsAttacking())
         {
@@ -550,6 +592,45 @@ namespace ActionRPG
         }
     }
 
+    // Town preview only. Dungeon attacks and damage use the authoritative state below.
+    void Character::UpdateMeleeAttack(const float inDeltaSeconds)
+    {
+        float remaining=inDeltaSeconds;
+        while (IsAttacking())
+        {
+            auto& animation=GetAttackAnimation();
+            remaining=animation.AdvanceOnce(remaining);
+            if (!animation.IsFinished()) break;
+            if (airAttack && attackPhase!=AttackPhase::End)
+            {
+                attackPhase=attackPhase==AttackPhase::Start ? AttackPhase::Fire:AttackPhase::End;
+                GetAttackAnimation().Reset();
+            }
+            else if (!meleeDash && ++attackShotCount<meleeComboAnimations.size() && pendingAttackShots>0
+                && (!airAttack || airShotCount<meleeComboAnimations.size()))
+            {
+                --pendingAttackShots;
+                if (airAttack) ++airShotCount;
+                attackPhase=airAttack ? AttackPhase::Start:AttackPhase::Fire;
+                GetAttackAnimation().Reset();
+            }
+            else
+            {
+                shotInputRemainingSeconds=!meleeDash && attackShotCount<meleeComboAnimations.size() ? SHOT_INPUT_SECONDS:0;
+                attackPhase=AttackPhase::None;pendingAttackShots=0;meleeDash=false;
+            }
+        }
+    }
+
+    const SpriteAnimation& Character::GetJumpAnimation() const
+    {
+        const float speed=combatState ? combatState->verticalSpeed:verticalVelocity;
+        const float threshold=(combatState ? combatRules.jumpSpeed:jumpSpeed)*0.15f;
+        if (speed>threshold && jumpRiseAnimation) return *jumpRiseAnimation;
+        if (speed<-threshold && jumpFallAnimation) return *jumpFallAnimation;
+        return jumpHoldAnimation;
+    }
+
     void Character::ConfigureJumpSpeed(const IniDocument& inDefinitions, const std::uint32_t inCharacterId)
     {
         const auto text = inDefinitions.GetOptionalValue("Character" + std::to_string(inCharacterId),
@@ -567,8 +648,8 @@ namespace ActionRPG
         if (combatState)
             return combatState->hp != 0 && combatState->reaction == CombatReaction::None
                 && (combatState->shotPhase != CombatShotPhase::None
-                    || (combatState->shotCount > 0 && combatState->shotCount < combatRules.maxShots));
-        return IsAttacking() || (attackShotCount > 0 && attackShotCount < MAX_ATTACK_SHOTS
+                    || (combatState->shotCount > 0 && combatState->shotCount < (IsMelee() ? 4u:combatRules.maxShots)));
+        return IsAttacking() || (attackShotCount > 0 && attackShotCount < (IsMelee() ? 4u:MAX_ATTACK_SHOTS)
             && shotInputRemainingSeconds > 0.0f);
     }
 
@@ -717,6 +798,17 @@ namespace ActionRPG
         if (!combatState) movementFacingLeft.reset();
         const bool newKnockback = inState.hasKnockbackState && inState.knockbackSequence
             != (combatState ? combatState->knockbackSequence : 0);
+        const bool landed = combatState && combatState->jumpPhase == CombatJumpPhase::Airborne
+            && inState.jumpPhase == CombatJumpPhase::Grounded;
+        if (IsMelee())
+        {
+            if (!combatState || combatState->reaction!=inState.reaction
+                || combatState->reactionSequence!=inState.reactionSequence) combatAirHitSeconds=0;
+            if (landed && inState.reaction==CombatReaction::None && inState.shotPhase==CombatShotPhase::None)
+            {combatLanding=true;combatLandingSeconds=0;}
+            if (inState.jumpPhase!=CombatJumpPhase::Grounded || inState.shotPhase!=CombatShotPhase::None
+                || inState.reaction!=CombatReaction::None || inState.hp==0) combatLanding=false;
+        }
         ConfigureHitRecovery(inState.hitRecovery);
         combatAnimationChanged = newStop || combatAnimationChanged || !combatState || combatState->reaction != inState.reaction
             || combatState->reactionSequence != inState.reactionSequence
@@ -730,8 +822,6 @@ namespace ActionRPG
             slidePresentationSeconds = inState.slideSeconds;
         else slidePresentationSeconds = std::max(slidePresentationSeconds, inState.slideSeconds);
         const bool wasDead = combatState && combatState->hp == 0;
-        const bool landed = combatState && combatState->jumpPhase == CombatJumpPhase::Airborne
-            && inState.jumpPhase == CombatJumpPhase::Grounded;
         isMoving = combatState && IsCombatHitstopped(inState, inState.presentationTimeMs) ? isMoving
             : combatState && (std::abs(inState.position.x - combatState->position.x) > 0.5f
                 || std::abs(inState.position.y - combatState->position.y) > 0.5f);
@@ -813,6 +903,13 @@ namespace ActionRPG
             && combatState->itemUseElapsedSeconds + combatPresentationSeconds < combatState->itemUseDurationSeconds;
     }
 
+    const MeleePresentation* Character::GetMeleePresentation() const
+    {
+        if (!combatState || !IsMelee()) return nullptr;
+        const auto found=combatRules.meleeDefinitions.find(combatState->characterId);
+        return found==combatRules.meleeDefinitions.end() ? nullptr:&found->second;
+    }
+
     const SpriteAnimation& Character::GetCombatAnimation() const
     {
         const auto& state = *combatState;
@@ -823,19 +920,22 @@ namespace ActionRPG
             return state.verticalSpeed > 0.0f ? airHitStartAnimation : airHitFallAnimation;
         if (state.reaction == CombatReaction::Rising) return getUpAnimation;
         if (IsSliding() && slideAnimation) return *slideAnimation;
-        if (IsItemUseMotionActive()) return attackFireAnimation;
+        if (IsItemUseMotionActive()) return IsMelee() ? idleAnimation:attackFireAnimation;
         if (state.jumpPhase == CombatJumpPhase::Prepare) return jumpStartAnimation;
-        if (state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
+        if (!IsMelee() && state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
             return IsRunning() ? runAnimation : walkAnimation;
         if (state.shotPhase != CombatShotPhase::None)
         {
+            if (IsMelee() && !state.airAttack)
+                return meleeComboAnimations[std::clamp<std::size_t>(state.shotCount,1,meleeComboAnimations.size())-1];
             if (state.airAttack)
                 return state.shotPhase == CombatShotPhase::Prepare ? airAttackStartAnimation
                     : state.shotPhase == CombatShotPhase::Fire ? airAttackFireAnimation : airAttackEndAnimation;
             return state.shotPhase == CombatShotPhase::Prepare ? attackStartAnimation
                 : state.shotPhase == CombatShotPhase::Fire ? attackFireAnimation : attackEndAnimation;
         }
-        if (state.jumpPhase == CombatJumpPhase::Airborne) return jumpHoldAnimation;
+        if (state.jumpPhase == CombatJumpPhase::Airborne) return GetJumpAnimation();
+        if (combatLanding) return jumpLandAnimation;
         return isMoving ? (IsRunning() ? runAnimation : walkAnimation) : idleAnimation;
     }
 
@@ -944,8 +1044,15 @@ namespace ActionRPG
         if (!bufferedPresentation && height > 0.0f && state.hp != 0)
             height = std::max(0.0f, height + state.verticalSpeed * combatPresentationSeconds
                 - 0.5f * combatRules.gravity * combatPresentationSeconds * combatPresentationSeconds);
+        if (IsMelee() && state.reaction==CombatReaction::Falling && state.verticalSpeed>0)
+            combatAirHitSeconds=std::min(airHitStartAnimation.GetDuration(),combatAirHitSeconds+activeDelta);
+        if (combatLanding)
+        {
+            combatLandingSeconds+=activeDelta;
+            if (combatLandingSeconds>=jumpLandAnimation.GetDuration()) combatLanding=false;
+        }
         auto& animation = GetCombatAnimation();
-        if (!IsItemUseMotionActive() && state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
+        if (!IsMelee() && !IsItemUseMotionActive() && state.shotPhase == CombatShotPhase::Recover && isMoving && state.jumpPhase == CombatJumpPhase::Grounded)
         {
             animation.Update(locomotionDelta);
             return;
@@ -957,11 +1064,11 @@ namespace ActionRPG
         else if (state.reaction == CombatReaction::Hit)
         { elapsed += state.reactionDurationSeconds - state.reactionSeconds; duration = state.reactionDurationSeconds; }
         else if (state.reaction == CombatReaction::Down)
-        { elapsed += combatRules.downSeconds - state.reactionSeconds; duration = combatRules.downSeconds; }
+        { elapsed += combatRules.downSeconds - state.reactionSeconds; duration = IsMelee() ? animation.GetDuration():combatRules.downSeconds; }
         else if (state.reaction == CombatReaction::Rising)
         { elapsed += combatRules.riseSeconds - state.reactionSeconds; duration = combatRules.riseSeconds; }
         else if (state.reaction == CombatReaction::Falling)
-        { elapsed = state.verticalSpeed > 0.0f ? combatPresentationSeconds : 0.0f; }
+        { elapsed = state.verticalSpeed > 0.0f ? (IsMelee() ? combatAirHitSeconds:combatPresentationSeconds) : 0.0f; }
         else if (IsSliding() && slideAnimation)
         {
             elapsed = GetSlidePresentationSeconds();
@@ -978,10 +1085,24 @@ namespace ActionRPG
         else if (state.shotPhase != CombatShotPhase::None)
         {
             elapsed += state.shotSeconds;
-            duration = state.shotPhase == CombatShotPhase::Prepare ? combatRules.shotPrepareSeconds
+            if (const auto* melee=GetMeleePresentation())
+            {
+                const auto& strike=state.airAttack ? melee->air:melee->ground.at(std::clamp<std::size_t>(state.shotCount,1,4)-1);
+                if (state.airAttack)
+                    duration=state.shotPhase==CombatShotPhase::Prepare ? strike.prepareSeconds
+                        :state.shotPhase==CombatShotPhase::Fire ? strike.durationSeconds-strike.prepareSeconds-strike.recoverSeconds:strike.recoverSeconds;
+                else
+                {
+                    if(state.shotPhase==CombatShotPhase::Fire)elapsed+=strike.prepareSeconds;
+                    else if(state.shotPhase==CombatShotPhase::Recover)elapsed+=strike.durationSeconds-strike.recoverSeconds;
+                    duration=strike.durationSeconds;
+                }
+            }
+            else duration = state.shotPhase == CombatShotPhase::Prepare ? combatRules.shotPrepareSeconds
                 : state.shotPhase == CombatShotPhase::Fire ? combatRules.shotIntervalSeconds : combatRules.shotRecoverSeconds;
         }
         else if (state.jumpPhase == CombatJumpPhase::Airborne) elapsed = 0.0f;
+        else if (combatLanding) {elapsed=combatLandingSeconds;duration=jumpLandAnimation.GetDuration();}
         else { animation.Update(locomotionDelta); return; }
         const float seconds = std::max(0.0f, elapsed) / (duration > 0.0f ? duration : 1.0f) * animation.GetDuration();
         lastCombatAnimationSeconds = combatAnimationChanged || lastCombatAnimation != &animation
@@ -994,7 +1115,7 @@ namespace ActionRPG
     {
         // The idle sprite defines upright head height. A larger running sheet
         // must not lift speech above a standing character.
-        return std::max(HEIGHT,idleAnimation.GetTopOffset());
+        return authoredHeadHeight>0 ? authoredHeadHeight:std::max(HEIGHT,idleAnimation.GetTopOffset());
     }
 
     void Character::Render(D2DRenderer& inRenderer, const Camera& inCamera) const
@@ -1038,7 +1159,7 @@ namespace ActionRPG
         }
         else if (jumpPhase == JumpPhase::Airborne)
         {
-            jumpHoldAnimation.Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
+            GetJumpAnimation().Draw(inRenderer, groundScreenPosition.x, bodyBottom, facingLeft);
         }
         else if (isMoving && IsRunning())
         {

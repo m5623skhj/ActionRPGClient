@@ -91,6 +91,12 @@ namespace
     {
         if (!inValue.is_array() || inValue.size() > inLimit) throw std::runtime_error("Invalid combat list.");
     }
+    void ValidateMelee(const ActionRPG::CombatPlayerState& inPlayer)
+    {
+        if (inPlayer.characterId==4 && (inPlayer.shotCount>4 || inPlayer.airShotCount>4
+            || (inPlayer.shotPhase!=ActionRPG::CombatShotPhase::None && inPlayer.shotCount==0)))
+            throw std::runtime_error("Invalid melee combo state.");
+    }
     void ValidateSlide(const ActionRPG::CombatPlayerState& inState)
     {
         const float length = std::hypot(inState.slideDirectionX, inState.slideDirectionY);
@@ -251,6 +257,55 @@ namespace ActionRPG
         rules.muzzleHeight = Number(value.at("muzzleHeight")); rules.airFireLift = Number(value.at("airFireLift"));
         rules.airRecoilDistance = Number(value.at("airRecoilDistance"));
         rules.shotHitstopSeconds = Number(value.at("shotHitstopSeconds"), false, true);
+        if (value.contains("meleeDefinitions"))
+        {
+            const auto& definitions=value.at("meleeDefinitions");
+            if (!definitions.is_array() || definitions.size()>256) throw std::runtime_error("Invalid melee definitions.");
+            const auto strike=[](const Json& source)
+            {
+                using Catalog=PlayerSkills::Catalog;
+                Catalog::Keys(source,{"motionId","durationSeconds","prepareSeconds","hitSeconds","recoverSeconds",
+                    "reach","depthRadius","bottom","height","damageRatio","force","hitType","hitstopSeconds"});
+                MeleeStrikePresentation result;
+                result.motionId=Text(source.at("motionId"));
+                if (!Catalog::IsId(result.motionId)) throw std::runtime_error("Invalid melee motion.");
+                result.durationSeconds=static_cast<float>(Catalog::Number(source.at("durationSeconds"),0.05,2));
+                result.prepareSeconds=static_cast<float>(Catalog::Number(source.at("prepareSeconds"),0.001,2));
+                result.hitSeconds=static_cast<float>(Catalog::Number(source.at("hitSeconds"),0.001,2));
+                result.recoverSeconds=static_cast<float>(Catalog::Number(source.at("recoverSeconds"),0.001,2));
+                if (result.prepareSeconds>=result.durationSeconds-result.recoverSeconds
+                    || result.hitSeconds<result.prepareSeconds || result.hitSeconds>=result.durationSeconds-result.recoverSeconds)
+                    throw std::runtime_error("Invalid melee timing.");
+                (void)Catalog::Number(source.at("reach"),1,500);(void)Catalog::Number(source.at("depthRadius"),1,100);
+                (void)Catalog::Number(source.at("bottom"),-1000,1000);(void)Catalog::Number(source.at("height"),1,1000);
+                (void)Catalog::Number(source.at("damageRatio"),0.01,100);
+                const float force=static_cast<float>(Catalog::Number(source.at("force"),0,500));
+                if(source.at("force").get<double>()>0 && force==0) throw std::runtime_error("Melee force underflows.");
+                const auto type=Text(source.at("hitType"));if(type!="Normal" && type!="Airborne") throw std::runtime_error("Invalid melee hit type.");
+                (void)Number(source.at("hitstopSeconds"),false,true);
+                return result;
+            };
+            for (const auto& source:definitions)
+            {
+                PlayerSkills::Catalog::Keys(source,{"characterId","maxCombo","bodyHeight","ground","air","dash"});
+                const auto id=Integer(source.at("characterId"));
+                const auto& ground=source.at("ground");
+                if (id!=4 || Integer(source.at("maxCombo"))!=4 || !ground.is_array() || ground.size()!=4)
+                    throw std::runtime_error("Unsupported melee character/combo.");
+                MeleePresentation definition;definition.bodyHeight=static_cast<float>(PlayerSkills::Catalog::Number(source.at("bodyHeight"),1,1000));
+                if (definition.bodyHeight<=0) throw std::runtime_error("Invalid melee body height.");
+                for (std::size_t i=0;i<ground.size();++i)
+                {
+                    auto attack=strike(ground[i]);
+                    if (attack.motionId!="attack"+std::to_string(i+1)) throw std::runtime_error("Unsupported melee motion.");
+                    definition.ground.push_back(std::move(attack));
+                }
+                definition.air=strike(source.at("air"));definition.dash=strike(source.at("dash"));
+                if (definition.air.motionId!="airAttack" || definition.dash.motionId!="dashAttack"
+                    || !rules.meleeDefinitions.emplace(id,std::move(definition)).second)
+                    throw std::runtime_error("Invalid melee definition.");
+            }
+        }
         return rules;
     }
 
@@ -423,7 +478,11 @@ namespace ActionRPG
             }
             result.projectiles.push_back(projectile);
         }
-        for (const auto& player : result.players) ValidateSlide(player);
+        for (const auto& player : result.players)
+        {
+            ValidateSlide(player);
+            ValidateMelee(player);
+        }
         return result;
     }
     // Binary payload v3: unaligned little-endian fields, never native struct layout.
@@ -711,7 +770,11 @@ namespace ActionRPG
         }
         if (!reader.Finished()) throw std::runtime_error("Trailing realtime bytes.");
 
-        for (const auto& player : result.players) ValidateSlide(player);
+        for (const auto& player : result.players)
+        {
+            ValidateSlide(player);
+            ValidateMelee(player);
+        }
         return result;
     }
 
